@@ -1,0 +1,142 @@
+output-format: grouped
+
+strictness: high
+test-warnings: true
+doc-warnings: true
+member-warnings: true
+max-line-length: 120
+
+ignore-paths:
+  - docs
+  - tests
+  - build
+  - dist
+  - .git
+  - __pycache__
+  - mlflow_artifacts
+  - mlflow.db
+
+ignore-patterns:
+  - (^|/)\..*
+  - .*\.pyc$
+
+pep8:
+  full: true
+  options:
+    max-line-length: 120
+    ignore:
+      - E402  # Module level import not at top of file (needed for path adjustments)
+      - W503  # Line break before binary operator
+      - E731  # Do not assign a lambda expression
+
+pylint:
+  run: true
+  disable:
+    - logging-format-interpolation
+    - logging-fstring-interpolation
+    - import-error
+    - no-name-in-module
+    - too-many-arguments
+    - too-many-instance-attributes
+    - too-many-locals
+  options:
+    max-line-length: 120
+    max-args: 8
+    max-attributes: 12
+    max-locals: 20
+    good-names: ['e', 'i', 'j', 'k', 'ex', 'df', 'X', 'y', '_']
+
+mccabe:
+  run: true
+  options:
+    max-complexity: 15
+
+pyflakes:
+  run: true
+  disable:
+    - F401  # Imported but unused (handled by pylint)
+
+dodgy:
+  run: true
+
+pyroma:
+  run: true
+
+bandit:
+  run: true
+  options:
+    exclude_dirs: ['tests']
+
+mypy:
+  run: true
+  options:
+    ignore_missing_imports: true
+    disallow_untyped_defs: true
+    check_untyped_defs: true
+    warn_redundant_casts: true
+    warn_unused_ignores: true
+    warn_return_any: true
+    strict_optional: true
+
+vulture:
+  run: true
+  options:
+    min-confidence: 80
+
+pydocstyle:
+  run: true
+  disable:
+    - D100  # Missing docstring in public module
+    - D104  # Missing docstring in public package
+    - D203  # 1 blank line required before class docstring
+    - D213  # Multi-line docstring summary should start at the second line
+
+frosted:
+  run: true
+
+profiles:
+  machine_learning:
+    mccabe:
+      options:
+        max-complexity: 20  # ML code tends to be more complex
+    pylint:
+      options:
+        max-args: 10  # ML functions often need more parameters
+        max-attributes: 15
+        max-locals: 25
+    ignore-patterns:
+      - .*_test\.py$
+      - test_.*\.py$
+      - conftest\.py$
+
+  data_processing:
+    mccabe:
+      options:
+        max-complexity: 12
+    pylint:
+      options:
+        max-args: 6
+        max-attributes: 10
+        max-locals: 15
+
+uses:
+  - machine_learning  # Use ML profile by default
+
+autodetect: true  # Automatically detect test files
+
+output-format: grouped
+
+message-template: "{path}:{line}: [{msg_id}({symbol}), {obj}] {msg}"
+
+strictness: high
+
+ignore-paths:
+  - mlflow_artifacts/
+  - data/
+  - logs/
+  - models/saved/
+
+ignore-patterns:
+  - .*\.ipynb$
+  - .*\.pkl$
+  - .*\.joblib$

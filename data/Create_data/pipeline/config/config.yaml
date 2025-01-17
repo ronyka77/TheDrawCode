@@ -1,0 +1,58 @@
+# Data paths
+data_paths:
+  raw_data_path: "data/prediction_raw"
+  processed_data_path: "data/processed"
+  prediction_data_path: "data/prediction"
+  model_artifacts_path: "models/artifacts"
+  results_path: "results"
+  cache_path: "data/cache"
+  logs_path: "logs"
+  experiment_path: "experiments"
+  metrics_path: "metrics"
+  plots_path: "plots"
+  temp_path: "temp"
+
+# Global configuration
+global_config:
+  random_seed: 42
+  experiment_name: "TheDrawCode"
+  data_version: "v1.0"
+  environment: "development"
+  debug_mode: false
+  num_workers: 4
+
+# Resource settings
+resources:
+  gpu_enabled: false
+  gpu_ids: []
+  memory_limit: "16G"
+  cpu_threads: 8
+  num_workers: 4
+
+# API settings
+api:
+  host: "localhost"
+  port: 8000
+  timeout: 30
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(timestamp)s - %(name)s - %(level)s - %(message)s"
+  file_rotation: "1 day"
+  structured:
+    enabled: true
+    format: "%(timestamp)s [%(level)s] %(name)s: %(message)s"
+  aggregation:
+    use_json: true
+    fields:
+      - timestamp
+      - level
+      - message
+      - extra
+
+# Environment settings
+environment:
+  name: "development"
+  debug: false
+  verbose: true
