@@ -244,7 +244,8 @@ def main():
         "8e369a543fcd437e8e89c521ec3ef91d",
         "9be0e3be588e44b79cb9728cead72789",
         "8722820d134d41548b26f71b3424bcb1",
-        "62ec3a34222a465d92d2e33178a7ca84"
+        "62ec3a34222a465d92d2e33178a7ca84",
+        "85cf06d460914ebb9e2bf51e59f251d5"
     ]
 
     best_precision = 0
@@ -289,7 +290,7 @@ def main():
             # Make predictions
             results = predictor.predict(prediction_data_model)
             prediction_df['draw_predicted'] = results['predictions']
-            prediction_df['draw_probability'] = [round(prob, 2) for prob in results['draw_probabilities']]
+            prediction_df['draw_probability'] = results['draw_probabilities'].round(2).astype(float)
             precision = 0.0
             
             # Get real scores from Excel only if we have running_ids

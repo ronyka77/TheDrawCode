@@ -92,16 +92,16 @@ class TwoStageEnsemble:
         self.stage1_params = {
             'objective': 'binary:logistic',
             'tree_method': 'hist',
-            'eta': 0.005270299370968224,
-            'min_child_weight': 67,
-            'gamma': 4.087493508876517,
-            'subsample': 0.9406026990109014,
-            'colsample_bytree': 0.7060670204415606,
-            'scale_pos_weight': 2.0501869778612245,
+            'eta': 0.006128716244606513,
+            'min_child_weight': 75,
+            'gamma': 2.1222988230569064,
+            'subsample': 0.7208215966467505,
+            'colsample_bytree': 0.8032064055478403,
+            'scale_pos_weight': 2.315225912115465,
             'max_depth': 4,
-            'reg_alpha': 2.636542928430549,
-            'reg_lambda': 0.36165161896065384,
-            'n_estimators': 15754,
+            'reg_alpha': 0.3749508487213241,
+            'reg_lambda': 1.3405932185047005,
+            'n_estimators': 18154,
             'early_stopping_rounds': 500
         }
         
@@ -109,23 +109,23 @@ class TwoStageEnsemble:
         self.stage2_params = {
             'objective': 'binary:logistic',
             'tree_method': 'hist',
-            'eta': 0.006138522765100215,
-            'min_child_weight': 67,
-            'gamma': 2.5864808282597322,
-            'subsample': 0.9215735683779592,
-            'colsample_bytree': 0.7707966449546877,
-            'scale_pos_weight': 2.5938314808286944,
+            'eta': 0.007497518200865267,
+            'min_child_weight': 70,
+            'gamma': 2.9992440961598756,
+            'subsample': 0.9280250574052775,
+            'colsample_bytree': 0.8451382203540232,
+            'scale_pos_weight': 2.2308303831271874,
             'max_depth': 5,
-            'reg_alpha': 1.4195460828598212,
-            'reg_lambda': 2.561462610216031,
-            'n_estimators': 16420,
+            'reg_alpha': 1.5334681008153,
+            'reg_lambda': 2.9155648894933877,
+            'n_estimators': 15043,
             'early_stopping_rounds': 500
         }
         
         self.model1 = None
         self.model2 = None
-        self.threshold1 = 0.2625599691278046
-        self.threshold2 = 0.7388850291144629
+        self.threshold1 = 0.3487619167065675
+        self.threshold2 = 0.7448723915920985
         
     def fit(self, 
             X_train: pd.DataFrame, 
@@ -283,16 +283,16 @@ class VotingEnsemble:
         self.base_params = {
             'objective': 'binary:logistic',
             'tree_method': 'hist',
-            'eta': 0.009422007422830688,
-            'min_child_weight': 43,
-            'gamma': 5.626833511885287,
-            'subsample': 0.8722509030797132,
-            'colsample_bytree': 0.8303530597018073,
-            'scale_pos_weight': 3.2889746304217438,
-            'max_depth': 4,
-            'reg_alpha': 0.6764598518458178,
-            'reg_lambda': 0.34183371717906913,
-            'n_estimators': 16752,
+            'eta': 0.006820204703663262,
+            'min_child_weight': 75,
+            'gamma': 3.8089250548106985,
+            'subsample': 0.9077980192919134,
+            'colsample_bytree': 0.700172984089638,
+            'scale_pos_weight': 3.1462983678621494,
+            'max_depth': 5,
+            'reg_alpha': 0.9386058665510197,
+            'reg_lambda': 2.516721398650805,
+            'n_estimators': 18876,
             'early_stopping_rounds': 300
         }
         
@@ -307,11 +307,11 @@ class VotingEnsemble:
         
         # Updated thresholds (optimized)
         self.thresholds = [
-            0.6207906924057289,
-            0.6052131477803907,
-            0.6849137547711547,
-            0.699808824785005,
-            0.7375138671202784
+            0.6897357654590663,
+            0.7034437604395418,
+            0.7168590930038107,
+            0.6979556780178647,
+            0.7197466182932057
         ]
     
     def fit(self, 

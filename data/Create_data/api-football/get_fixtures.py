@@ -200,31 +200,41 @@ class ApiFootball:
         
         response = self._get_request(endpoint, params)
         
-        if response and 'response' in response:
+        if response and 'response' in response and response['response']:
             raw_statistics = response['response']
 
-            # Transform statistics into simplified format
             statistics = {
                 'fixture_id': fixture_id,
                 'home': {
-                    'team_id': raw_statistics[0]['team']['id'],
-                    'team_name': raw_statistics[0]['team']['name'],
-                    'team_logo': raw_statistics[0]['team']['logo'],
                     'stats': {}
                 },
                 'away': {
-                    'team_id': raw_statistics[1]['team']['id'], 
-                    'team_name': raw_statistics[1]['team']['name'],
-                    'team_logo': raw_statistics[1]['team']['logo'],
                     'stats': {}
                 }
             }
+            
+            try:
+                # Assuming the first element is home and the second is away
+                if len(raw_statistics) >= 2:
+                    statistics['home']['team_id'] = raw_statistics[0]['team']['id']
+                    statistics['home']['team_name'] = raw_statistics[0]['team']['name']
+                    statistics['home']['team_logo'] = raw_statistics[0]['team']['logo']
 
-            # Process statistics for both teams
-            for i, team in enumerate(['home', 'away']):
-                for stat in raw_statistics[i]['statistics']:
-                    key = stat['type'].lower().replace(' ', '_')
-                    statistics[team]['stats'][key] = stat['value']
+                    statistics['away']['team_id'] = raw_statistics[1]['team']['id']
+                    statistics['away']['team_name'] = raw_statistics[1]['team']['name']
+                    statistics['away']['team_logo'] = raw_statistics[1]['team']['logo']
+
+                    # Process statistics for both teams
+                    for i, team in enumerate(['home', 'away']):
+                        for stat in raw_statistics[i]['statistics']:
+                            key = stat['type'].lower().replace(' ', '_')
+                            statistics[team]['stats'][key] = stat['value']
+                else:
+                    self.logger.warning(f"Insufficient statistics data for fixture {fixture_id}")
+                    print(f"json: {raw_statistics}")
+            except (IndexError, KeyError, TypeError) as e:
+                self.logger.error(f"Error processing statistics for fixture {fixture_id}: {e}")
+                return {}
 
             # Insert simplified statistics into MongoDB
             try:
@@ -243,20 +253,23 @@ class ApiFootball:
     
     def get_fixture_ids_without_statistics(self) -> List[int]:
         """
-        Retrieves fixture IDs from MongoDB where home/stats is empty and the date is today or earlier.
+        Retrieves fixture IDs from MongoDB where home/stats is empty, the date is today or earlier,
+        and the league ID is one of the specified IDs.
 
         Returns:
-            List[int]: List of fixture IDs without statistics.
+            List[int]: List of fixture IDs without statistics that meet the criteria.
         """
+        target_league_ids = [39, 61, 62, 78, 79, 94, 129, 135, 140]
         today = datetime.now().strftime('%Y-%m-%d %H:%M')
         print(today)
         query = {
             "date": {"$lte": today},
+            "league_id": {"$in": target_league_ids},
             "home.stats": {}
         }
         fixtures = self.fixtures_collection.find(query, {"fixture_id": 1})
         fixture_ids = [fixture["fixture_id"] for fixture in fixtures]
-        self.logger.info(f"Found {len(fixture_ids)} fixtures without statistics.")
+        self.logger.info(f"Found {len(fixture_ids)} fixtures without statistics for league IDs {target_league_ids}.")
         return fixture_ids
 
     def _save_json(self, data: Any, filename: str) -> None:
@@ -303,7 +316,7 @@ class ApiFootball:
         """
         Retrieves fixtures for each league ID found in 'league_ids.json'.
         """
-        league_ids_file_path = os.path.join(self.data_dir, 'league_ids.json')
+        league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
         seasons = [2022, 2023, 2024]
         try:
             with open(league_ids_file_path, 'r') as f:
@@ -334,7 +347,28 @@ def main():
     
     logger = ExperimentLogger()
     api_football = ApiFootball(api_key, logger)
-    api_football.get_fixtures_for_leagues()
+    fixture_ids = api_football.get_fixture_ids_without_statistics()
+    import time
+    
+    request_count = 0
+    start_time = time.time()
+    
+    for fixture_id in fixture_ids:
+        api_football.get_statistics(fixture_id)
+        request_count += 1
+        
+        # Check if we've made 250 requests
+        if request_count >= 250:
+            elapsed_time = time.time() - start_time
+            
+            # If less than a minute has passed, wait
+            if elapsed_time < 60:
+                time.sleep(60 - elapsed_time)
+                print(f"Waiting for {60 - elapsed_time} seconds")
+            
+            # Reset the counter and start time
+            request_count = 0
+            start_time = time.time()
 
     # leagues = api_football.get_leagues()
     

@@ -55,11 +55,6 @@
         "country": "World"
     },
     {
-        "league_id": 301,
-        "league_name": "Pro League",
-        "country": "United-Arab-Emirates"
-    },
-    {
         "league_id": 203,
         "league_name": "S\u00fcper Lig",
         "country": "Turkey"
@@ -74,11 +69,6 @@
     {
         "league_id": 328,
         "league_name": "Esiliiga A",
-        "country": "Estonia"
-    },
-    {
-        "league_id": 329,
-        "league_name": "Meistriliiga",
         "country": "Estonia"
     },
     {

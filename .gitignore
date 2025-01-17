@@ -103,3 +103,7 @@ data/training_data.csv
 data/training_data.xlsx
 X_train.parquet
 model_info.json
+cumsum_away_api.xlsx
+cumsum_home_api.xlsx
+fixtures_with_stats.xlsx
+fixtures_with_stats_old.xlsx
