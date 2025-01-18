@@ -79,8 +79,7 @@ class DataPipeline:
     def __init__(
         self,
         logger: Optional[ExperimentLogger] = None,
-        config_path: Optional[str] = None
-    ) -> None:
+        config_path: Optional[str] = None) -> None:
         """Initialize data importer.
         
         Args:
@@ -157,17 +156,16 @@ class DataPipeline:
         self.logger.info(
             "Initialized data importer",
             extra={
-                'pipeline_config': self.pipeline_config.dict(),
-                'validation_config': self.validation_config.dict(),
-                'processing_config': self.processing_config.dict(),
+                'pipeline_config': self.pipeline_config.model_dump(),
+                'validation_config': self.validation_config.model_dump(),
+                'processing_config': self.processing_config.model_dump(),
                 'feature_groups': list(self.feature_groups.keys())
             }
         )
         
     def load_and_process_data(
         self,
-        force_reload: bool = False
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+        force_reload: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
         """Load and process data through the complete pipeline.
         
         Args:
@@ -323,8 +321,7 @@ class DataPipeline:
         target_column: str,
         test_size: float = 0.2,
         val_size: float = 0.2,
-        random_state: int = 42
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        random_state: int = 42) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Split data into train/val/test sets."""
         
         if isinstance(data, np.ndarray):

@@ -167,13 +167,13 @@ class DataLoader:
             else:
                 raise ValueError(f"Unsupported source format: {source_format}")
             
-            # Cache the data
-            df.to_parquet(
-                cache_path,
-                engine='pyarrow',
-                compression=self.data_config.get('parquet_compression', 'snappy')
-            )
-            self.logger.info(f"Successfully cached data to {cache_path}")
+            # # Cache the data
+            # df.to_parquet(
+            #     cache_path,
+            #     engine='pyarrow',
+            #     compression=self.data_config.get('parquet_compression', 'snappy')
+            # )
+            # self.logger.info(f"Successfully cached data to {cache_path}")
             
             return df
             
@@ -233,14 +233,14 @@ class DataLoader:
 
         df.dropna(inplace=True)
           
-        # Cache the data
-        cache_path = self.cache_path / f"raw_data.parquet"
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(
-            cache_path,
-            engine='pyarrow',
-            compression=self.data_config.get('parquet_compression', 'snappy')
-        )
+        # # Cache the data
+        # cache_path = self.cache_path / f"raw_data.parquet"
+        # cache_path.parent.mkdir(parents=True, exist_ok=True)
+        # df.to_parquet(
+        #     cache_path,
+        #     engine='pyarrow',
+        #     compression=self.data_config.get('parquet_compression', 'snappy')
+        # )
         
         return df
     

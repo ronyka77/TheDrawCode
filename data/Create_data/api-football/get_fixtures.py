@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 import pymongo
 from datetime import datetime
+import time
 
 # Add project root to Python path
 try:
@@ -147,13 +148,12 @@ class ApiFootball:
                         "team_id": fixture["teams"]["home"]["id"],
                         "team_name": fixture["teams"]["home"]["name"],
                         "team_logo": fixture["teams"]["home"]["logo"],
-                        "stats": {}
+                        
                     },
                     "away": {
                         "team_id": fixture["teams"]["away"]["id"],
                         "team_name": fixture["teams"]["away"]["name"],
                         "team_logo": fixture["teams"]["away"]["logo"],
-                        "stats": {}
                     },
                     "goals": {
                         "home": fixture["goals"]["home"],
@@ -234,6 +234,7 @@ class ApiFootball:
                     print(f"json: {raw_statistics}")
             except (IndexError, KeyError, TypeError) as e:
                 self.logger.error(f"Error processing statistics for fixture {fixture_id}: {e}")
+                time.sleep(10)
                 return {}
 
             # Insert simplified statistics into MongoDB
@@ -249,6 +250,7 @@ class ApiFootball:
             return statistics
         else:
             self.logger.warning(f"No statistics found for fixture {fixture_id}")
+            time.sleep(10)
             return {}
     
     def get_fixture_ids_without_statistics(self) -> List[int]:
@@ -259,13 +261,14 @@ class ApiFootball:
         Returns:
             List[int]: List of fixture IDs without statistics that meet the criteria.
         """
-        target_league_ids = [39, 61, 62, 78, 79, 94, 129, 135, 140]
+        target_league_ids = [39, 40, 61, 62, 71, 78, 79, 88, 94, 128, 135, 140]
         today = datetime.now().strftime('%Y-%m-%d %H:%M')
         print(today)
         query = {
             "date": {"$lte": today},
             "league_id": {"$in": target_league_ids},
-            "home.stats": {}
+            "home.stats": {},
+            "score.fulltime.home": {"$ne": None}
         }
         fixtures = self.fixtures_collection.find(query, {"fixture_id": 1})
         fixture_ids = [fixture["fixture_id"] for fixture in fixtures]
@@ -317,7 +320,7 @@ class ApiFootball:
         Retrieves fixtures for each league ID found in 'league_ids.json'.
         """
         league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
-        seasons = [2022, 2023, 2024]
+        seasons = [2024]
         try:
             with open(league_ids_file_path, 'r') as f:
                 league_ids_data = json.load(f)
@@ -338,6 +341,35 @@ class ApiFootball:
         except Exception as e:
             self.logger.error(f"Error processing league IDs: {e}")
 
+    def get_statistics_for_fixtures(self) -> None:
+        """
+        Retrieves statistics for each fixture ID found in the fixtures.json files.
+        """
+        fixture_ids = self.get_fixture_ids_without_statistics()
+
+        fixture_id_count = len(fixture_ids)
+        request_count = 0
+        all_request_count = 0
+        start_time = time.time()
+        
+        for fixture_id in fixture_ids:
+            self.get_statistics(fixture_id)
+            request_count += 1
+            all_request_count += 1
+            print(f"Processed {all_request_count} of {fixture_id_count} fixtures")
+            
+            # Check if we've made 250 requests
+            if request_count >= 250:
+                elapsed_time = time.time() - start_time
+                
+                # If less than a minute has passed, wait
+                if elapsed_time < 60:
+                    print(f"Waiting for {60 - elapsed_time} seconds")
+                    time.sleep(60 - elapsed_time)
+                    
+                # Reset the counter and start time
+                request_count = 0
+                start_time = time.time()
 
 def main():
     api_key = '9d97f6f9804b592c86be814e246a077d'
@@ -347,32 +379,12 @@ def main():
     
     logger = ExperimentLogger()
     api_football = ApiFootball(api_key, logger)
-    fixture_ids = api_football.get_fixture_ids_without_statistics()
-    import time
     
-    request_count = 0
-    start_time = time.time()
+    # api_football.get_fixtures_for_leagues()
     
-    for fixture_id in fixture_ids:
-        api_football.get_statistics(fixture_id)
-        request_count += 1
-        
-        # Check if we've made 250 requests
-        if request_count >= 250:
-            elapsed_time = time.time() - start_time
-            
-            # If less than a minute has passed, wait
-            if elapsed_time < 60:
-                time.sleep(60 - elapsed_time)
-                print(f"Waiting for {60 - elapsed_time} seconds")
-            
-            # Reset the counter and start time
-            request_count = 0
-            start_time = time.time()
+    api_football.get_statistics_for_fixtures()
 
-    # leagues = api_football.get_leagues()
-    
-    # fixtures = api_football.get_fixtures(61, 2024)
+  
 
 if __name__ == "__main__":
     main()

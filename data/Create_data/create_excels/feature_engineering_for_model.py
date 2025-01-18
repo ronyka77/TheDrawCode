@@ -141,8 +141,8 @@ def calculate_cumulative_sum( cumsum_home_df, cumsum_away_df, running_id, team, 
                     (cumsum_away_df['away_encoded'] == team) &
                 (cumsum_away_df['Date'] <= datum)
             ]['away_count'].tail(1)
+            
         elif home_away == 2:
-                
             # Filter based on team, league, and season from original DataFrame (not the rolled result)
             team_home_results_new = cumsum_home_df[
                 (cumsum_home_df['home_encoded'] == team) &
@@ -182,10 +182,6 @@ def calculate_cumulative_sum( cumsum_home_df, cumsum_away_df, running_id, team, 
         else:
             team_away_count = 0  # or another default value
                 
-        # if team_home_results_new != 0 and team_away_results_new != 0:
-        #     # Calculate rolling value
-        #     cumulative_value = (team_home_results_new + team_away_results_new) / (team_away_count + team_home_count)
-        # else:
         cumulative_value = team_home_results_new + team_away_results_new
             
         return cumulative_value
@@ -193,8 +189,6 @@ def calculate_cumulative_sum( cumsum_home_df, cumsum_away_df, running_id, team, 
     except Exception as e:
         print(f"running id: {str(running_id)} team:   {team} Date: {str(datum),home_column, away_column, str(home_away)}")
         print(f"Error calculating cumulative values(probably column not in cumulative_columns list): {e}")
-        # print(cumsum_home_df.head())
-        # print(cumsum_away_df.head())
         return 0
 
 # Function to extract home and away goals from 'Score' column
@@ -414,8 +408,6 @@ def add_cumulative_sums(dataframe):
     
     cumsum_home_df = cumsum_home_df.sort_values(by=['running_id'])
     cumsum_away_df = cumsum_away_df.sort_values(by=['running_id'])
-    # cumsum_home_df.to_excel('./data_files/cumsum_home_df.xlsx')
-    # cumsum_away_df.to_excel('./data_files/cumsum_away_df.xlsx')
     
     print("CUMSUM Dataframes ready, start calculating values...")
     dataframe['home_cumcount'] = dataframe.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount() + 1

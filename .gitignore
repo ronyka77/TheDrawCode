@@ -107,3 +107,8 @@ cumsum_away_api.xlsx
 cumsum_home_api.xlsx
 fixtures_with_stats.xlsx
 fixtures_with_stats_old.xlsx
+data/training_data_20250116.xlsx
+data/Create_data/pipeline/models/
+data/Create_data/pipeline/models/away_poisson_model.joblib
+data/Create_data/pipeline/models/home_poisson_model.joblib
+data/Create_data/pipeline/models/poisson_scaler.joblib

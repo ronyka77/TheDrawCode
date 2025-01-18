@@ -19,12 +19,15 @@ class ELOCalculator:
         self.training_data_path = './data_files/model_data_training_newPoisson.xlsx'
         self.training_data_path_new = './data_files/model_data_training_withPoisson.xlsx'
         self.prediction_data_path = './data_files/model_data_prediction_newPoisson.xlsx'
+        self.api_data_path = './data_files/api_prediction_data_newPoisson.xlsx'
         
         # Define export paths
         self.training_export_path = './data_files/model_data_training_newPoisson.xlsx'
         self.training_export_path_new = './data_files/model_data_training_withPoisson.xlsx'
         self.prediction_export_path = './data_files/model_data_prediction_newPoisson.xlsx'
+        self.api_export_path = './data_files/api_prediction_data_newPoisson.xlsx'
         
+
         # ELO settings
         self.INITIAL_ELO = 1500
         self.league_k_factors = {}  # Will be calculated automatically
@@ -199,6 +202,15 @@ class ELOCalculator:
             prediction_data = self.add_elo_scores(prediction_data)
             prediction_data.to_excel(self.prediction_export_path, index=False)
             self.logger.info("Prediction data processed and saved")
+            
+            # Process API data
+            self.logger.info("Processing API data...")
+            api_data = pd.read_excel(self.api_data_path)
+            api_data = convert_numeric_columns(api_data)
+            api_data = api_data.sort_values('Datum')
+            api_data = self.add_elo_scores(api_data)
+            api_data.to_excel(self.api_export_path, index=False)
+            self.logger.info("API data processed and saved")
 
         except Exception as e:
             self.logger.error(f"Error in process_data: {str(e)}")

@@ -247,7 +247,8 @@ class PoissonXGCalculator:
             'training': ('./data_files/model_data_training_newPoisson.xlsx'),
             'training_new': ('./data_files/model_data_training_withPoisson.xlsx'),
             'prediction': ('./data_files/model_data_prediction_newPoisson.xlsx'),
-            'merged': ('./data_files/merged_data_prediction_newPoisson.csv')
+            'merged': ('./data_files/merged_data_prediction_newPoisson.csv'),
+            'api': ('./data_files/api_prediction_data_newPoisson.xlsx')
         }
         
         output_path = datasets[type]
@@ -283,15 +284,26 @@ class PoissonXGCalculator:
             training_path_new = './data_files/PowerBI/model_data_training2.csv'
             prediction_path = './data_files/PowerBI/model_data_prediction.csv'
             merged_path = './data_files/PowerBI/merged_data_prediction.csv'
+            api_path = './data_files/PowerBI/api_prediction_data.csv'
             self.logger.info(f"Loading training data from {training_path}")
             training_data = pd.read_csv(training_path)
             training_data_new = pd.read_csv(training_path_new)
             prediction_data = pd.read_csv(prediction_path)
             merged_data = pd.read_csv(merged_path)
+            api_data = pd.read_csv(api_path)
+            
+            api_data = api_data.rename(columns={
+                'home_possession_mean': 'Home_possession_mean',
+                'home_shot_on_target_mean': 'Home_shot_on_target_mean',
+                'away_goal_difference_cum': 'Away_goal_difference_cum',
+                'home_points_cum': 'Home_points_cum',
+                'away_points_cum': 'Away_points_cum'
+            })
             self.add_poisson_xG(training_data, 'training')
             self.add_poisson_xG(training_data_new, 'training_new')
             self.add_poisson_xG(prediction_data, 'prediction')
             self.add_poisson_xG(merged_data, 'merged')
+            self.add_poisson_xG(api_data, 'api')
            
             
         except Exception as e:

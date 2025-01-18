@@ -216,15 +216,15 @@ class MongoDBFeatures:
         """
         try:
             print("Start adding features...")
-            if self.logger:
-                self.logger.info("Start adding features...")
             fixtures_dataframe = self.load_and_prepare_data(fixtures_dataframe)
+            
+            print("Start adding cumulative sums...")
             fixtures_dataframe = self.add_cumulative_sums(fixtures_dataframe)
+            
             print("Start adding rolling averages...")
-          
             fixtures_dataframe = self.add_rolling_averages(fixtures_dataframe)
+            
             print("Features added")
-  
             return fixtures_dataframe
         except Exception as e:
             print(f"Error adding features to fixtures data: {e}")
@@ -282,7 +282,7 @@ class MongoDBFeatures:
 
             # Referee Stats
             if 'referee' in data.columns:
-                data['referee_encoded'] = le.fit_transform(data['referee'])
+                data['referee_encoded'] = le.fit_transform(data['referee'].astype(str))
             else:
                 raise KeyError("Error: 'referee' column not found in DataFrame.")
 
@@ -337,6 +337,7 @@ class MongoDBFeatures:
             data['home_goal_diff_cumulative'] = data.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_goal_difference'].cumsum()
             data['away_goal_diff_cumulative'] = data.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_goal_difference'].cumsum()
             return data 
+        
         except Exception as e:
             print(f"Error in load_and_prepare_data: {e}")
             if self.logger:
@@ -347,7 +348,7 @@ class MongoDBFeatures:
         try:
             cumulative_columns = ['fixture_id','Date','home_encoded','away_encoded', 'season_encoded', 'league_encoded','home_saves','away_saves',
                                 'home_shots_on_goal','away_shots_on_goal','home_passes_accuracy','away_passes_accuracy','home_fouls','away_fouls'
-                                ,'home_points','away_points','home_goal_difference','away_goal_difference','home_win','away_win','draw']
+                                ,'home_points','away_points','home_goal_difference','away_goal_difference','home_win','away_win','draw','home_red_cards','away_red_cards','home_yellow_cards','away_yellow_cards']
             
             dataframe = dataframe.replace([np.inf, -np.inf], 0)
             
@@ -363,6 +364,8 @@ class MongoDBFeatures:
             cumsum_home_df.loc[:,'home_win_cumsum'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_win'].cumsum()
             cumsum_home_df.loc[:,'draw_cumsum'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['draw'].cumsum()
             cumsum_home_df.loc[:,'home_count'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['fixture_id'].cumcount()+1
+            cumsum_home_df.loc[:,'red_cards_cumsum'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_red_cards'].cumsum()
+            cumsum_home_df.loc[:,'yellow_cards_cumsum'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_yellow_cards'].cumsum()
             
             cumsum_away_df = dataframe[cumulative_columns]
             cumsum_away_df = cumsum_away_df.copy()
@@ -376,13 +379,18 @@ class MongoDBFeatures:
             cumsum_away_df.loc[:, 'away_win_cumsum'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_win'].cumsum()
             cumsum_away_df.loc[:, 'draw_cumsum'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['draw'].cumsum()
             cumsum_away_df.loc[:, 'away_count'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['fixture_id'].cumcount()+1
+            cumsum_away_df.loc[:, 'red_cards_cumsum'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_red_cards'].cumsum()
+            cumsum_away_df.loc[:, 'yellow_cards_cumsum'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_yellow_cards'].cumsum()
             
             cumsum_home_df = cumsum_home_df.sort_values(by=['fixture_id'])
             cumsum_away_df = cumsum_away_df.sort_values(by=['fixture_id'])
             
-            cumsum_away_df.to_excel('cumsum_away_api.xlsx', index=False)
-            cumsum_home_df.to_excel('cumsum_home_api.xlsx', index=False)
-            
+            path_cumsum_away = 'data/Create_data/data_files/base/cumsum_away_api.xlsx'
+            path_cumsum_home = 'data/Create_data/data_files/base/cumsum_home_api.xlsx'
+            cumsum_away_df.to_excel(path_cumsum_away, index=False)
+            print(f"Cumulative sums away exported to Excel: {path_cumsum_away}")
+            cumsum_home_df.to_excel(path_cumsum_home, index=False)
+            print(f"Cumulative sums home exported to Excel: {path_cumsum_home}")
 
             dataframe['home_cumcount'] = dataframe.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['fixture_id'].cumcount() + 1
             dataframe['away_cumcount'] = dataframe.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['fixture_id'].cumcount() + 1
@@ -394,18 +402,20 @@ class MongoDBFeatures:
                 self.logger.error(f"Error in add_cumulative_sums: {e}")
             return dataframe
     
-
     def add_rolling_averages(self, dataframe):
         try:
-            rolling_columns = ['fixture_id','Date','home_encoded','away_encoded', 'season_encoded', 'league_encoded','home_saves','away_saves',
+            rolling_columns = ['fixture_id','Date','year','week_of_year','home_encoded','away_encoded', 'season_encoded', 'league_encoded','home_saves','away_saves',
                                 'home_shots_on_goal','away_shots_on_goal','home_passes_accuracy','away_passes_accuracy','home_fouls','away_fouls'
-                                ,'home_points','away_points','home_goal_difference','away_goal_difference','home_win','away_win','draw']
+                                ,'home_points','away_points','home_goal_difference','away_goal_difference','home_win','away_win','draw','home_red_cards','away_red_cards','home_yellow_cards','away_yellow_cards']
             
             dataframe = dataframe.replace([np.inf, -np.inf], 0)
             
-            rolling_home_df = dataframe[rolling_columns]
+            rolling_home_df = dataframe[rolling_columns].sort_values(by=['home_encoded', 'season_encoded', 'league_encoded', 'year', 'week_of_year'])
+            rolling_away_df = dataframe[rolling_columns].sort_values(by=['away_encoded', 'season_encoded', 'league_encoded', 'year', 'week_of_year'])
             rolling_home_df = rolling_home_df.copy()
+            rolling_away_df = rolling_away_df.copy()
             
+            # Home dataframe
             rolling_home_df.loc[:,'home_points_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_points'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             rolling_home_df.loc[:,'home_saves_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_saves'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             rolling_home_df.loc[:,'home_shots_on_target_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_shots_on_goal'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
@@ -414,10 +424,10 @@ class MongoDBFeatures:
             rolling_home_df.loc[:,'home_goal_difference_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_goal_difference'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             rolling_home_df.loc[:,'home_win_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_win'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             rolling_home_df.loc[:,'home_draw_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['draw'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            
-            rolling_away_df = dataframe[rolling_columns]
-            rolling_away_df = rolling_away_df.copy()
-            
+            rolling_home_df.loc[:,'home_red_cards_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_red_cards'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
+            rolling_home_df.loc[:,'home_yellow_cards_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_yellow_cards'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
+
+            # Away dataframe
             rolling_away_df.loc[:,'away_points_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_points'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             rolling_away_df.loc[:,'away_saves_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_saves'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             rolling_away_df.loc[:,'away_shots_on_target_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_shots_on_goal'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
@@ -426,6 +436,8 @@ class MongoDBFeatures:
             rolling_away_df.loc[:,'away_goal_difference_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_goal_difference'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             rolling_away_df.loc[:,'away_win_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_win'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             rolling_away_df.loc[:,'away_draw_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['draw'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
+            rolling_away_df.loc[:,'away_red_cards_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_red_cards'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
+            rolling_away_df.loc[:,'away_yellow_cards_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_yellow_cards'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
             
             rolling_home_df = rolling_home_df.sort_values(by=['fixture_id'])
             rolling_away_df = rolling_away_df.sort_values(by=['fixture_id'])
@@ -448,9 +460,11 @@ def main():
     print("Normalizing fixtures data")
     fixtures_dataframe = mongodb_features.normalize_fixtures_data(fixtures_with_stats)
     fixtures_dataframe_final = mongodb_features.add_features(fixtures_dataframe)
-    print("Exporting to Excel")
-    mongodb_features.export_to_excel(fixtures_dataframe_final, 'fixtures_with_stats.xlsx')
-    
+    print(f"Final dataframe shape: {fixtures_dataframe_final.shape}")
+
+    export_path = 'data/Create_data/data_files/base/fixtures_with_stats.xlsx'
+    mongodb_features.export_to_excel(fixtures_dataframe_final, export_path)
+    print("Data exported to Excel")
 
 if __name__ == "__main__":
     main()
