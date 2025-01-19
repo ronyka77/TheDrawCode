@@ -5,8 +5,9 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 import pymongo
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
+
 
 # Add project root to Python path
 try:
@@ -67,6 +68,22 @@ class ApiFootball:
             self.logger.error(f"Error during API request to {url}: {e}")
             return {}
 
+    def _save_json(self, data: Any, filename: str) -> None:
+            """
+            Saves data to a JSON file in the data directory.
+
+            Args:
+                data (Any): The data to save.
+                filename (str): The name of the file to save to.
+            """
+            file_path = os.path.join(self.data_dir, filename)
+            try:
+                with open(file_path, 'w') as f:
+                    json.dump(data, f, indent=4)
+                self.logger.info(f"Data saved to {file_path}")
+            except Exception as e:
+                self.logger.error(f"Error saving data to {file_path}: {e}")
+
     def get_leagues(self, league_id: int = None) -> List[Dict]:
         """
         Retrieves all available leagues from the API and stores them in MongoDB.
@@ -110,6 +127,30 @@ class ApiFootball:
             self.logger.warning("No leagues data found.")
             return []
     
+    def get_league_ids(self) -> None:
+        """
+        Retrieves league IDs, names, and countries from the leagues.json file and saves them to a new JSON file.
+        """
+        leagues_file_path = os.path.join(self.data_dir, 'leagues', 'leagues.json')
+        try:
+            with open(leagues_file_path, 'r') as f:
+                leagues_data = json.load(f)
+
+            league_info = []
+            for item in leagues_data:
+                league_id = item['league']['id']
+                league_name = item['league']['name']
+                country_name = item['country']['name']
+                league_info.append({
+                    'league_id': league_id,
+                    'league_name': league_name,
+                    'country': country_name
+                })
+
+            self._save_json(league_info, 'league_ids.json')
+        except Exception as e:
+            self.logger.error(f"Error processing leagues data: {e}")
+    
     def get_fixtures(self, league_id: int, season: int) -> List[Dict]:
         """
         Retrieves fixtures for a specific league and season.
@@ -136,7 +177,7 @@ class ApiFootball:
             for fixture in fixtures:
                 transformed_fixture = {
                     "fixture_id": fixture["fixture"]["id"],
-                    "date": fixture["fixture"]["date"],
+                    "date": datetime.strptime(fixture["fixture"]["date"], "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M"),
                     "referee": fixture["fixture"]["referee"],
                     "venue_name": fixture["fixture"]["venue"]["name"],
                     "venue_id": fixture["fixture"]["venue"]["id"],
@@ -172,13 +213,32 @@ class ApiFootball:
                     "match_outcome": 1 if fixture["fixture"]["status"]["short"] == "FT" and fixture["goals"]["home"] > fixture["goals"]["away"] else (2 if fixture["fixture"]["status"]["short"] == "FT" and fixture["goals"]["home"] == fixture["goals"]["away"] else (3 if fixture["fixture"]["status"]["short"] == "FT" else None))
                 }
                 
+                # Update only specific fields, preserving existing stats
                 self.fixtures_collection.update_one(
                     {"fixture_id": transformed_fixture["fixture_id"]},
-                    {"$set": transformed_fixture},
+                    {"$set": {
+                        "date": transformed_fixture["date"],
+                        "referee": transformed_fixture["referee"],
+                        "venue_name": transformed_fixture["venue_name"],
+                        "venue_id": transformed_fixture["venue_id"],
+                        "league_id": transformed_fixture["league_id"],
+                        "league_name": transformed_fixture["league_name"],
+                        "league_season": transformed_fixture["league_season"],
+                        "league_round": transformed_fixture["league_round"],
+                        "home.team_id": transformed_fixture["home"]["team_id"],
+                        "home.team_name": transformed_fixture["home"]["team_name"],
+                        "home.team_logo": transformed_fixture["home"]["team_logo"],
+                        "away.team_id": transformed_fixture["away"]["team_id"],
+                        "away.team_name": transformed_fixture["away"]["team_name"],
+                        "away.team_logo": transformed_fixture["away"]["team_logo"],
+                        "goals": transformed_fixture["goals"],
+                        "score": transformed_fixture["score"],
+                        "match_outcome": transformed_fixture["match_outcome"]
+                    }},
                     upsert=True
                 )
                 
-            return fixtures
+            return len(fixtures)
         else:
             self.logger.warning(f"No fixtures found for league {league_id} season {season}")
             return []
@@ -234,7 +294,7 @@ class ApiFootball:
                     print(f"json: {raw_statistics}")
             except (IndexError, KeyError, TypeError) as e:
                 self.logger.error(f"Error processing statistics for fixture {fixture_id}: {e}")
-                time.sleep(10)
+                time.sleep(3)
                 return {}
 
             # Insert simplified statistics into MongoDB
@@ -261,8 +321,21 @@ class ApiFootball:
         Returns:
             List[int]: List of fixture IDs without statistics that meet the criteria.
         """
-        target_league_ids = [39, 40, 61, 62, 71, 78, 79, 88, 94, 128, 135, 140]
-        today = datetime.now().strftime('%Y-%m-%d %H:%M')
+        target_league_ids = [
+            39, 40, #ENGLAND
+            61, 62, #FRANCE
+            78, 79, #GERMANY
+            88, #Netherlands
+            94, #Portugal
+            128, #Argentina
+            135, 136, #Italy  
+            140, 141, #SPAIN
+            203, #Turkey
+            207, #Switzerland
+            262, #Mexico
+            283 #Romania
+            ]
+        today = (datetime.now() - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M')
         print(today)
         query = {
             "date": {"$lte": today},
@@ -275,66 +348,28 @@ class ApiFootball:
         self.logger.info(f"Found {len(fixture_ids)} fixtures without statistics for league IDs {target_league_ids}.")
         return fixture_ids
 
-    def _save_json(self, data: Any, filename: str) -> None:
-        """
-        Saves data to a JSON file in the data directory.
-
-        Args:
-            data (Any): The data to save.
-            filename (str): The name of the file to save to.
-        """
-        file_path = os.path.join(self.data_dir, filename)
-        try:
-            with open(file_path, 'w') as f:
-                json.dump(data, f, indent=4)
-            self.logger.info(f"Data saved to {file_path}")
-        except Exception as e:
-            self.logger.error(f"Error saving data to {file_path}: {e}")
-
-    def get_league_ids(self) -> None:
-        """
-        Retrieves league IDs, names, and countries from the leagues.json file and saves them to a new JSON file.
-        """
-        leagues_file_path = os.path.join(self.data_dir, 'leagues', 'leagues.json')
-        try:
-            with open(leagues_file_path, 'r') as f:
-                leagues_data = json.load(f)
-
-            league_info = []
-            for item in leagues_data:
-                league_id = item['league']['id']
-                league_name = item['league']['name']
-                country_name = item['country']['name']
-                league_info.append({
-                    'league_id': league_id,
-                    'league_name': league_name,
-                    'country': country_name
-                })
-
-            self._save_json(league_info, 'league_ids.json')
-        except Exception as e:
-            self.logger.error(f"Error processing leagues data: {e}")
-
     def get_fixtures_for_leagues(self) -> None:
         """
         Retrieves fixtures for each league ID found in 'league_ids.json'.
         """
         league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
-        seasons = [2024]
+        seasons = [2022,2023]
         try:
             with open(league_ids_file_path, 'r') as f:
                 league_ids_data = json.load(f)
                 
+            # league_ids_data = [{'league_id': 40}] #IF YOU WANT TO GET FIXTURES FOR A SPECIFIC LEAGUE
+            
             num_leagues = len(league_ids_data)
             self.logger.info(f"Total number of leagues: {num_leagues}")
-            
+
             for league_info in league_ids_data:
                 league_id = league_info['league_id']
                 self.logger.info(f"Getting fixtures for league ID: {league_id}")
                 for season in seasons:
                     fixtures = self.get_fixtures(league_id, season)
                     if fixtures:
-                        self.logger.info(f"Retrieved fixtures for league ID: {league_id} season: {season}")
+                        self.logger.info(f"Retrieved {fixtures} fixtures for league ID: {league_id} season: {season}")
                     else:
                         self.logger.warning(f"No fixtures found for league ID: {league_id} season: {season}")
 

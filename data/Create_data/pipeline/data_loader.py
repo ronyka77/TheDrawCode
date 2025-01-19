@@ -123,16 +123,10 @@ class DataLoader:
                 'data/prediction_raw'
             ))
             prediction_path.mkdir(parents=True, exist_ok=True)  # Create directory if it doesn't exist
-            excel_files = list(prediction_path.glob('*.xlsx'))
-            if excel_files:
-                source_path = excel_files[0]
-                source_format = 'xlsx'
-        else:
-            excel_files = list(self.raw_data_path.glob('*.xlsx'))
-            if excel_files:
-                source_path = excel_files[0]
-                source_format = 'xlsx'
         
+            source_path = prediction_path / 'model_data_prediction_newPoisson.xlsx'
+            source_format = 'xlsx'
+            
         if not source_path:
             raise ValueError(f"No supported data file found in {'prediction_raw' if self.is_prediction else 'raw'} data directory, prediction_path: {prediction_path}")
         
@@ -194,11 +188,11 @@ class DataLoader:
         
         return self.raw_data
         
-    def preprocess_data(self, df: pd.DataFrame = None) -> Dict[str, pd.DataFrame]:
+    def preprocess_data(self, df: pd.DataFrame = None) -> pd.DataFrame:
         """Preprocess data and split into train/val/test sets.
         
         Returns:
-            Dictionary containing train/val/test splits
+            Preprocessed DataFrame
         """
         
         # Load raw data if not already loaded
@@ -206,6 +200,7 @@ class DataLoader:
             df = self.load_raw_data()
         else:
             self.raw_data = df
+            
         # Get feature groups from config
         feature_groups = self.feature_config.get('feature_groups', {})
         

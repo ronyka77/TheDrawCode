@@ -354,13 +354,14 @@ def update_prediction_data():
         updated_data.to_csv(data_path, index=False)
         
         # Merge only new columns from updated_data with eval_data
-        new_columns = [col for col in updated_data.columns if col not in eval_data.columns and col != 'running_id']
+        new_columns = [col for col in eval_data.columns if col not in updated_data.columns and col != 'running_id']
         merged_data = pd.merge(
-            eval_data,
-            updated_data[['running_id'] + new_columns],
+            updated_data,
+            eval_data[['running_id'] + new_columns],
             on='running_id',
             how='left'
         )
+        print(f"merged_data shape: {merged_data.shape}")
         merged_data.to_excel(eval_path, index=False)
         merged_data = merged_data.dropna()
         print(f"Updated prediction data saved to {eval_path}")
@@ -370,73 +371,132 @@ def update_prediction_data():
 
 
 # GET NEW TRAINING DATA FOR DRAWS 
+# def get_selected_columns_draws():
+#     selected_columns_new = [
+#         "h2h_draw_rate", #marad
+#         "h2h_draws",  #marad
+#         "historical_draw_tendency", #marad
+#         "combined_draw_rate", #marad
+#         "away_h2h_wins", #marad
+#         "home_h2h_dominance", #marad
+#         "home_h2h_wins", #marad
+#         "home_historical_strength", #marad
+#         "league_home_draw_rate", #marad
+#         "form_weighted_xg_diff",  #marad
+#         "away_draw_rate", #marad
+#         "h2h_matches", #marad
+#         "home_draw_rate", #marad
+#         "elo_difference", #marad
+#         "elo_similarity_form_similarity", #marad
+#         "home_team_elo", #marad
+#         "away_historical_strength", #marad
+#         "Away_offsides_mean", #marad
+#         "home_corners_rollingaverage", #marad!!!
+#         "Away_points_cum", #marad
+#         "elo_similarity", #marad
+#         "away_h2h_dominance", #marad
+#         "Home_points_cum",
+#         "weighted_h2h_draw_rate",
+#         "position_equilibrium",
+#         "away_corners_mean",
+#         "home_avg_attendance",
+#         "Home_team_matches",
+#         "date_encoded", #marad
+#         "away_team_elo",
+#         "home_poisson_xG",
+#         "away_crowd_resistance",  #marad
+#         "h2h_avg_goals",  #marad
+#         "home_passing_efficiency", #marad
+#         "home_defense_index",
+#         "away_possession_impact",
+#         "Home_draws",
+#         "venue_encoded",
+#         "league_draw_rate_composite",
+#         "league_away_draw_rate",
+#         "home_form_weighted_xg",
+#         "league_draw_rate",
+#         "league_position_impact",
+#         "league_season_stage_draw_rate",
+#         "league_competitiveness",
+#         "ref_goal_tendency",
+#         "Home_passes_mean",
+#         "home_attack_strength",
+#         "Away_saves_mean",
+#         "mid_season_factor",
+#         "away_avg_attendance",
+#         "away_total_strength",
+#         "home_interceptions_mean",
+#         "away_shot_on_target_rollingaverage",
+#         "referee_foul_rate",
+#         "home_average_points",
+#         "Home_offsides_mean",
+#         "Away_goal_difference_cum",
+#         "home_style_compatibility",
+#         "referee_goals_per_game",
+#         "season_progress",
+#         "Away_fouls_mean",
+#         "form_stability"
+#     ]
+#     return selected_columns_new
 def get_selected_columns_draws():
-    selected_columns_new = [
-        "h2h_draw_rate",
-        "h2h_draws",
-        "historical_draw_tendency",
-        "combined_draw_rate",
-        "away_h2h_wins",
-        "home_h2h_dominance",
-        "home_h2h_wins",
-        "home_historical_strength",
-        "league_home_draw_rate",
-        "form_weighted_xg_diff",
-        "away_draw_rate",
-        "h2h_matches",
-        "home_draw_rate",
-        "elo_difference",
-        "elo_similarity_form_similarity",
-        "home_team_elo",
-        "away_historical_strength",
-        "Away_offsides_mean",
-        "home_corners_rollingaverage",
-        "Away_points_cum",
-        "elo_similarity",
-        "away_h2h_dominance",
-        "Home_points_cum",
-        "weighted_h2h_draw_rate",
-        "position_equilibrium",
-        "away_corners_mean",
-        "home_avg_attendance",
-        "Home_team_matches",
-        "date_encoded",
-        "away_team_elo",
-        "home_poisson_xG",
-        "away_crowd_resistance",
-        "h2h_avg_goals",
-        "home_passing_efficiency",
-        "home_defense_index",
-        "away_possession_impact",
-        "Home_draws",
-        "venue_encoded",
-        "league_draw_rate_composite",
-        "league_away_draw_rate",
-        "home_form_weighted_xg",
-        "league_draw_rate",
-        "league_position_impact",
-        "league_season_stage_draw_rate",
-        "league_competitiveness",
-        "ref_goal_tendency",
-        "Home_passes_mean",
-        "home_attack_strength",
-        "Away_saves_mean",
-        "mid_season_factor",
-        "away_avg_attendance",
-        "away_total_strength",
-        "home_interceptions_mean",
-        "away_shot_on_target_rollingaverage",
-        "referee_foul_rate",
-        "home_average_points",
-        "Home_offsides_mean",
-        "Away_goal_difference_cum",
-        "home_style_compatibility",
-        "referee_goals_per_game",
-        "season_progress",
-        "Away_fouls_mean",
-        "form_stability"
+    selected_columns = [
+        # Very High Impact (>0.01)
+        'league_home_draw_rate',          # 0.1009
+        'home_draw_rate',                 # 0.0173
+        'home_poisson_xG',                # 0.0158
+        'possession_balance',             # 0.0127
+        'home_corners_rollingaverage',    # 0.0125
+        'form_weighted_xg_diff',          # 0.0123
+        'home_goal_difference_rollingaverage', # 0.0112
+        'referee_encoded',                # 0.0110
+        
+        # High Impact (0.008-0.01)
+        'Home_offsides_mean',             # 0.0098
+        'position_volatility',            # 0.0095
+        'league_draw_rate_composite',     # 0.0093
+        'draw_xg_indicator',              # 0.0092
+        'Away_fouls_mean',                # 0.0092
+        'date_encoded',                   # 0.0089
+        'away_encoded',                   # 0.0088
+        
+        # Medium-High Impact (0.007-0.008)
+        'away_saves_rollingaverage',      # 0.0086
+        'home_corners_mean',              # 0.0086
+        'away_corners_rollingaverage',    # 0.0085
+        'mid_season_factor',              # 0.0083
+        'home_shots_on_target_accuracy_rollingaverage', # 0.0083
+        'seasonal_draw_pattern',          # 0.0082
+        'home_shot_on_target_rollingaverage', # 0.0080
+        'xg_momentum_similarity',         # 0.0079
+        'home_style_compatibility',       # 0.0078
+        'away_possession_mean',           # 0.0077
+        'home_offensive_sustainability',  # 0.0077
+        'Home_passes_mean',               # 0.0075
+        'Home_possession_mean',           # 0.0075
+        
+        # Medium Impact (0.006-0.007)
+        'Away_offsides_mean',             # 0.0074
+        'away_crowd_resistance',          # 0.0074
+        'league_away_draw_rate',          # 0.0073
+        'away_goal_difference_rollingaverage', # 0.0072
+        'away_interceptions_mean',        # 0.0071
+        'Home_saves_mean',                # 0.0070
+        'away_referee_impact',            # 0.0069
+        'Away_saves_mean',                # 0.0069
+        'combined_draw_rate',             # 0.0069
+        'home_defensive_organization',    # 0.0069
+        'attack_xg_equilibrium',          # 0.0068
+        'away_team_elo',                  # 0.0068
+        'home_xg_momentum',               # 0.0068
+        'home_interceptions_mean',        # 0.0068
+        'home_team_elo',                  # 0.0067
+        'referee_foul_rate',              # 0.0067
+        'xg_form_equilibrium',            # 0.0066
+        'home_saves_rollingaverage',      # 0.0061
+        'Home_fouls_mean'                 # 0.0061
     ]
-    return selected_columns_new
+    
+    return selected_columns
 
 def import_training_data_draws_new():
     """Import training data for draw predictions."""
@@ -453,28 +513,40 @@ def import_training_data_draws_new():
     data = data.replace([np.inf, -np.inf], 0)
     data = data.fillna(0)
     
-    # Convert all numeric-like columns
     for col in data.columns:
-        if not np.issubdtype(data[col].dtype, np.number):
-            try:
-                # Convert string numbers with either dots or commas
-                data[col] = (data[col].astype(str)
-                           .str.strip()
-                           .str.strip("'\"")
-                           .str.replace(' ', '')
-                           .str.replace(',', '.')
-                           .replace('', '0')  # Replace empty strings with 0
-                           .astype(float))
-            except (ValueError, AttributeError) as e:
-                print(f"Could not convert column {col}: {str(e)}")
-                if col in selected_columns:
-                    selected_columns.remove(col)
-                continue
+        data[col] = pd.to_numeric(data[col], errors='coerce')
+    
+    # Convert all numeric-like columns (excluding problematic_cols that have already been handled)
+    for col in data.columns:
+        try:
+            # Convert string numbers with either dots or commas
+            data[col] = (data[col].astype(str)
+                        .str.strip()
+                        .str.strip("'\"")
+                        .str.replace(' ', '')
+                        .str.replace(',', '.')
+                        .replace('', '0')  # Replace empty strings with 0
+                        .astype(float))
+        except (ValueError, AttributeError) as e:
+            print(f"Training data: Could not convert column {col}: {str(e)}")
+            data = data.drop(columns=[col], errors='ignore')
+            continue
+        
+    # Define integer columns that should remain as int64
+    int_columns = [
+        'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
+        'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
+    ]
+    
+    # Convert integer columns back to int64
+    for col in int_columns:
+        if col in data.columns:
+            data[col] = data[col].astype('int64')
     
     # Verify all selected columns are numeric
     for col in selected_columns:
         if data[col].dtype == 'object':
-            print(f"Warning: Column {col} is still object type after conversion")
+            print(f"Training data: Column {col} is still object type after conversion")
             selected_columns.remove(col)
     
     # Split into train and test sets
@@ -491,9 +563,16 @@ def import_training_data_draws_new():
     X_test = test_data[selected_columns]
     y_test = test_data['is_draw']
     
-    # Final verification of data types
-    assert all(X_train.dtypes != 'object'), "Training data contains object columns"
-    assert all(X_test.dtypes != 'object'), "Test data contains object columns"
+    # Add verification of dtypes
+    print("\nVerifying final dtypes:")
+    non_numeric_cols = X_train.select_dtypes(include=['object']).columns
+    if len(non_numeric_cols) > 0:
+        print(f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
+    
+    print("\nInteger columns dtypes:")
+    for col in int_columns:
+        if col in X_train.columns:
+            print(f"{col}: {X_train[col].dtype}")
     
     return X_train, y_train, X_test, y_test
 
@@ -524,27 +603,40 @@ def create_evaluation_sets_draws():
         
         # Calculate 'date_encoded' as days since the reference date
         data['date_encoded'] = (pd.to_datetime(data['Datum']) - reference_date).dt.days
-    # Separate features and target
-    X = data[selected_columns]
+    
+    # Separate features and target (make sure you are working on a copy if needed)
+    X = data[selected_columns].copy()
     y = data[target_column]
-    # Start of Selection
-    # Replace comma with dot for ALL numeric-like columns
+
+    # Convert all numeric-like columns to numeric types, handling errors by coercing
     for col in X.columns:
-        if X[col].dtype == 'object':
-            try:
-                X.loc[:, col] = (
-                    X[col].astype(str)
-                    .str.strip()  # Remove leading/trailing whitespace
-                    .str.strip("'\"")  # Remove quotes
-                    .str.replace(' ', '')  # Remove any spaces
-                    .str.replace(',', '.')  # Replace comma with dot
-                    .astype(float)  # Convert to float
-                )
-            except (AttributeError, ValueError) as e:
-                print(f"Could not convert column {col}: {str(e)}")
-                data = data.drop(columns=[col], errors='ignore')
-                continue
-                
+        X[col] = pd.to_numeric(X[col], errors='coerce')
+
+   # Convert all numeric-like columns (excluding problematic_cols that have already been handled)
+    for col in data.columns:
+        try:
+            # Convert string numbers with either dots or commas
+            data[col] = (data[col].astype(str)
+                        .str.strip()
+                        .str.strip("'\"")
+                        .str.replace(' ', '')
+                        .str.replace(',', '.')
+                        .replace('', '0')  # Replace empty strings with 0
+                        .astype(float))
+        except (ValueError, AttributeError) as e:
+            print(f"Evaluation data: Could not convert column {col}: {str(e)}")
+            data = data.drop(columns=[col], errors='ignore')
+            continue
+
+    # Separate features and target
+    X = X[selected_columns]
+    y = y        
+
+    # Add this before returning
+    non_numeric_cols = X.select_dtypes(include=['object']).columns
+    if len(non_numeric_cols) > 0:
+        print(f"Warning: Found object columns: {list(non_numeric_cols)}")
+    
     return X, y
 
 
@@ -704,7 +796,15 @@ def import_training_data_goals(goal_type: str):
 
 if __name__ == "__main__":
     # Define the file path and target column
-    update_training_data_for_draws()
-    print("Training data updated successfully")
+    # update_training_data_for_draws()
+    # print("Training data updated successfully")
     update_prediction_data()
     print("Prediction data updated successfully")
+    
+    # X_eval, y_eval = create_evaluation_sets_draws()
+    # X_train, y_train, X_test, y_test = import_training_data_draws_new()
+    # print(f"X_eval dtypes: {X_eval.dtypes.to_dict()}")
+    # print(f"X_train dtypes: {X_train.dtypes.to_dict()}")
+    # print(f"X_test dtypes: {X_test.dtypes.to_dict()}")
+    
+

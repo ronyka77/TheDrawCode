@@ -18,9 +18,10 @@ sys.path.append(str(project_root))
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import create_evaluation_sets, get_selected_columns, import_training_data_draws
+from utils.create_evaluation_set import create_evaluation_sets_draws, get_selected_columns_draws, import_training_data_draws_new
 
-selected_columns = get_selected_columns()
+selected_columns = get_selected_columns_draws()
+
 class GlobalHypertuner:
     """Global hyperparameter tuner for XGBoost model optimizing for validation metrics.
     
@@ -421,8 +422,8 @@ def tune_global_model():
             precision_weight=0.7     # Weight for precision vs recall balance
         )
         
-        X_train, y_train, X_test, y_test = import_training_data_draws()
-        X_val, y_val = create_evaluation_sets()
+        X_train, y_train, X_test, y_test = import_training_data_draws_new()
+        X_val, y_val = create_evaluation_sets_draws()
         print(X_val.shape)
         
         with mlflow.start_run(run_name=f"global_xgboost_tuning"):

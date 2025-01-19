@@ -136,7 +136,7 @@
     },
     {
         "league_id": 141,
-        "league_name": "Segunda Divisi\u00f3n",
+        "league_name": "Segunda División",
         "country": "Spain"
     },
     {
@@ -156,7 +156,7 @@
     },
     {
         "league_id": 203,
-        "league_name": "S\u00fcper Lig",
+        "league_name": "Süper Lig",
         "country": "Turkey"
     },
     {
@@ -208,25 +208,7 @@
         "league_id": 283,
         "league_name": "Liga I",
         "country": "Romania"
-    },
-    {
-        "league_id": 328,
-        "league_name": "Esiliiga A",
-        "country": "Estonia"
-    },
-    {
-        "league_id": 345,
-        "league_name": "Czech Liga",
-        "country": "Czech-Republic"
-    },
-    {
-        "league_id": 497,
-        "league_name": "Japan Football League",
-        "country": "Japan"
-    },
-    {
-        "league_id": 925,
-        "league_name": "Super Cup",
-        "country": "Czech-Republic"
     }
+    
+    
 ]

@@ -1,8 +1,21 @@
 import pandas as pd
 import numpy as np
 import logging
-
-class FeatureEngineer_base:
+# Add project root to Python path
+try:
+    project_root = Path(__file__).parent.parent.parent
+    if not project_root.exists():
+        # Handle network path by using raw string
+        project_root = Path(r"\\".join(str(project_root).split("\\")))
+    sys.path.append(str(project_root))
+    print(f"Project root get_fixtures: {project_root}")
+except Exception as e:
+    print(f"Error setting project root path: {e}")
+    # Fallback to current directory if path resolution fails
+    sys.path.append(os.getcwd().parent.parent)
+    print(f"Current directory get_fixtures: {os.getcwd().parent.parent}")
+    
+class FeatureEngineer_api_football:
     def __init__(self,
                  logger: logging.Logger,
                  target_variable: str,
@@ -50,15 +63,15 @@ class FeatureEngineer_base:
             # Then add draw-specific features
             df = self.engineer_draw_features(df)
             
-            # if self.is_prediction:
-            #     # Export the DataFrame to an Excel file
-            #     output_file_path = "./data/prediction/feature_engineered_data_prediction.xlsx"
-            #     try:
-            #         df.to_excel(output_file_path, index=False)
-            #         print(f"Feature engineered data successfully exported to {output_file_path}")
-            #     except Exception as e:
-            #         print(f"Error exporting feature engineered data to Excel: {str(e)}")
-            #         raise
+            if self.is_prediction:
+                # Export the DataFrame to an Excel file
+                output_file_path = "./data/prediction/feature_engineered_data_prediction.xlsx"
+                try:
+                    df.to_excel(output_file_path, index=False)
+                    print(f"Feature engineered data successfully exported to {output_file_path}")
+                except Exception as e:
+                    print(f"Error exporting feature engineered data to Excel: {str(e)}")
+                    raise
             
             return df
             
@@ -182,7 +195,7 @@ class FeatureEngineer_base:
                     lambda x: pd.qcut(x.rank(method='first'), q=3, labels=['1', '2', '3'])
                 )
                 league_season_stage_rates = (
-                    df.groupby(['league_encoded', 'season_stage'], observed=False)['match_outcome']
+                    df.groupby(['league_encoded', 'season_stage'])['match_outcome']
                     .mean()
                     .reset_index()
                     .rename(columns={'match_outcome': 'league_season_stage_draw_rate'})
@@ -507,127 +520,43 @@ class FeatureEngineer_base:
             self.logger.error(f"Error in create_composite_features: {str(e)}")
             return df  # Return original dataframe on error
 
-    def add_advanced_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Adds advanced features to the dataframe.
-        """
+    def load_prediction_data(self) -> pd.DataFrame:
+        """Load data from a specified Excel file in the data/prediction_raw directory."""
         try:
-            df = df.copy()
+            file_path = 'data/prediction_raw/api_prediction_data_newPoisson.xlsx'
+            # Construct the full file path
+            full_file_path = Path(file_path)
             
-            df['is_draw'] = (df['match_outcome'] == 2).astype(int)
-                
-            # Momentum and Form Features
-            if all(col in df.columns for col in ['home_goal_difference_rollingaverage', 'away_goal_difference_rollingaverage']):
-                df['goal_differential_trend'] = self.calculate_exponential_decay(df, 'home_goal_difference_rollingaverage') - \
-                                                self.calculate_exponential_decay(df, 'away_goal_difference_rollingaverage')
+            # Check if the file exists
+            if not full_file_path.exists():
+                raise FileNotFoundError(f"The specified file was not found: {full_file_path}")
 
-            if 'is_draw' in df.columns:
-                df['home_draw_streak_length'] = df.groupby('home_encoded')['is_draw'].cumsum()
-                df['away_draw_streak_length'] = df.groupby('away_encoded')['is_draw'].cumsum()
+            # Load the Excel file into a pandas DataFrame
+            df = pd.read_excel(full_file_path)
 
-            if all(col in df.columns for col in ['home_points_cum', 'Away_points_cum']):
-                df['home_form_consistency_index'] = df.groupby('home_encoded')['home_points_cum'].rolling(window=5).var().reset_index(level=0, drop=True)
-                df['away_form_consistency_index'] = df.groupby('away_encoded')['Away_points_cum'].rolling(window=5).var().reset_index(level=0, drop=True)
-
-            if all(col in df.columns for col in ['home_points_cum', 'Away_points_cum']):
-                df['home_points_acceleration'] = df.groupby('home_encoded')['home_points_cum'].rolling(window=5).apply(lambda x: np.polyfit(range(len(x)), x, 2)[0]).reset_index(level=0, drop=True)
-                df['away_points_acceleration'] = df.groupby('away_encoded')['Away_points_cum'].rolling(window=5).apply(lambda x: np.polyfit(range(len(x)), x, 2)[0]).reset_index(level=0, drop=True)
-
-            # Timing and Context Features
-            if 'is_draw' in df.columns and 'date_encoded' in df.columns:
-                df['days_since_last_draw'] = df.groupby('home_encoded')['is_draw'].apply(lambda x: (x == 1).groupby((x != 1).cumsum()).cumsum()).reset_index(level=0, drop=True)
-
-            if 'date_encoded' in df.columns:
-                df['season_phase'] = pd.cut(df['date_encoded'], bins=3, labels=['early', 'mid', 'late'])
-                for phase in ['early', 'mid', 'late']:
-                    df[f'home_performance_{phase}'] = df.groupby(['home_encoded', 'season_phase'])['home_points_cum'].transform('mean')
-                    df[f'away_performance_{phase}'] = df.groupby(['away_encoded', 'season_phase'])['Away_points_cum'].transform('mean')
-
-            if 'date_encoded' in df.columns:
-                df['home_fixture_congestion'] = df.groupby('home_encoded')['date_encoded'].rolling(window=14).count().reset_index(level=0, drop=True)
-                df['away_fixture_congestion'] = df.groupby('away_encoded')['date_encoded'].rolling(window=14).count().reset_index(level=0, drop=True)
-
-            if 'date_encoded' in df.columns:
-                df['home_rest_days'] = df.groupby('home_encoded')['date_encoded'].diff().dt.days
-                df['away_rest_days'] = df.groupby('away_encoded')['date_encoded'].diff().dt.days
-                df['rest_advantage'] = df['home_rest_days'] - df['away_rest_days']
-
-            # Style Compatibility Metrics
-            if all(col in df.columns for col in ['home_saves_rollingaverage', 'away_saves_rollingaverage', 'home_interceptions_rollingaverage', 'away_interceptions_rollingaverage', 'home_fouls_rollingaverage', 'away_fouls_rollingaverage']):
-                df['defensive_style_similarity'] = 1 - (abs(df['home_saves_rollingaverage'] - df['away_saves_rollingaverage']) + \
-                                                        abs(df['home_interceptions_rollingaverage'] - df['away_interceptions_rollingaverage']) + \
-                                                        abs(df['home_fouls_rollingaverage'] - df['away_fouls_rollingaverage']))
-
-            if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean']):
-                df['possession_style_clash'] = abs(df['Home_possession_mean'] - df['away_possession_mean'])
-
-            if all(col in df.columns for col in ['home_passes_rollingaverage', 'away_passes_rollingaverage', 'home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_corners_rollingaverage', 'away_corners_rollingaverage']):
-                df['tempo_differential'] = abs(df['home_passes_rollingaverage'] - df['away_passes_rollingaverage']) + \
-                                            abs(df['home_shots_rollingaverage'] - df['away_shots_rollingaverage']) + \
-                                            abs(df['home_corners_rollingaverage'] - df['away_corners_rollingaverage'])
-
-            if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean', 'home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_passes_rollingaverage', 'away_passes_rollingaverage']):
-                df['home_tactical_flexibility'] = df.groupby('home_encoded').rolling(window=5)['Home_possession_mean'].var().reset_index(level=0, drop=True) + \
-                                                df.groupby('home_encoded').rolling(window=5)['home_shots_rollingaverage'].var().reset_index(level=0, drop=True) + \
-                                                df.groupby('home_encoded').rolling(window=5)['home_passes_rollingaverage'].var().reset_index(level=0, drop=True)
-                df['away_tactical_flexibility'] = df.groupby('away_encoded').rolling(window=5)['away_possession_mean'].var().reset_index(level=0, drop=True) + \
-                                                df.groupby('away_encoded').rolling(window=5)['away_shots_rollingaverage'].var().reset_index(level=0, drop=True) + \
-                                                df.groupby('away_encoded').rolling(window=5)['away_passes_rollingaverage'].var().reset_index(level=0, drop=True)
-
-            # Historical Pattern Features
-            if 'h2h_draws' in df.columns:
-                df['h2h_draw_frequency_weighted'] = self.calculate_exponential_decay(df, 'h2h_draws')
-
-            if 'venue_encoded' in df.columns:
-                df['venue_draw_tendency'] = df.groupby('venue_encoded')['is_draw'].transform('mean')
-
-            if 'referee_encoded' in df.columns:
-                df['referee_draw_pattern_index'] = df.groupby('referee_encoded')['is_draw'].transform('mean')
-
-            if all(col in df.columns for col in ['h2h_draws', 'league_draw_rate_composite']):
-                df['matchup_draw_probability'] = df['h2h_draws'] * 0.5 + df['league_draw_rate_composite'] * 0.5
-
-            # Performance Equilibrium Metrics
-            if all(col in df.columns for col in ['home_saves_rollingaverage', 'away_saves_rollingaverage', 'home_interceptions_rollingaverage', 'away_interceptions_rollingaverage']):
-                df['defensive_equilibrium_score'] = 1 - (abs(df['home_saves_rollingaverage'] - df['away_saves_rollingaverage']) + \
-                                                        abs(df['home_interceptions_rollingaverage'] - df['away_interceptions_rollingaverage']))
-
-            if all(col in df.columns for col in ['home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_goals_rollingaverage', 'away_goals_rollingaverage']):
-                df['attacking_efficiency_balance'] = 1 - (abs(df['home_shots_rollingaverage'] - df['away_shots_rollingaverage']) + \
-                                                        abs(df['home_goals_rollingaverage'] - df['away_goals_rollingaverage']))
-
-            if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean', 'home_passes_rollingaverage', 'away_passes_rollingaverage']):
-                df['pressure_resistance_ratio'] = (df['Home_possession_mean'] / df['away_possession_mean']) * \
-                                                (df['home_passes_rollingaverage'] / df['away_passes_rollingaverage'])
-
-            if all(col in df.columns for col in ['home_form_momentum', 'away_form_momentum']):
-                df['momentum_equilibrium_index'] = 1 - abs(df['home_form_momentum'] - df['away_form_momentum'])
-
-            # Composite Indicators
-            if all(col in df.columns for col in ['is_draw', 'h2h_draws']):
-                df['draw_propensity_score'] = df['is_draw'].rolling(window=5).mean() * 0.6 + df['h2h_draws'] * 0.4
-
-            if all(col in df.columns for col in ['home_points_cum', 'Away_points_cum']):
-                df['home_team_stability_index'] = df.groupby('home_encoded')['home_points_cum'].rolling(window=5).std().reset_index(level=0, drop=True)
-                df['away_team_stability_index'] = df.groupby('away_encoded')['Away_points_cum'].rolling(window=5).std().reset_index(level=0, drop=True)
-
-            if all(col in df.columns for col in ['home_form_consistency_index', 'away_form_consistency_index', 'h2h_draws']):
-                df['matchup_volatility_score'] = (df['home_form_consistency_index'] + df['away_form_consistency_index']) * 0.7 + \
-                                                df['h2h_draws'] * 0.3
-
-            if all(col in df.columns for col in ['defensive_style_similarity', 'possession_style_clash', 'h2h_draw_frequency_weighted']):
-                df['tactical_deadlock_probability'] = df['defensive_style_similarity'] * 0.4 + \
-                                                    df['possession_style_clash'] * 0.3 + \
-                                                    df['h2h_draw_frequency_weighted'] * 0.3
-
+            self.logger.info(f"Data successfully loaded from {full_file_path}")
             return df
 
+        except FileNotFoundError as fnf_error:
+            self.logger.error(str(fnf_error))
+            raise
         except Exception as e:
-            self.logger.error(f"Error in add_advanced_features: {str(e)}")
-            return df
+            self.logger.error(f"Error loading data from {full_file_path}: {str(e)}")
+            raise
 
-    def calculate_exponential_decay(self, df: pd.DataFrame, column: str, alpha: float = 0.7) -> pd.Series:
-        """
-        Calculates exponential decay for a given column.
-        """
-        return df.groupby('home_encoded')[column].transform(lambda x: x.ewm(alpha=alpha).mean())
+
+if __name__ == "__main__":
+    # Example usage (assuming you have a DataFrame 'df' ready)
+    # Replace this with your actual DataFrame loading and preprocessing steps
+    # df = pd.read_csv("your_data.csv")
+    # df = preprocess_data(df)
+    
+    # Initialize the feature engineer
+    feature_engineer = FeatureEngineer_api_football(logger=logging.getLogger(__name__), target_variable='your_target_variable')
+    
+    # Engineer features
+    # df_engineered = feature_engineer.engineer_all_features(df.copy())
+    
+    # Display or save the engineered features
+    # print(df_engineered.head())
+    # df_engineered.to_csv("engineered_data.csv", index=False)

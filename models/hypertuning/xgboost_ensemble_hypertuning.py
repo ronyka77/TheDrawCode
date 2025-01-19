@@ -33,7 +33,7 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import create_evaluation_sets_draws, import_training_data_draws_new, setup_mlflow_tracking
+from utils.create_evaluation_set import create_evaluation_sets_draws, import_training_data_draws_new, setup_mlflow_tracking, get_selected_columns_draws
 from models.xgboost_ensemble_model import TwoStageEnsemble, VotingEnsemble
 
 
@@ -154,11 +154,11 @@ class EnsembleHypertuner:
                     'n_estimators': trial.suggest_int('v_n_estimators', 11000, 20000),
                 }
                 
-                # Thresholds with higher ranges
-                threshold1 = trial.suggest_float('threshold1', 0.25, 0.35)
-                threshold2 = trial.suggest_float('threshold2', 0.60, 0.75)
+                # Modified threshold ranges
+                threshold1 = trial.suggest_float('threshold1', 0.15, 0.25)  # Lower range for first stage
+                threshold2 = trial.suggest_float('threshold2', 0.40, 0.55)  # Lower range for second stage
                 voting_thresholds = [
-                    trial.suggest_float(f'v_threshold_{i}', 0.60, 0.75)
+                    trial.suggest_float(f'v_threshold_{i}', 0.40, 0.55)  # Lower range for voting
                     for i in range(5)
                 ]
                 
@@ -174,24 +174,21 @@ class EnsembleHypertuner:
                 voting.thresholds = voting_thresholds
 
                 # Train models with early stopping to reduce training time
-                two_stage.stage1_params['early_stopping_rounds'] = 300
-                two_stage.stage2_params['early_stopping_rounds'] = 300
-                voting.base_params['early_stopping_rounds'] = 300
+                two_stage.stage1_params['early_stopping_rounds'] = 500
+                two_stage.stage2_params['early_stopping_rounds'] = 500
+                voting.base_params['early_stopping_rounds'] = 500
                 
                 # Train with reduced verbosity
                 two_stage.fit(X_train, y_train, X_val, y_val)
                 voting.fit(X_train, y_train, X_val, y_val)
 
-                # Get probabilities for class 1 only
-                two_stage_probs = two_stage.predict_proba(X_val)[:, 1]  # Get second column
-                voting_probs = np.mean([
-                    model.predict_proba(X_val)[:, 1]  # Get second column for each model
-                    for model in voting.models
-                ], axis=0)
+                # Get probabilities
+                two_stage_probs = two_stage.predict_proba(X_val)[:, 1]
+                voting_probs = np.mean([model.predict_proba(X_val)[:, 1] for model in voting.models], axis=0)
 
-                # Compare probabilities with thresholds
+                # Modified prediction combination with lower thresholds
                 combined_preds = ((two_stage_probs >= threshold2) & 
-                                 (voting_probs >= np.mean(voting_thresholds))).astype(int)
+                                (voting_probs >= np.mean(voting_thresholds))).astype(int)
 
                 # Calculate metrics
                 precision = precision_score(y_val, combined_preds, zero_division=0)
@@ -199,28 +196,34 @@ class EnsembleHypertuner:
                 f1 = f1_score(y_val, combined_preds, zero_division=0)
 
                 # Store metrics in trial
+                print(f"precision: {precision:.4f}")
+                print(f"recall: {recall:.4f}")
+                print(f"f1: {f1:.4f}")
                 trial.set_user_attr('precision', precision)
                 trial.set_user_attr('recall', recall)
                 trial.set_user_attr('f1', f1)
-                
-                # Modified scoring function with stronger precision emphasis
-                if precision < 0.50:  # Increase minimum precision threshold
+
+                # Modified scoring function with more balanced approach
+                if precision == 0 or recall == 0:
                     score = 0.0
                 else:
-                    # Increase precision weight
-                    precision_weight = 0.9 if precision >= 0.65 else 0.85
-                    recall_weight = 1.0 - precision_weight
+                    # Base weights
+                    precision_weight = 0.7
+                    recall_weight = 0.3
                     
-                    # More aggressive recall penalty
-                    recall_penalty = 0.3 if recall < 0.20 else 1.0
+                    # Calculate weighted score
+                    weighted_score = (precision * precision_weight + recall * recall_weight)
                     
-                    # Combined score with higher emphasis on precision
-                    score = (
-                        (precision * precision_weight + recall * recall_weight) * 
-                        f1 * 
-                        recall_penalty
-                    )
-
+                    # Apply f1 multiplier to encourage balance
+                    score = weighted_score * f1
+                    
+                    # Apply minimum thresholds but with lower requirements
+                    if precision < 0.25 or recall < 0.1:
+                        score *= 0.5
+                self.logger.info(f"Trial parameters: {trial.params}")
+                self.logger.info(f"Score: {score:.4f}")
+                self.logger.info(f"Precision: {precision:.4f}")
+                self.logger.info(f"Recall: {recall:.4f}")
                 return score
             except Exception as e:
                 self.logger.error(f"Trial failed with error: {str(e)}")
@@ -273,7 +276,7 @@ class EnsembleHypertuner:
 
 def tune_ensemble_model():
     """Main function to tune the ensemble model."""
-    logger = ExperimentLogger()
+    logger = ExperimentLogger(experiment_name="xgboost_ensemble_hypertuning")
     experiment_name = "xgboost_ensemble_hypertuning"
     artifact_dir = os.path.join(project_root, "mlflow_artifacts", experiment_name)
     temp_dir = setup_xgboost_temp_directory(logger, project_root)
@@ -290,6 +293,13 @@ def tune_ensemble_model():
         X_train, y_train, X_test, y_test = import_training_data_draws_new()
         X_val, y_val = create_evaluation_sets_draws()
         
+        print(f"X_train: {X_train.shape}")
+        print(f"X_val: {X_val.shape}")
+        print(f"X_test: {X_test.shape}")
+        print(f"y_train: {y_train.shape}")
+        print(f"y_val: {y_val.shape}")
+        print(f"y_test: {y_test.shape}")
+        
         with mlflow.start_run(run_name="ensemble_hypertuning"):
             hypertuner = EnsembleHypertuner(logger=logger, temp_dir=temp_dir)
             # Log data statistics
@@ -301,6 +311,11 @@ def tune_ensemble_model():
                 "val_draws": y_val.mean(),
                 "test_draws": y_test.mean()
             })
+            
+            # Inspect data types before tuning
+            # print(f"X_train dtypes: {X_train.dtypes.to_dict()}")
+            # print(f"X_val dtypes: {X_val.dtypes.to_dict()}")
+            # print(f"X_test dtypes: {X_test.dtypes.to_dict()}")
             
             # Tune models
             best_params = hypertuner.tune_ensemble(

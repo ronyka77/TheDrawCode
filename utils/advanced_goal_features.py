@@ -18,12 +18,28 @@ class AdvancedGoalFeatureEngineer:
             
             data = df.copy()
             
+            # Convert all numeric-like columns
+            for col in df.columns:
+                if not np.issubdtype(df[col].dtype, np.number):
+                    try:
+                        # Convert string numbers with either dots or commas
+                        df[col] = (df[col].astype(str)
+                                .str.strip()
+                                .str.strip("'\"")
+                                .str.replace(' ', '')
+                                .str.replace(',', '.')
+                                .replace('', '0')  # Replace empty strings with 0
+                                .astype(float))
+                    except (ValueError, AttributeError) as e:
+                        print(f"Could not convert column {col}: {str(e)}")
+                        continue
+                    
             # Verify all selected columns are numeric
             # Start Generation Here
             for column in df.columns:
                 if df[column].dtype == 'object':
                     try:
-                        df[column] = pd.to_numeric(df[column], errors='coerce')
+                        df[column] = pd.to_numeric(df[column])
                         # self.logger.debug(f"Converted column '{column}' to numeric.")
                     except Exception as e:
                         self.logger.warning(f"Failed to convert column '{column}' to numeric: {e}")

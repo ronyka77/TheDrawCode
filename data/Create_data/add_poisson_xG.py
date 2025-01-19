@@ -248,7 +248,8 @@ class PoissonXGCalculator:
             'training_new': ('./data_files/model_data_training_withPoisson.xlsx'),
             'prediction': ('./data_files/model_data_prediction_newPoisson.xlsx'),
             'merged': ('./data_files/merged_data_prediction_newPoisson.csv'),
-            'api': ('./data_files/api_prediction_data_newPoisson.xlsx')
+            'api_prediction': ('./data_files/api_football_prediction_newPoisson.xlsx'),
+            'api_training': ('./data_files/api_football_training_newPoisson.xlsx')
         }
         
         output_path = datasets[type]
@@ -284,13 +285,15 @@ class PoissonXGCalculator:
             training_path_new = './data_files/PowerBI/model_data_training2.csv'
             prediction_path = './data_files/PowerBI/model_data_prediction.csv'
             merged_path = './data_files/PowerBI/merged_data_prediction.csv'
-            api_path = './data_files/PowerBI/api_prediction_data.csv'
+            api_prediction_path = './data_files/PowerBI/api_football_prediction.csv'
+            api_training_path = './data_files/PowerBI/api_football_training.csv'
             self.logger.info(f"Loading training data from {training_path}")
             training_data = pd.read_csv(training_path)
             training_data_new = pd.read_csv(training_path_new)
             prediction_data = pd.read_csv(prediction_path)
             merged_data = pd.read_csv(merged_path)
-            api_data = pd.read_csv(api_path)
+            api_prediction_data = pd.read_csv(api_prediction_path)
+            api_training_data = pd.read_csv(api_training_path)
             
             api_data = api_data.rename(columns={
                 'home_possession_mean': 'Home_possession_mean',
@@ -303,7 +306,8 @@ class PoissonXGCalculator:
             self.add_poisson_xG(training_data_new, 'training_new')
             self.add_poisson_xG(prediction_data, 'prediction')
             self.add_poisson_xG(merged_data, 'merged')
-            self.add_poisson_xG(api_data, 'api')
+            self.add_poisson_xG(api_prediction_data, 'api_prediction')
+            self.add_poisson_xG(api_training_data, 'api_training')
            
             
         except Exception as e:

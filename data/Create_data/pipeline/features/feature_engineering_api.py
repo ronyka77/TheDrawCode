@@ -98,37 +98,6 @@ class FeatureEngineer:
             # Draw-prone Period Detection
             df['mid_season_factor'] = 1 - abs(df['season_progress'] - 0.5) * 2
             
-            # League-specific Draw Rates
-            # Overall league draw rate
-            # league_draw_rates = df.groupby('league_encoded')['match_outcome'].apply(
-            #     lambda x: (x == 2).mean()
-            # ).to_dict()
-            # df['league_draw_tendency'] = df['league_encoded'].map(league_draw_rates)
-            
-            # Home-specific draw rates for each league
-            # league_home_draw_rates = df.groupby(['league_encoded', 'home_encoded'])['match_outcome'].apply(
-            #     lambda x: (x == 2).mean()
-            # ).reset_index()
-            # league_home_draw_rates.columns = ['league_encoded', 'home_encoded', 'league_home_draw_rate']
-            # df = df.merge(league_home_draw_rates, on=['league_encoded', 'home_encoded'], how='left')
-            
-            # # Away-specific draw rates for each league
-            # league_away_draw_rates = df.groupby(['league_encoded', 'away_encoded'])['match_outcome'].apply(
-            #     lambda x: (x == 2).mean()
-            # ).reset_index()
-            # league_away_draw_rates.columns = ['league_encoded', 'away_encoded', 'league_away_draw_rate']
-            # df = df.merge(league_away_draw_rates, on=['league_encoded', 'away_encoded'], how='left')
-            
-            # Season stage draw rates
-            # df['season_stage'] = df.groupby('season_encoded')['date_encoded'].transform(
-            #     lambda x: pd.qcut(x.rank(method='first'), q=3, labels=['early', 'mid', 'late'])
-            # )
-            # league_season_stage_rates = df.groupby(['league_encoded', 'season_stage'])['match_outcome'].apply(
-            #     lambda x: (x == 2).mean()
-            # ).reset_index()
-            # league_season_stage_rates.columns = ['league_encoded', 'season_stage', 'league_season_stage_draw_rate']
-            # df = df.merge(league_season_stage_rates, on=['league_encoded', 'season_stage'], how='left')
-            
             # Create composite league draw tendency
             df['league_draw_rate_composite'] = (
                 df['league_draw_rate'] * 0.3 +

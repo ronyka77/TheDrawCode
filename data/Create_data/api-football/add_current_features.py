@@ -24,12 +24,14 @@ class MongoDBFeatures:
             List[Dict]: List of fixtures with home.stats.
         """
         query = {
-            "home.stats": {"$ne": {}}
+            "home.stats": {"$ne": {}},
+            "score.fulltime.home": {"$ne": None},
+            "score.fulltime.away": {"$ne": None},
+            "match_outcome": {"$ne": None}
         }
         fixtures = self.fixtures_collection.find(query)
         fixture_list = list(fixtures)
-        if self.logger:
-            self.logger.info(f"Found {len(fixture_list)} fixtures with home.stats.")
+        print(f"Found {len(fixture_list)} fixtures with home.stats.")
         return fixture_list
    
     def normalize_fixtures_data(self, fixtures_with_stats: List[Dict]) -> pd.DataFrame:
@@ -165,7 +167,7 @@ class MongoDBFeatures:
         
             fixtures_dataframe = pd.DataFrame(normalized_data)
             
-            fixtures_dataframe['date'] = pd.to_datetime(fixtures_dataframe['date']).dt.strftime('%Y-%m-%d')
+            fixtures_dataframe['date'] = pd.to_datetime(fixtures_dataframe['date'], format='mixed', utc=True).dt.strftime('%Y-%m-%d %H:%M')
             
             for col in fixtures_dataframe.columns:
                 if fixtures_dataframe[col].dtype == 'object':
@@ -181,8 +183,7 @@ class MongoDBFeatures:
             print(f"Normalized fixtures data: {fixtures_dataframe.shape}")
             return fixtures_dataframe
         except Exception as e:
-            if self.logger:
-                self.logger.error(f"Error normalizing fixtures data: {e}")
+            print(f"Error normalizing fixtures data: {e}")
             return pd.DataFrame()
     
     def export_to_excel(self, fixtures_dataframe: pd.DataFrame, file_path: str) -> None:
@@ -196,13 +197,8 @@ class MongoDBFeatures:
         try:
             fixtures_dataframe.to_excel(file_path, index=False)
             print(f"Data exported to {file_path}")
-            if self.logger:
-                self.logger.info(f"Data exported to {file_path}")
-                
         except Exception as e:
             print(f"Error exporting data to Excel: {e}")
-            if self.logger:
-                self.logger.error(f"Error exporting data to Excel: {e}")
      
     def add_features(self, fixtures_dataframe: pd.DataFrame) -> pd.DataFrame:
         """
@@ -235,9 +231,9 @@ class MongoDBFeatures:
     def load_and_prepare_data(self, fixtures_dataframe: pd.DataFrame):
         try:
             print("Collecting data...")
-            if self.logger:
-                self.logger.info("Collecting data...")
             data = fixtures_dataframe
+            print(data.shape)
+            print("Dropping rows with missing match_outcome...")
             data = data.dropna(subset=['match_outcome'])
             print("Data Collected, Start Cleaning and Feature Engineering...")
             if self.logger:
@@ -384,6 +380,8 @@ class MongoDBFeatures:
             
             cumsum_home_df = cumsum_home_df.sort_values(by=['fixture_id'])
             cumsum_away_df = cumsum_away_df.sort_values(by=['fixture_id'])
+            print(f"Cumsum home: {len(cumsum_home_df)}")
+            print(f"Cumsum away: {len(cumsum_away_df)}")
             
             path_cumsum_away = 'data/Create_data/data_files/base/cumsum_away_api.xlsx'
             path_cumsum_home = 'data/Create_data/data_files/base/cumsum_home_api.xlsx'
@@ -404,7 +402,7 @@ class MongoDBFeatures:
     
     def add_rolling_averages(self, dataframe):
         try:
-            rolling_columns = ['fixture_id','Date','year','week_of_year','home_encoded','away_encoded', 'season_encoded', 'league_encoded','home_saves','away_saves',
+            rolling_columns = ['fixture_id','year','week_of_year','home_encoded','away_encoded', 'season_encoded', 'league_encoded','home_saves','away_saves',
                                 'home_shots_on_goal','away_shots_on_goal','home_passes_accuracy','away_passes_accuracy','home_fouls','away_fouls'
                                 ,'home_points','away_points','home_goal_difference','away_goal_difference','home_win','away_win','draw','home_red_cards','away_red_cards','home_yellow_cards','away_yellow_cards']
             
@@ -414,36 +412,144 @@ class MongoDBFeatures:
             rolling_away_df = dataframe[rolling_columns].sort_values(by=['away_encoded', 'season_encoded', 'league_encoded', 'year', 'week_of_year'])
             rolling_home_df = rolling_home_df.copy()
             rolling_away_df = rolling_away_df.copy()
-            
-            # Home dataframe
-            rolling_home_df.loc[:,'home_points_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_points'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_saves_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_saves'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_shots_on_target_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_shots_on_goal'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_passes_accuracy_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_passes_accuracy'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_fouls_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_fouls'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_goal_difference_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_goal_difference'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_win_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_win'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_draw_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['draw'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_red_cards_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_red_cards'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_home_df.loc[:,'home_yellow_cards_rolling'] = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_yellow_cards'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
 
-            # Away dataframe
-            rolling_away_df.loc[:,'away_points_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_points'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_saves_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_saves'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_shots_on_target_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_shots_on_goal'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_passes_accuracy_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_passes_accuracy'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_fouls_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_fouls'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_goal_difference_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_goal_difference'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_win_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_win'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_draw_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['draw'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_red_cards_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_red_cards'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
-            rolling_away_df.loc[:,'away_yellow_cards_rolling'] = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_yellow_cards'].rolling(window=4, min_periods=1).mean().reset_index(drop=True)
+            # Rolling sum for home dataframe
+            home_df = rolling_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded','year','week_of_year']) \
+                        .rolling(window=4, min_periods=1, closed='left').sum().reset_index()
+
+            # Rolling sum for away dataframe 
+            away_df = rolling_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded','year','week_of_year']) \
+                        .rolling(window=4, min_periods=1, closed='left').sum().reset_index()
+
+            print('Rolling dataframeframes ready, calculating values...')
             
-            rolling_home_df = rolling_home_df.sort_values(by=['fixture_id'])
-            rolling_away_df = rolling_away_df.sort_values(by=['fixture_id'])
+            # Calculate rolling values 
+            print('Rolling values: home_points_rolling')
+            dataframe['home_points_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], 
+                                              home_df, 
+                                              away_df,
+                                              row['league_encoded'],
+                                              row['season_encoded'],
+                                              row['year'],
+                                              row['week_of_year'],
+                                              'home_points',
+                                              'away_points'), axis=1).ffill()
+            print('Rolling values: home_saves_rolling')
+            dataframe['home_saves_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_saves','away_saves'), axis=1).ffill()
+            print('Rolling values: home_shots_on_target_rolling')
+            dataframe['home_shots_on_target_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_shots_on_goal','away_shots_on_goal'), axis=1).ffill()
+            print('Rolling values: home_passes_accuracy_rolling')
+            dataframe['home_passes_accuracy_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_passes_accuracy','away_passes_accuracy'), axis=1).ffill()
+            print('Rolling values: home_fouls_rolling')
+            dataframe['home_fouls_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_fouls','away_fouls'), axis=1).ffill()
+            print('Rolling values: home_goal_difference_rolling')
+            dataframe['home_goal_difference_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_goal_difference','away_goal_difference'), axis=1).ffill()
+            print('Rolling values: home_win_rolling')
+            dataframe['home_win_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_win','away_win'), axis=1).ffill()
+            print('Rolling values: home_draw_rolling')
+            dataframe['home_draw_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'draw','draw'), axis=1).ffill()
+            print('Rolling values: home_red_cards_rolling')
+            dataframe['home_red_cards_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_red_cards','away_red_cards'), axis=1).ffill()
+            print('Rolling values: home_yellow_cards_rolling')
+            dataframe['home_yellow_cards_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_yellow_cards','away_yellow_cards'), axis=1).ffill()
+            print('Rolling values: away_points_rolling')
+            dataframe['away_points_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_points','away_points'), axis=1).ffill()
+            print('Rolling values: away_saves_rolling')
+            dataframe['away_saves_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_saves','away_saves'), axis=1).ffill()
+            print('Rolling values: away_shots_on_target_rolling')
+            dataframe['away_shots_on_target_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_shots_on_goal','away_shots_on_goal'), axis=1).ffill()
+            print('Rolling values: away_passes_accuracy_rolling')
+            dataframe['away_passes_accuracy_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_passes_accuracy','away_passes_accuracy'), axis=1).ffill()
+            print('Rolling values: away_fouls_rolling')
+            dataframe['away_fouls_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_fouls','away_fouls'), axis=1).ffill()
+            print('Rolling values: away_goal_difference_rolling')
+            dataframe['away_goal_difference_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_goal_difference','away_goal_difference'), axis=1).ffill()
+            print('Rolling values: away_win_rolling')
+            dataframe['away_win_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_win','away_win'), axis=1).ffill()
+            print('Rolling values: away_draw_rolling')
+            dataframe['away_draw_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'draw','draw'), axis=1).ffill()
+            print('Rolling values: away_red_cards_rolling')
+            dataframe['away_red_cards_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_red_cards','away_red_cards'), axis=1).ffill()
+            print('Rolling values: away_yellow_cards_rolling')
+            dataframe['away_yellow_cards_rolling'] = dataframe.apply(lambda row: 
+                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+                                        row['league_encoded'],row['season_encoded'],
+                                        row['year'],row['week_of_year'],
+                                        'home_yellow_cards','away_yellow_cards'), axis=1).ffill()
             
-            dataframe = pd.merge(dataframe, rolling_home_df[['fixture_id','home_points_rolling','home_saves_rolling','home_shots_on_target_rolling','home_passes_accuracy_rolling','home_fouls_rolling','home_goal_difference_rolling','home_win_rolling','home_draw_rolling']], on='fixture_id', how='left')
-            dataframe = pd.merge(dataframe, rolling_away_df[['fixture_id','away_points_rolling','away_saves_rolling','away_shots_on_target_rolling','away_passes_accuracy_rolling','away_fouls_rolling','away_goal_difference_rolling','away_win_rolling','away_draw_rolling']], on='fixture_id', how='left')
             print("Rolling averages added")
             return dataframe
         except Exception as e:
@@ -452,6 +558,38 @@ class MongoDBFeatures:
                 self.logger.error(f"Error in add_rolling_averages: {e}")
             return dataframe
 
+    # Function to calculate rolling team form
+    def calculate_rolling_values(self, team, home_df, away_df, league, season, year, week, home_column, away_column):
+        try:
+        
+            # Filter based on team, league, and season from original DataFrame (not the rolled result)
+            team_home_results_new = home_df[
+                (home_df['home_encoded'] == team) & 
+                (home_df['league_encoded'] == league) & 
+                (home_df['season_encoded'] == season) &
+                (home_df['week_of_year'] == week) &
+                (home_df['year'] == year)
+            ][home_column].sum()
+
+            team_away_results_new = away_df[
+                (away_df['away_encoded'] == team) & 
+                (away_df['league_encoded'] == league) & 
+                (away_df['season_encoded'] == season) &
+                (away_df['week_of_year'] == week) &
+                (away_df['year'] == year)
+            ][away_column].sum()
+
+            if team_home_results_new != 0 and team_away_results_new != 0:
+                # Calculate rolling value
+                rolling_value = (team_home_results_new + team_away_results_new) / 2
+            else:
+                rolling_value = team_home_results_new + team_away_results_new
+                
+            return rolling_value
+
+        except Exception as e:
+            print(f"Error calculating rolling values(probably column not in rolling_colums list): {e}")
+            return 0
 
 def main():
     mongodb_features = MongoDBFeatures()
@@ -462,7 +600,7 @@ def main():
     fixtures_dataframe_final = mongodb_features.add_features(fixtures_dataframe)
     print(f"Final dataframe shape: {fixtures_dataframe_final.shape}")
 
-    export_path = 'data/Create_data/data_files/base/fixtures_with_stats.xlsx'
+    export_path = 'data/Create_data/data_files/base/api_football_current_features.xlsx'
     mongodb_features.export_to_excel(fixtures_dataframe_final, export_path)
     print("Data exported to Excel")
 

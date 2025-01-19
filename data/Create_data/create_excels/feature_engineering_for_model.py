@@ -390,7 +390,7 @@ def add_cumulative_sums(dataframe):
     cumsum_home_df.loc[:,'home_goal_difference_cumsum'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_goal_difference'].cumsum() - cumsum_home_df['home_goal_difference']
     cumsum_home_df.loc[:,'home_win_cumsum'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_win'].cumsum() - cumsum_home_df['home_win']
     cumsum_home_df.loc[:,'draw_cumsum'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['draw'].cumsum() - cumsum_home_df['draw']
-    cumsum_home_df.loc[:,'home_count'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()+1
+    cumsum_home_df.loc[:,'home_count'] = cumsum_home_df.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()
     
     cumsum_away_df = dataframe[cumulative_columns]
     # Ensure you are working with a copy of the DataFrame, not a slice
@@ -404,14 +404,19 @@ def add_cumulative_sums(dataframe):
     cumsum_away_df.loc[:, 'away_goal_difference_cumsum'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_goal_difference'].cumsum() - cumsum_away_df['away_goal_difference']
     cumsum_away_df.loc[:, 'away_win_cumsum'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_win'].cumsum() - cumsum_away_df['away_win']
     cumsum_away_df.loc[:, 'draw_cumsum'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['draw'].cumsum() - cumsum_away_df['draw']
-    cumsum_away_df.loc[:, 'away_count'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()+1
+    cumsum_away_df.loc[:, 'away_count'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()
+    
+    cumsum_home_df = cumsum_home_df.sort_values(by=['running_id'])
+    cumsum_away_df = cumsum_away_df.sort_values(by=['running_id'])
+    cumsum_home_df.to_excel('./data_files/cumsum_home_df.xlsx')
+    cumsum_away_df.to_excel('./data_files/cumsum_away_df.xlsx')
     
     cumsum_home_df = cumsum_home_df.sort_values(by=['running_id'])
     cumsum_away_df = cumsum_away_df.sort_values(by=['running_id'])
     
     print("CUMSUM Dataframes ready, start calculating values...")
-    dataframe['home_cumcount'] = dataframe.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount() + 1
-    dataframe['away_cumcount'] = dataframe.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount() + 1
+    dataframe['home_cumcount'] = dataframe.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()
+    dataframe['away_cumcount'] = dataframe.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()
     
     return dataframe
 
@@ -434,8 +439,6 @@ def add_rolling_columns(dataframe):
                 .rolling(window=4, min_periods=1).sum().reset_index()
 
     print('Rolling dataframeframes ready, calculating values...')
-    # home_df.to_excel('./SoccerPredictor_byRichardSzita/home_rolling_df.xlsx')
-    # away_df.to_excel('./SoccerPredictor_byRichardSzita/away_rolling_df.xlsx')      
        
     # Calculate rolling values 
     print('Rolling values: home_goals_rolling_avg')

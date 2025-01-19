@@ -112,3 +112,7 @@ data/Create_data/pipeline/models/
 data/Create_data/pipeline/models/away_poisson_model.joblib
 data/Create_data/pipeline/models/home_poisson_model.joblib
 data/Create_data/pipeline/models/poisson_scaler.joblib
+data/Create_data/pipeline/models/away_poisson_model.joblib
+data/Create_data/pipeline/models/home_poisson_model.joblib
+data/Create_data/pipeline/models/poisson_scaler.joblib
+data/Create_data/merge_data_prediction.pbix

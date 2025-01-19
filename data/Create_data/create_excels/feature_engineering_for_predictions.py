@@ -76,8 +76,6 @@ def flatten_stats(row):
 def calculate_team_form(team, df, window=5):
     team_home_results = df[df['home_encoded'] == team]['home_points'].rolling(window=window, min_periods=1).apply(lambda x: sum(x == 1)).sum()
     team_away_results = df[df['away_encoded'] == team]['away_points'].rolling(window=window, min_periods=1).apply(lambda x: sum(x == -1)).sum()
-    # print('team_home_results: ' + str(team_home_results))
-    # print('team_away_results: ' + str(team_away_results))
     form = (team_home_results + team_away_results) / 10
     return form
 
@@ -410,14 +408,14 @@ def add_cumulative_sums(dataframe):
     cumsum_away_df.loc[:, 'draw_cumsum'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['draw'].cumsum()
     cumsum_away_df.loc[:, 'away_count'] = cumsum_away_df.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()+1
     
-    cumsum_home_df = cumsum_home_df.sort_values(by=['running_id'])
-    cumsum_away_df = cumsum_away_df.sort_values(by=['running_id'])
-    cumsum_home_df.to_excel('./data_files/cumsum_home_df.xlsx')
-    cumsum_away_df.to_excel('./data_files/cumsum_away_df.xlsx')
+    # cumsum_home_df = cumsum_home_df.sort_values(by=['running_id'])
+    # cumsum_away_df = cumsum_away_df.sort_values(by=['running_id'])
+    # cumsum_home_df.to_excel('./data_files/cumsum_home_df.xlsx')
+    # cumsum_away_df.to_excel('./data_files/cumsum_away_df.xlsx')
     
     print("CUMSUM Dataframes ready, start calculating values...")
-    dataframe['home_cumcount'] = dataframe.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount() + 1
-    dataframe['away_cumcount'] = dataframe.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount() + 1
+    dataframe['home_cumcount'] = dataframe.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()+1
+    dataframe['away_cumcount'] = dataframe.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['running_id'].cumcount()+1
     
     return dataframe
 

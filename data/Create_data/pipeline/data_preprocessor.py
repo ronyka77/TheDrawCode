@@ -417,9 +417,7 @@ class DataPreprocessor:
                 }
             )
             raise   
-            
-   
-            
+     
         except Exception as e:
             self.logger.error(
                 f"Error encoding features: {str(e)}",
@@ -428,7 +426,8 @@ class DataPreprocessor:
                     'error_details': str(e)
                 }
             )
-            raise        
+            raise    
+            
     def _transform_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """Apply feature transformations.
         

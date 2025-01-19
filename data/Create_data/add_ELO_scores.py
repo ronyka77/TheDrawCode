@@ -19,13 +19,15 @@ class ELOCalculator:
         self.training_data_path = './data_files/model_data_training_newPoisson.xlsx'
         self.training_data_path_new = './data_files/model_data_training_withPoisson.xlsx'
         self.prediction_data_path = './data_files/model_data_prediction_newPoisson.xlsx'
-        self.api_data_path = './data_files/api_prediction_data_newPoisson.xlsx'
+        self.api_prediction_data_path = './data_files/api_football_prediction_newPoisson.xlsx'
+        self.api_training_data_path = './data_files/api_football_training_newPoisson.xlsx'
         
         # Define export paths
         self.training_export_path = './data_files/model_data_training_newPoisson.xlsx'
         self.training_export_path_new = './data_files/model_data_training_withPoisson.xlsx'
         self.prediction_export_path = './data_files/model_data_prediction_newPoisson.xlsx'
-        self.api_export_path = './data_files/api_prediction_data_newPoisson.xlsx'
+        self.api_prediction_export_path = './data_files/api_football_prediction_newPoisson.xlsx'
+        self.api_training_export_path = './data_files/api_football_training_newPoisson.xlsx'
         
 
         # ELO settings

@@ -15,7 +15,6 @@ from sklearn.model_selection import train_test_split
 # Add the project root directory to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
-print(f"project_root: {project_root}")
 
 # Change relative imports to absolute imports
 from logger import ExperimentLogger
@@ -166,8 +165,6 @@ class DataPipeline:
         
     def load_and_process_data(
         self,
-        base_path: str,
-        new_path: str,
         force_reload: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
         """Load and process data through the complete pipeline.
         
@@ -179,9 +176,8 @@ class DataPipeline:
         """
         try:
             # Step 1: Load raw data
-            self.logger.info(f"Loading raw data from {base_path}...")
-            raw_data = pd.read_excel(base_path)
-            raw_data = self.data_loader.preprocess_data(raw_data)
+            self.logger.info("Loading raw data...")
+            raw_data = self.data_loader.preprocess_data()
             
             # Step 2: Initial data processing
             self.logger.info("Processing data...")
@@ -196,89 +192,86 @@ class DataPipeline:
             preprocessed_data = self.feature_engineer.engineer_all_features(preprocessed_data)
             
             # Save preprocessed data to Excel
-            preprocessed_data.to_excel(f"{new_path}", index=False)
-            self.logger.info(f"Preprocessed data saved to {new_path}")
+            raw_data_path = "./data/prediction"
+            preprocessed_data.to_excel(f"{raw_data_path}/preprocessed_data_prediction.xlsx", index=False)
+            self.logger.info(f"Preprocessed data saved to {raw_data_path}/preprocessed_data_prediction.xlsx")
+            # Drop 'match_outcome' column if it exists
+            if 'match_outcome' in preprocessed_data.columns:
+                preprocessed_data.drop(columns=['match_outcome'], inplace=True)
+                self.logger.info("'match_outcome' column dropped from preprocessed data")
             
+            self.logger.info("Saving preprocessed data to parquet...")
+            preprocessed_data.to_parquet(f"{raw_data_path}/preprocessed_data_prediction.parquet", index=False)
+            self.logger.info(f"Preprocessed data saved to {raw_data_path}/preprocessed_data_prediction.parquet")
             
+            # Step 4: Split data
+            self.logger.info("Splitting data...")
+            split_data = self.data_splitter.split_data(
+                preprocessed_data,
+                target_col=self.processing_config.processing['target_column']
+            )
             
-            # # Drop 'match_outcome' column if it exists
-            # if 'match_outcome' in preprocessed_data.columns:
-            #     preprocessed_data.drop(columns=['match_outcome'], inplace=True)
-            #     self.logger.info("'match_outcome' column dropped from preprocessed data")
+            # Add feature engineering specific to splits
+            X_train = split_data['X_train']
+            X_val = split_data['X_val']
+            X_test = split_data['X_test']
             
-            # self.logger.info("Saving preprocessed data to parquet...")
-            # preprocessed_data.to_parquet(f"{raw_data_path}/preprocessed_data_prediction.parquet", index=False)
-            # self.logger.info(f"Preprocessed data saved to {raw_data_path}/preprocessed_data_prediction.parquet")
+            # Transform features after engineering
+            self.logger.info("Transforming features...")
+            X_train = self.data_transformer.fit_transform(X_train)
+            X_val = self.data_transformer.transform(X_val)
+            X_test = self.data_transformer.transform(X_test)
             
-            # # Step 4: Split data
-            # self.logger.info("Splitting data...")
-            # split_data = self.data_splitter.split_data(
-            #     preprocessed_data,
-            #     target_col=self.processing_config.processing['target_column']
-            # )
+            # Get target variables
+            y_train = split_data['y_train']
+            y_val = split_data['y_val']
+            y_test = split_data['y_test']
             
-            # # Add feature engineering specific to splits
-            # X_train = split_data['X_train']
-            # X_val = split_data['X_val']
-            # X_test = split_data['X_test']
+            self.logger.info(
+                "Data loading and processing completed",
+                extra={
+                    'train_shape': X_train.shape,
+                    'val_shape': X_val.shape,
+                    'test_shape': X_test.shape
+                }
+            )
+            # Save processed data using ProcessedDataManager
+            self.logger.info("Saving processed data...")
+            processed_data_manager = ProcessedDataManager(
+                base_path=self.pipeline_config.data_paths['processed_data_path'],
+                data_path=self.pipeline_config.data_paths['raw_data_path']
+            )
             
-            # # Transform features after engineering
-            # self.logger.info("Transforming features...")
-            # X_train = self.data_transformer.fit_transform(X_train)
-            # X_val = self.data_transformer.transform(X_val)
-            # X_test = self.data_transformer.transform(X_test)
+            data_to_save = {
+                'X_train': pd.DataFrame(X_train),
+                'X_val': pd.DataFrame(X_val),
+                'X_test': pd.DataFrame(X_test),
+                'y_train': pd.Series(y_train),
+                'y_val': pd.Series(y_val),
+                'y_test': pd.Series(y_test)
+            }
             
-            # # Get target variables
-            # y_train = split_data['y_train']
-            # y_val = split_data['y_val']
-            # y_test = split_data['y_test']
+            metadata = {
+                'train_shape': X_train.shape,
+                'val_shape': X_val.shape,
+                'test_shape': X_test.shape,
+                'feature_groups': list(self.feature_groups.keys()),
+                'target_distribution': y_train.value_counts(normalize=True).to_dict(),
+                'feature_count': X_train.shape[1],
+                'preprocessing_steps': [
+                    'train_val_test_split',
+                    'numerical_scaling',
+                    'categorical_encoding',
+                    'feature_engineering',
+                    'draw_specific_features'
+                ],
+                'timestamp': datetime.now().isoformat()
+            }
             
-            # self.logger.info(
-            #     "Data loading and processing completed",
-            #     extra={
-            #         'train_shape': X_train.shape,
-            #         'val_shape': X_val.shape,
-            #         'test_shape': X_test.shape
-            #     }
-            # )
-            # # Save processed data using ProcessedDataManager
-            # self.logger.info("Saving processed data...")
-            # processed_data_manager = ProcessedDataManager(
-            #     base_path=self.pipeline_config.data_paths['processed_data_path'],
-            #     data_path=self.pipeline_config.data_paths['raw_data_path']
-            # )
+            version_id = processed_data_manager.save_processed_data(data_to_save, metadata)
+            self.logger.info(f"Processed data saved with version ID: {version_id}")
             
-            # data_to_save = {
-            #     'X_train': pd.DataFrame(X_train),
-            #     'X_val': pd.DataFrame(X_val),
-            #     'X_test': pd.DataFrame(X_test),
-            #     'y_train': pd.Series(y_train),
-            #     'y_val': pd.Series(y_val),
-            #     'y_test': pd.Series(y_test)
-            # }
-            
-            # metadata = {
-            #     'train_shape': X_train.shape,
-            #     'val_shape': X_val.shape,
-            #     'test_shape': X_test.shape,
-            #     'feature_groups': list(self.feature_groups.keys()),
-            #     'target_distribution': y_train.value_counts(normalize=True).to_dict(),
-            #     'feature_count': X_train.shape[1],
-            #     'preprocessing_steps': [
-            #         'train_val_test_split',
-            #         'numerical_scaling',
-            #         'categorical_encoding',
-            #         'feature_engineering',
-            #         'draw_specific_features'
-            #     ],
-            #     'timestamp': datetime.now().isoformat()
-            # }
-            
-            # version_id = processed_data_manager.save_processed_data(data_to_save, metadata)
-            # self.logger.info(f"Processed data saved with version ID: {version_id}")
-            
-            # return X_train, X_val, X_test, y_train, y_val, y_test
-            return preprocessed_data
+            return X_train, X_val, X_test, y_train, y_val, y_test
             
         except Exception as e:
             self.logger.error(f"Error in data loading and processing: {str(e)}")
@@ -353,17 +346,11 @@ if __name__ == "__main__":
     logger = ExperimentLogger()
 
     base_config = load_config('base')
-    data_paths={k: Path(v) for k, v in base_config.get('data_paths', {}).items() }
-    
-    files = {
-        "prediction_base": 'data/prediction_raw/model_data_prediction_newPoisson.xlsx',
-        "training_base": 'data/prediction_raw/model_data_training_newPoisson.xlsx',
-        "training_new": 'data/prediction/preprocessed_data_training.xlsx',
-        "prediction_new": 'data/prediction/preprocessed_data_prediction.xlsx'
-    }
+    data_paths={
+                k: Path(v) for k, v in base_config.get('data_paths', {}).items()
+            }
     # Initialize DataPipeline
     data_pipeline = DataPipeline(logger=logger)
 
     # Run check_and_import_latest_parquet
-    data_pipeline.load_and_process_data(base_path=files['prediction_base'], new_path=files['prediction_new'])
-    data_pipeline.load_and_process_data(base_path=files['training_base'], new_path=files['training_new'])
+    data_pipeline.check_and_import_latest_parquet(data_paths=data_paths)
