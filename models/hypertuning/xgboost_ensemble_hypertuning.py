@@ -111,14 +111,14 @@ class EnsembleHypertuner:
                     'objective': 'binary:logistic',
                     'tree_method': 'hist',
                     'eta': trial.suggest_float('s1_eta', 0.001, 0.015),
-                    'min_child_weight': trial.suggest_int('s1_min_child_weight', 40, 80),
+                    'min_child_weight': trial.suggest_int('s1_min_child_weight', 60, 90),
                     'gamma': trial.suggest_float('s1_gamma', 2.0, 8.0),
                     'subsample': trial.suggest_float('s1_subsample', 0.7, 0.95),
                     'colsample_bytree': trial.suggest_float('s1_colsample_bytree', 0.7, 0.9),
-                    'scale_pos_weight': trial.suggest_float('s1_scale_pos_weight', 2.0, 3.5),
+                    'scale_pos_weight': trial.suggest_float('s1_scale_pos_weight', 2.5, 4.0),
                     'max_depth': trial.suggest_int('s1_max_depth', 4, 5),
-                    'reg_alpha': trial.suggest_float('s1_alpha', 0.1, 3.0),
-                    'reg_lambda': trial.suggest_float('s1_lambda', 0.3, 3.0),
+                    'reg_alpha': trial.suggest_float('s1_alpha', 0.5, 3.5),
+                    'reg_lambda': trial.suggest_float('s1_lambda', 0.5, 3.5),
                     'n_estimators': trial.suggest_int('s1_n_estimators', 11000, 20000),
                 }
                 
@@ -127,14 +127,14 @@ class EnsembleHypertuner:
                     'objective': 'binary:logistic',
                     'tree_method': 'hist',
                     'eta': trial.suggest_float('s2_eta', 0.001, 0.015),
-                    'min_child_weight': trial.suggest_int('s2_min_child_weight', 40, 80),
+                    'min_child_weight': trial.suggest_int('s2_min_child_weight', 60, 90),
                     'gamma': trial.suggest_float('s2_gamma', 2.0, 8.0),
                     'subsample': trial.suggest_float('s2_subsample', 0.7, 0.95),
                     'colsample_bytree': trial.suggest_float('s2_colsample_bytree', 0.7, 0.9),
-                    'scale_pos_weight': trial.suggest_float('s2_scale_pos_weight', 2.0, 3.5),
+                    'scale_pos_weight': trial.suggest_float('s2_scale_pos_weight', 2.5, 4.0),
                     'max_depth': trial.suggest_int('s2_max_depth', 4, 5),
-                    'reg_alpha': trial.suggest_float('s2_alpha', 0.1, 3.0),
-                    'reg_lambda': trial.suggest_float('s2_lambda', 0.3, 3.0),
+                    'reg_alpha': trial.suggest_float('s2_alpha', 0.5, 3.5),
+                    'reg_lambda': trial.suggest_float('s2_lambda', 0.5, 3.5),
                     'n_estimators': trial.suggest_int('s2_n_estimators', 11000, 20000),
                 }
                 
@@ -143,22 +143,22 @@ class EnsembleHypertuner:
                     'objective': 'binary:logistic',
                     'tree_method': 'hist',
                     'eta': trial.suggest_float('v_eta', 0.001, 0.015),
-                    'min_child_weight': trial.suggest_int('v_min_child_weight', 40, 80),
+                    'min_child_weight': trial.suggest_int('v_min_child_weight', 60, 90),
                     'gamma': trial.suggest_float('v_gamma', 2.0, 8.0),
                     'subsample': trial.suggest_float('v_subsample', 0.7, 0.95),
                     'colsample_bytree': trial.suggest_float('v_colsample_bytree', 0.7, 0.9),
-                    'scale_pos_weight': trial.suggest_float('v_scale_pos_weight', 2.0, 3.5),
+                    'scale_pos_weight': trial.suggest_float('v_scale_pos_weight', 2.5, 4.0),
                     'max_depth': trial.suggest_int('v_max_depth', 4, 5),
-                    'reg_alpha': trial.suggest_float('v_alpha', 0.1, 3.0),
-                    'reg_lambda': trial.suggest_float('v_lambda', 0.3, 3.0),
+                    'reg_alpha': trial.suggest_float('v_alpha', 0.5, 3.5),
+                    'reg_lambda': trial.suggest_float('v_lambda', 0.5, 3.5),
                     'n_estimators': trial.suggest_int('v_n_estimators', 11000, 20000),
                 }
                 
                 # Modified threshold ranges
-                threshold1 = trial.suggest_float('threshold1', 0.15, 0.25)  # Lower range for first stage
-                threshold2 = trial.suggest_float('threshold2', 0.40, 0.55)  # Lower range for second stage
+                threshold1 = trial.suggest_float('threshold1', 0.15, 0.25)
+                threshold2 = trial.suggest_float('threshold2', 0.45, 0.6)
                 voting_thresholds = [
-                    trial.suggest_float(f'v_threshold_{i}', 0.40, 0.55)  # Lower range for voting
+                    trial.suggest_float(f'v_threshold_{i}', 0.45, 0.6)
                     for i in range(5)
                 ]
                 
@@ -179,7 +179,9 @@ class EnsembleHypertuner:
                 voting.base_params['early_stopping_rounds'] = 500
                 
                 # Train with reduced verbosity
+                self.logger.info(f"Training two_stage model")
                 two_stage.fit(X_train, y_train, X_val, y_val)
+                self.logger.info(f"Training voting model")
                 voting.fit(X_train, y_train, X_val, y_val)
 
                 # Get probabilities
@@ -215,11 +217,13 @@ class EnsembleHypertuner:
                     weighted_score = (precision * precision_weight + recall * recall_weight)
                     
                     # Apply f1 multiplier to encourage balance
-                    score = weighted_score * f1
+                    score = weighted_score 
                     
                     # Apply minimum thresholds but with lower requirements
-                    if precision < 0.25 or recall < 0.1:
+                    if precision < 0.35 or recall < 0.15:
                         score *= 0.5
+                        
+                self.logger.info(f"Trial: {trial.number}")
                 self.logger.info(f"Trial parameters: {trial.params}")
                 self.logger.info(f"Score: {score:.4f}")
                 self.logger.info(f"Precision: {precision:.4f}")
@@ -278,15 +282,10 @@ def tune_ensemble_model():
     """Main function to tune the ensemble model."""
     logger = ExperimentLogger(experiment_name="xgboost_ensemble_hypertuning")
     experiment_name = "xgboost_ensemble_hypertuning"
-    artifact_dir = os.path.join(project_root, "mlflow_artifacts", experiment_name)
     temp_dir = setup_xgboost_temp_directory(logger, project_root)
        
     # Setup MLflow tracking with explicit artifact location
     setup_mlflow_tracking(experiment_name)
-    mlflow.set_experiment(experiment_name)
-    
-    # Set artifact location explicitly
-    os.environ['MLFLOW_ARTIFACT_ROOT'] = artifact_dir
 
     try:
         # Load and prepare data

@@ -33,10 +33,11 @@ selected_columns = get_selected_columns_draws()
 class DrawPredictor:
     """Predictor class for draw predictions using the stacked model."""
     
-    def __init__(self, run_id: str):
+    def __init__(self, run_id: str, experiment_id: str, mlruns_dir: str):
         """Initialize predictor with run ID."""
         self.run_id = run_id
-        model_path = Path(project_root) / "mlruns" / "2" / run_id / "artifacts"
+        self.experiment_id = experiment_id
+        model_path = Path(mlruns_dir) / experiment_id / run_id / "artifacts"
         
         try:
             # Load models using xgboost flavor instead of pyfunc
@@ -173,16 +174,16 @@ def _preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
     # ic("Final columns:", df.columns)
     return df
 
-def make_prediction(prediction_data, run_id: str) -> pd.DataFrame:
+def make_prediction(prediction_data, run_id: str, experiment_id: str, mlruns_dir: str) -> pd.DataFrame:
     """Make predictions and return results with probabilities."""
     try:
         # Initialize predictor
-        model_path = Path(project_root) / "mlruns" / "2" / run_id / "artifacts"
+        model_path = Path(mlruns_dir) / experiment_id / run_id / "artifacts"
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found at {model_path}")
             
         ic(f"Loading model from: {model_path}")
-        predictor = DrawPredictor(run_id)
+        predictor = DrawPredictor(run_id, experiment_id, mlruns_dir)
         
         # Keep a copy of running_id before prediction
         running_ids = prediction_data['running_id'].copy() if 'running_id' in prediction_data.columns else None
@@ -236,16 +237,12 @@ def main():
     project_root = Path(__file__).resolve().parents[1]
     data_path = project_root / "data/prediction/prediction_data.csv"
     experiment_name = "xgboost_ensemble_draw_model"
-    setup_mlflow_tracking(experiment_name=experiment_name)
+    mlruns_dir = setup_mlflow_tracking(experiment_name)
+    experiment_id = mlflow.get_experiment_by_name(experiment_name).experiment_id
     
     # Model run IDs to evaluate
     run_ids = [
-        "ce79e624e452469cb9dbc697a100f1c5",
-        "8e369a543fcd437e8e89c521ec3ef91d",
-        "9be0e3be588e44b79cb9728cead72789",
-        "8722820d134d41548b26f71b3424bcb1",
-        "62ec3a34222a465d92d2e33178a7ca84",
-        "85cf06d460914ebb9e2bf51e59f251d5"
+        "d762089f280f45dc89cbe8e6dc415141"
     ]
 
     best_precision = 0
@@ -280,12 +277,12 @@ def main():
             
             # predicted_df, precision = make_prediction(prediction_data_model, run_id)
             # Use MLruns directory structure
-            model_path = Path(f"{project_root}/mlruns/2/{run_id}/artifacts")
+            model_path = Path(mlruns_dir) / experiment_id / run_id / "artifacts"
             if not model_path.exists():
                 raise FileNotFoundError(f"Model not found at {model_path}")
                 
             # ic(f"Loading model from: {model_path}")
-            predictor = DrawPredictor(run_id)
+            predictor = DrawPredictor(run_id, experiment_id, mlruns_dir)
             
             # Make predictions
             results = predictor.predict(prediction_data_model)

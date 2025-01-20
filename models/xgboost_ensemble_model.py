@@ -14,7 +14,9 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 import xgboost as xgb
 from icecream import ic
 import mlflow
+import mlflow.xgboost
 from mlflow.models import ModelSignature, infer_signature
+from mlflow.tracking import MlflowClient
 
 # Add project root to Python path
 try:
@@ -92,16 +94,16 @@ class TwoStageEnsemble:
         self.stage1_params = {
             'objective': 'binary:logistic',
             'tree_method': 'hist',
-            'eta': 0.006128716244606513,
-            'min_child_weight': 75,
-            'gamma': 2.1222988230569064,
-            'subsample': 0.7208215966467505,
-            'colsample_bytree': 0.8032064055478403,
-            'scale_pos_weight': 2.315225912115465,
-            'max_depth': 4,
-            'reg_alpha': 0.3749508487213241,
-            'reg_lambda': 1.3405932185047005,
-            'n_estimators': 18154,
+            'eta': 0.006865559224954327,
+            'min_child_weight': 60,
+            'gamma': 7.806498688082427,
+            'subsample': 0.9078101439029029,
+            'colsample_bytree': 0.7068967670968938,
+            'scale_pos_weight': 2.8662440643452793,
+            'max_depth': 5,
+            'reg_alpha': 2.2327934748903853,
+            'reg_lambda': 1.5146242746941245,
+            'n_estimators': 11780,
             'early_stopping_rounds': 500
         }
         
@@ -109,23 +111,23 @@ class TwoStageEnsemble:
         self.stage2_params = {
             'objective': 'binary:logistic',
             'tree_method': 'hist',
-            'eta': 0.007497518200865267,
-            'min_child_weight': 70,
-            'gamma': 2.9992440961598756,
-            'subsample': 0.9280250574052775,
-            'colsample_bytree': 0.8451382203540232,
-            'scale_pos_weight': 2.2308303831271874,
+            'eta': 0.008124767669595323,
+            'min_child_weight': 69,
+            'gamma': 2.953207382098794,
+            'subsample': 0.7232914789349782,
+            'colsample_bytree': 0.7646895411848675,
+            'scale_pos_weight': 3.1368440226593757,
             'max_depth': 5,
-            'reg_alpha': 1.5334681008153,
-            'reg_lambda': 2.9155648894933877,
-            'n_estimators': 15043,
+            'reg_alpha': 1.487607571406742,
+            'reg_lambda': 3.3472678825444158,
+            'n_estimators': 18900,
             'early_stopping_rounds': 500
         }
         
         self.model1 = None
         self.model2 = None
-        self.threshold1 = 0.3487619167065675
-        self.threshold2 = 0.7448723915920985
+        self.threshold1 = 0.22655221256782027
+        self.threshold2 = 0.4925858455173652
         
     def fit(self, 
             X_train: pd.DataFrame, 
@@ -283,17 +285,17 @@ class VotingEnsemble:
         self.base_params = {
             'objective': 'binary:logistic',
             'tree_method': 'hist',
-            'eta': 0.006820204703663262,
-            'min_child_weight': 75,
-            'gamma': 3.8089250548106985,
-            'subsample': 0.9077980192919134,
-            'colsample_bytree': 0.700172984089638,
-            'scale_pos_weight': 3.1462983678621494,
+            'eta': 0.0027025804658614323,
+            'min_child_weight': 88,
+            'gamma': 7.058060647290297,
+            'subsample': 0.9392182884712076,
+            'colsample_bytree': 0.77474138934419,
+            'scale_pos_weight': 3.7283950450408563,
             'max_depth': 5,
-            'reg_alpha': 0.9386058665510197,
-            'reg_lambda': 2.516721398650805,
-            'n_estimators': 18876,
-            'early_stopping_rounds': 300
+            'reg_alpha': 0.7560452842648453,
+            'reg_lambda': 3.4087149623397104,
+            'n_estimators': 19346,
+            'early_stopping_rounds': 500
         }
         
         # Model-specific parameters
@@ -307,13 +309,13 @@ class VotingEnsemble:
         
         # Updated thresholds (optimized)
         self.thresholds = [
-            0.6897357654590663,
-            0.7034437604395418,
-            0.7168590930038107,
-            0.6979556780178647,
-            0.7197466182932057
+            0.5123415558451974,
+            0.523915129253955,
+            0.5235739487768032,
+            0.5805933205011075,
+            0.49127522750596514
         ]
-    
+        
     def fit(self, 
             X_train: pd.DataFrame, 
             y_train: pd.Series,
@@ -407,9 +409,9 @@ def train_ensemble_model() -> Dict[str, Any]:
     """Train and evaluate the ensemble model."""
     logger = ExperimentLogger()
     experiment_name = "xgboost_ensemble_draw_model"
-    artifact_location = setup_mlflow_tracking(experiment_name)
+    mlruns_dir = setup_mlflow_tracking(experiment_name)
+   
     temp_dir = setup_xgboost_temp_directory(logger, project_root)
-    mlflow.set_experiment(experiment_name)
     
     try:
         # Load data

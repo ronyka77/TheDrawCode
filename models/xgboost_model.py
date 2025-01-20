@@ -25,6 +25,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 import mlflow
 
+global project_root
 # Add project root to Python path
 try:
     project_root = Path(__file__).parent.parent
@@ -32,6 +33,7 @@ try:
         # Handle network path by using raw string
         project_root = Path(r"\\".join(str(project_root).split("\\")))
     sys.path.append(str(project_root))
+    
     print(f"Project root xgboost_model: {project_root}")
 except Exception as e:
     print(f"Error setting project root path: {e}")
@@ -44,6 +46,9 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 # Local imports
 from utils.logger import ExperimentLogger
 from utils.create_evaluation_set import get_selected_columns_draws, create_evaluation_sets_draws, import_training_data_draws_new, setup_mlflow_tracking
+
+experiment_name = "xgboost_draw_prediction"
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 class XGBoostModel(BaseEstimator, ClassifierMixin):
     """XGBoost model implementation with global training."""
@@ -59,15 +64,15 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         # Global training parameters
         # Start of Selection
         self.global_params = {
-            'learning_rate': 0.006126289868028037,
-            'min_child_weight': 74,
-            'gamma': 9.639051879081777,
-            'subsample': 0.5479909488996442,
-            'colsample_bytree': 0.7646179095099503,
-            'scale_pos_weight': 1.0064239424158705,
-            'reg_alpha': 3.75597569315955,
-            'reg_lambda': 2.2976340705068514,
-            'n_estimators': 10285,
+            'learning_rate': 0.0007652597759282612,
+            'min_child_weight': 200,
+            'gamma': 5.404506242667606,
+            'subsample': 0.813594644530502,
+            'colsample_bytree': 0.5242183592264711,
+            'scale_pos_weight': 9.54724852109992,
+            'reg_alpha': 13.317585343608865,
+            'reg_lambda': 6.784559639789116,
+            'n_estimators': 22156,
             'objective': 'binary:logistic',
             'tree_method': 'hist',
             'eval_metric': ['error', 'auc', 'aucpr'],
@@ -310,9 +315,10 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
                 self.logger.error(f"Error loading model: {str(e)}")
             raise
 
-def log_feature_importance(feature_importance, artifact_path):
+def log_feature_importance(feature_importance):
+    global project_root
     """Log feature importance values."""
-    os.makedirs(artifact_path, exist_ok=True)
+    os.makedirs(f"{project_root}/feature_importance", exist_ok=True)
     
     # Sort features by importance
     sorted_features = sorted(
@@ -322,12 +328,12 @@ def log_feature_importance(feature_importance, artifact_path):
     )
     
     # Save top 20 features to a text file
-    with open(f"{artifact_path}/top_60_features.txt", 'w', encoding='utf-8') as f:
+    with open(f"{project_root}/feature_importance/top_60_features.txt", 'w', encoding='utf-8') as f:
         for feature, importance in sorted_features[:60]:
             f.write(f"{feature}: {importance:.6f}\n")
     
     # Save all feature importance values as JSON
-    with open(f"{artifact_path}/feature_importance.json", 'w', encoding='utf-8') as f:
+    with open(f"{project_root}/feature_importance/feature_importance.json", 'w', encoding='utf-8') as f:
         json.dump(feature_importance, f, indent=2)
 
 def convert_int_columns(df):
@@ -339,13 +345,6 @@ def convert_int_columns(df):
 def train_with_mlflow():
     """Train XGBoost model with MLflow tracking."""
     logger = ExperimentLogger()
-    experiment_name = "xgboost_draw_prediction"
-    artifact_path = setup_mlflow_tracking(experiment_name)
-    
-    # Set artifact location
-    os.environ["MLFLOW_ARTIFACT_ROOT"] = artifact_path
-    
-    mlflow.set_experiment(experiment_name)
     
     features_train, target_train, features_test, target_test = import_training_data_draws_new()
     features_val, target_val = create_evaluation_sets_draws()

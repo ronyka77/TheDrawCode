@@ -310,6 +310,15 @@ class ApiFootball:
             return statistics
         else:
             self.logger.warning(f"No statistics found for fixture {fixture_id}")
+            try:
+                fixture_date_str = self.fixtures_collection.find_one({"fixture_id": fixture_id}, {"date": 1})["date"]
+                fixture_date = datetime.strptime(fixture_date_str, '%Y-%m-%d %H:%M')
+                if fixture_date < datetime(2025, 1, 1):
+                    self.fixtures_collection.delete_one({"fixture_id": fixture_id})
+                    self.logger.info(f"Fixture {fixture_id} dropped from MongoDB due to date constraint.")
+                    return {}
+            except Exception as e:
+                self.logger.error(f"Error checking date for fixture {fixture_id}: {e}")
             time.sleep(10)
             return {}
     
@@ -321,20 +330,26 @@ class ApiFootball:
         Returns:
             List[int]: List of fixture IDs without statistics that meet the criteria.
         """
-        target_league_ids = [
-            39, 40, #ENGLAND
-            61, 62, #FRANCE
-            78, 79, #GERMANY
-            88, #Netherlands
-            94, #Portugal
-            128, #Argentina
-            135, 136, #Italy  
-            140, 141, #SPAIN
-            203, #Turkey
-            207, #Switzerland
-            262, #Mexico
-            283 #Romania
-            ]
+        # target_league_ids = [
+        #     39, 40, #ENGLAND
+        #     61, 62, #FRANCE
+        #     78, 79, #GERMANY
+        #     88, #Netherlands
+        #     94, #Portugal
+        #     128, #Argentina
+        #     135, 136, #Italy  
+        #     140, 141, #SPAIN
+        #     203, #Turkey
+        #     207, #Switzerland
+        #     262, #Mexico
+        #     283 #Romania
+        #     ]
+        
+        league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
+        with open(league_ids_file_path, 'r') as f:
+            league_ids_data = json.load(f)
+        target_league_ids = [item['league_id'] for item in league_ids_data]
+        
         today = (datetime.now() - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M')
         print(today)
         query = {
@@ -353,7 +368,7 @@ class ApiFootball:
         Retrieves fixtures for each league ID found in 'league_ids.json'.
         """
         league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
-        seasons = [2022,2023]
+        seasons = [2021,2022,2024]
         try:
             with open(league_ids_file_path, 'r') as f:
                 league_ids_data = json.load(f)

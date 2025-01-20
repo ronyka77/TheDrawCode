@@ -13,9 +13,10 @@ from pymongo import MongoClient
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.create_evaluation_set import get_selected_columns_draws, get_real_scores_from_excel
+from utils.create_evaluation_set import get_selected_columns_draws, get_real_scores_from_excel, setup_mlflow_tracking
 
 selected_columns = get_selected_columns_draws()
+mlruns_dir = setup_mlflow_tracking("xgboost_draw_prediction")
 
 class DrawPredictor:
     """Predictor class for draw predictions using the stacked model."""
@@ -24,13 +25,7 @@ class DrawPredictor:
         """Initialize predictor with model URI."""
         # Set up MLflow tracking URI based on current environment
         current_dir = os.getcwd()
-        if current_dir.startswith('\\\\'): 
-            db_path = os.path.join(current_dir, 'mlflow.db')
-        else:
-            db_path = "./mlflow.db"
-            
-        # Set tracking URI to the SQLite database
-        mlflow.set_tracking_uri(f"sqlite:///{db_path}")
+        
         
         self.model = mlflow.xgboost.load_model(model_uri)
         self.required_columns = self._load_required_columns()
@@ -173,27 +168,11 @@ def make_prediction(prediction_data, model_uri) -> pd.DataFrame:
 def main():
     # Set up paths
     data_path = Path("./data/prediction/prediction_data.csv")
-    
-    # Get current directory for MLflow setup
-    current_dir = os.getcwd()
-    if current_dir.startswith('\\\\'): 
-        db_path = os.path.join(current_dir, 'mlflow.db')
-        artifact_path = os.path.join(current_dir, 'mlflow_artifacts')
-    else:
-        db_path = "./mlflow.db"
-        artifact_path = os.path.join(Path(__file__).parent, "mlflow_artifacts")
-    
-    # Set MLflow tracking URI
-    mlflow.set_tracking_uri(f"sqlite:///{db_path}")
    
     # Model URIs to evaluate
     model_uris = [
-        '87e1e29331334d68a50f5eb9be467009',
-        'c3ee9277fa2e451aad4ca29753125560',
-        '62ba6711d52c43cb8039d7dcfe3c62c5',
-        '78979d937d024d808d3a2ab028fcc073',
-        'd0c4d78f68184f03bc5c2948a1354806',
-        '253251e98e0d48c1a218ea9261830031'
+        'da08fdb512f44696b56c54026af24ba9',
+        '5d49d28c6eb24cf494886f1d8e0237d5'
     ]
 
     best_precision = 0

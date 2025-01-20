@@ -24,43 +24,20 @@ except Exception as e:
     print(f"Current directory create_evaluation_set: {os.getcwd().parent}")
 
 from utils.advanced_goal_features import AdvancedGoalFeatureEngineer
+from utils.mlflow_utils import MLFlowConfig, MLFlowManager
 
 # MLFLOW SETUP
 def setup_mlflow_tracking(experiment_name: str) -> str:
     """Configure MLflow tracking location"""
-    
-    # Create mlruns directory within project root
-    mlruns_dir = os.path.join(project_root, "mlruns")
-    os.makedirs(mlruns_dir, exist_ok=True)
-    
-    # Set up SQLite backend for MLflow
-    if str(project_root).startswith('\\'): 
-        # For network share
-        db_path = os.path.join(project_root, 'mlflow.db')
-        temp_artifacts = os.path.join(project_root, 'mlflow_artifacts')
-    else:
-        # Local machine setup - use project-specific temp directory
-        db_path = os.path.join(project_root, "mlflow.db")
-        temp_artifacts = os.path.join(project_root, "mlflow_artifacts")
-    
-    # Set MLflow tracking URI
-    print(f"Tracking URI: {db_path}")
-    mlflow.set_tracking_uri(f"sqlite:///{db_path}")
-    
-    # Get or create experiment
-    try:
-        experiment = mlflow.get_experiment_by_name(experiment_name)
-        if experiment is None:
-            mlflow.create_experiment(experiment_name)
-    except Exception as e:
-        print(f"Error with experiment creation/retrieval: {e}")
-        # If experiment exists, just set it
-        pass
-    
-    mlflow.set_experiment(experiment_name)
-    
-    return mlruns_dir
+    mlflow_manager = MLFlowManager()
+    mlflow_manager.setup_experiment(experiment_name)
+    return
 
+def sync_mlflow():
+    mlflow_manager = MLFlowManager()
+    mlflow_manager.backup_to_shared()
+    mlflow_manager.sync_with_shared()
+    return
 
 # GET TRAINING DATA FOR DRAWS 
 def get_selected_columns():
@@ -798,13 +775,7 @@ if __name__ == "__main__":
     # Define the file path and target column
     # update_training_data_for_draws()
     # print("Training data updated successfully")
-    update_prediction_data()
-    print("Prediction data updated successfully")
+    # update_prediction_data()
+    # print("Prediction data updated successfully")
     
-    # X_eval, y_eval = create_evaluation_sets_draws()
-    # X_train, y_train, X_test, y_test = import_training_data_draws_new()
-    # print(f"X_eval dtypes: {X_eval.dtypes.to_dict()}")
-    # print(f"X_train dtypes: {X_train.dtypes.to_dict()}")
-    # print(f"X_test dtypes: {X_test.dtypes.to_dict()}")
-    
-
+    sync_mlflow()

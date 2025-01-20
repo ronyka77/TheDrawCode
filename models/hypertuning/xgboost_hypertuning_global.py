@@ -18,9 +18,11 @@ sys.path.append(str(project_root))
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import create_evaluation_sets_draws, get_selected_columns_draws, import_training_data_draws_new
+from utils.create_evaluation_set import create_evaluation_sets_draws, get_selected_columns_draws, import_training_data_draws_new, setup_mlflow_tracking
 
 selected_columns = get_selected_columns_draws()
+experiment_name = "global_xgboost_hypertuning"
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 class GlobalHypertuner:
     """Global hyperparameter tuner for XGBoost model optimizing for validation metrics.
@@ -38,7 +40,7 @@ class GlobalHypertuner:
     DEFAULT_THRESHOLD: float = 0.53
     TARGET_PRECISION: float = 0.5
     TARGET_RECALL: float = 0.6
-    PRECISION_WEIGHT: float = 0.8
+    PRECISION_WEIGHT: float = 0.7
     RECALL_CAP: float = 0.30
 
     def __init__(self, 
@@ -103,34 +105,34 @@ class GlobalHypertuner:
             param = {
                 'objective': 'binary:logistic',
                 'tree_method': 'hist',
-                'early_stopping_rounds': 300,
+                'early_stopping_rounds': 500,
                 'eval_metric': ['error', 'auc', 'aucpr'],
-                # Center around best value of 0.002807
-                'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.01, log=True),
+                # Widen range for learning rate
+                'learning_rate': trial.suggest_float('learning_rate', 0.0005, 0.05, log=True),
                 
-                # Center around best value of 69
-                'min_child_weight': trial.suggest_int('min_child_weight', 40, 120),
+                # Widen range for min_child_weight
+                'min_child_weight': trial.suggest_int('min_child_weight', 20, 200),
                 
-                # Center around best value of 8.43
-                'gamma': trial.suggest_float('gamma', 4.0, 15.0),
+                # Widen range for gamma
+                'gamma': trial.suggest_float('gamma', 2.0, 20.0),
                 
-                # Center around best value of 0.747
-                'subsample': trial.suggest_float('subsample', 0.5, 0.95),
+                # Widen range for subsample
+                'subsample': trial.suggest_float('subsample', 0.4, 1.0),
                 
-                # Center around best value of 0.69
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 0.95),
+                # Widen range for colsample_bytree
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.4, 1.0),
                 
-                # Center around best value of 2.009
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 1.0, 5.0) * (0.26/safe_draw_rate),
+                # Widen range for scale_pos_weight
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.5, 10.0) * (0.26/safe_draw_rate),
                 
-                # Center around best value of 2.902
-                'reg_alpha': trial.suggest_float('reg_alpha', 1.0, 10.0, log=True),
+                # Widen range for reg_alpha
+                'reg_alpha': trial.suggest_float('reg_alpha', 0.1, 20.0, log=True),
                 
-                # Center around best value of 1.261
-                'reg_lambda': trial.suggest_float('reg_lambda', 0.5, 5.0, log=True),
+                # Widen range for reg_lambda
+                'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0, log=True),
                 
-                # Center around best value of 10496
-                'n_estimators': trial.suggest_int('n_estimators', 8000, 20000)
+                # Widen range for n_estimators
+                'n_estimators': trial.suggest_int('n_estimators', 5000, 25000)
             }
             
             model = xgb.XGBClassifier(**param)
@@ -163,6 +165,7 @@ class GlobalHypertuner:
             print(f"F1: {metrics['f1']:.4f}")
             print(f"Threshold: {threshold:.4f}")
             print(f"Predicted rate: {predicted_rate:.4f}")
+            print(f"Trial parameters: {param}")
             
 
             # Calculate normalized scores
@@ -170,17 +173,17 @@ class GlobalHypertuner:
             recall_score_value = metrics['recall'] / self.target_recall
             
             # Prioritize precision more heavily
-            precision_weight = 0.8
-            recall_weight = 0.2
+            precision_weight = 0.7
+            recall_weight = 0.3
             weighted_score = (precision_score_value * precision_weight + 
                             recall_score_value * recall_weight)
             
              # Add precision threshold penalty
             if metrics['precision'] < 0.38:
                 weighted_score *= 0.6
-            if metrics['precision'] > 0.85:
+            if metrics['precision'] > 0.70:
                 weighted_score *= 1.3
-            if metrics['recall'] < 0.30:
+            if metrics['recall'] < 0.20:
                 weighted_score *= 0.6
             if metrics['recall'] < 0.10:
                 weighted_score *= 0.2
@@ -197,6 +200,12 @@ class GlobalHypertuner:
             trial.set_user_attr('precision', metrics['precision'])
             trial.set_user_attr('recall', metrics['recall'])
             trial.set_user_attr('f1', metrics['f1'])
+           
+            self.logger.info(f"Metrics: {metrics}")
+            self.logger.info(f"Precision: {metrics['precision']}")
+            self.logger.info(f"Recall: {metrics['recall']}")
+            self.logger.info(f"F1: {metrics['f1']}")
+            self.logger.info(f"Threshold: {threshold}")
             
             return weighted_score
         except Exception as e:
@@ -321,7 +330,7 @@ class GlobalHypertuner:
             params = self.best_params.copy()
             params.update({
                 'objective': 'binary:logistic',
-                'early_stopping_rounds': 300,
+                'early_stopping_rounds': 500,
                 'eval_metric': ['error', 'auc', 'aucpr'],
                 'tree_method': 'hist'
             })
@@ -352,7 +361,7 @@ class GlobalHypertuner:
             
             # Get predictions from original model for metrics
             preds = model.predict_proba(features_val)[:, 1]
-            y_pred = (preds >= 0.55).astype(int)
+            y_pred = (preds >= 0.53).astype(int)
             
             metrics = {
                 'precision': precision_score(target_val, y_pred, zero_division=0),
@@ -387,31 +396,7 @@ class GlobalHypertuner:
     
 def tune_global_model():
     """Main function to tune the global model."""
-    logger = ExperimentLogger()
-    # Get current directory
-    current_dir = os.getcwd()
-    
-    # Set up SQLite backend for MLflow
-    if current_dir.startswith('\\\\'): 
-        # For network share, create SQLite DB in the network location
-        db_path = os.path.join(current_dir, 'mlflow.db')
-        artifact_path = os.path.join(current_dir, 'mlflow_artifacts')
-        
-        # Use SQLite backend
-        mlflow.set_tracking_uri(f"sqlite:///{db_path}")
-    else:
-        # Local machine setup
-        db_path = "./mlflow.db"
-        artifact_path = os.path.join(project_root, "mlflow_artifacts")
-        mlflow.set_tracking_uri(f"sqlite:///{db_path}")
-    
-    # Ensure artifact directory exists
-    os.makedirs(artifact_path, exist_ok=True)
-    
-    # Set artifact location
-    os.environ["MLFLOW_ARTIFACT_ROOT"] = artifact_path
-
-    mlflow.set_experiment("global_xgboost_hypertuning")
+    logger = ExperimentLogger(experiment_name="global_xgboost_hypertuning")
     
     try:
         # Initialize hypertuner with target metrics
@@ -453,7 +438,7 @@ def tune_global_model():
                 y_val,
                 X_test,
                 y_test,
-                n_trials=100
+                n_trials=200
             )
             
             mlflow.log_params(best_params)

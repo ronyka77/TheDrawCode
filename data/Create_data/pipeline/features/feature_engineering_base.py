@@ -515,7 +515,13 @@ class FeatureEngineer_base:
             df = df.copy()
             
             df['is_draw'] = (df['match_outcome'] == 2).astype(int)
-                
+            
+            all_teams = df['home_encoded'].unique() + df['away_encoded'].unique()
+            all_teams = np.unique(all_teams)
+            
+            all_matches = df[['running_id','home_encoded','away_encoded','date_encoded']].unique()
+            all_matches.sort('date_encoded',ascending=True)
+            
             # Momentum and Form Features
             if all(col in df.columns for col in ['home_goal_difference_rollingaverage', 'away_goal_difference_rollingaverage']):
                 df['goal_differential_trend'] = self.calculate_exponential_decay(df, 'home_goal_difference_rollingaverage') - \
