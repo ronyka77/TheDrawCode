@@ -46,7 +46,24 @@ class MongoDBFeatures:
         """
         try:
             normalized_data = []
+            
             for fixture in fixtures_with_stats:
+                 # Debug print to see the structure
+                print(f"Fixture structure: {fixture.keys()}")
+                print(f"Home team data: {fixture['home'].keys()}")
+                
+                # Extract home team stats - add safety checks
+                home_stats = fixture.get('home', {}).get('stats', {})
+                if not home_stats:
+                    print(f"Missing home stats for fixture: {fixture.get('fixture_id')}")
+                    continue
+                
+                # Extract away team stats - add safety checks    
+                away_stats = fixture.get('away', {}).get('stats', {})
+                if not away_stats:
+                    print(f"Missing away stats for fixture: {fixture.get('fixture_id')}")
+                    continue
+                    
                 fixture_id = fixture['fixture_id']
                 date = fixture['date']
                 league_id = fixture['league_id']
@@ -68,7 +85,6 @@ class MongoDBFeatures:
                 away_halftime_goals = fixture['score']['halftime']['away']
                 
                 # Extract home team stats
-                home_stats = fixture['home']['stats']
                 home_shots_on_goal = home_stats.get('shots_on_goal')
                 home_shots_off_goal = home_stats.get('shots_off_goal')
                 home_total_shots = home_stats.get('total_shots')
@@ -89,7 +105,6 @@ class MongoDBFeatures:
                 home_passes_accuracy = home_stats.get('passes_%')
                 
                 # Extract away team stats
-                away_stats = fixture['away']['stats']
                 away_shots_on_goal = away_stats.get('shots_on_goal')
                 away_shots_off_goal = away_stats.get('shots_off_goal')
                 away_total_shots = away_stats.get('total_shots')
@@ -184,6 +199,7 @@ class MongoDBFeatures:
             return fixtures_dataframe
         except Exception as e:
             print(f"Error normalizing fixtures data: {e}")
+            print(f"Error fixture: {fixture}")
             return pd.DataFrame()
     
     def export_to_excel(self, fixtures_dataframe: pd.DataFrame, file_path: str) -> None:

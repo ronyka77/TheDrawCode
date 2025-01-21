@@ -99,12 +99,14 @@ class EnsembleHypertuner:
                      y_train: pd.Series,
                      X_val: pd.DataFrame,
                      y_val: pd.Series,
+                     X_test: pd.DataFrame,
+                     y_test: pd.Series,
                      n_trials: int = 200) -> Dict[str, Any]:
         """Tune hyperparameters for both ensemble models."""
         
         study = optuna.create_study(direction='maximize')
         
-        def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val):
+        def objective(trial: optuna.Trial, X_train, y_train, X_val, y_val, X_test, y_test):
             try:
                 # Stage 1 Parameters
                 stage1_params = {
@@ -180,9 +182,9 @@ class EnsembleHypertuner:
                 
                 # Train with reduced verbosity
                 self.logger.info(f"Training two_stage model")
-                two_stage.fit(X_train, y_train, X_val, y_val)
+                two_stage.fit(X_train, y_train, X_test, y_test)
                 self.logger.info(f"Training voting model")
-                voting.fit(X_train, y_train, X_val, y_val)
+                voting.fit(X_train, y_train, X_test, y_test)
 
                 # Get probabilities
                 two_stage_probs = two_stage.predict_proba(X_val)[:, 1]
@@ -236,7 +238,7 @@ class EnsembleHypertuner:
         
         try:
             study.optimize(
-                lambda trial: objective(trial, X_train, y_train, X_val, y_val),
+                lambda trial: objective(trial, X_train, y_train, X_val, y_val, X_test, y_test),
                 n_trials=n_trials,
                 catch=(Exception,)
             )
@@ -311,15 +313,11 @@ def tune_ensemble_model():
                 "test_draws": y_test.mean()
             })
             
-            # Inspect data types before tuning
-            # print(f"X_train dtypes: {X_train.dtypes.to_dict()}")
-            # print(f"X_val dtypes: {X_val.dtypes.to_dict()}")
-            # print(f"X_test dtypes: {X_test.dtypes.to_dict()}")
-            
             # Tune models
             best_params = hypertuner.tune_ensemble(
                 X_train, y_train,
                 X_val, y_val,
+                X_test, y_test,
                 n_trials=200
             )
             
@@ -335,8 +333,8 @@ def tune_ensemble_model():
             voting.thresholds = best_params['voting']['thresholds']
 
             # Train and evaluate
-            two_stage.fit(X_train, y_train, X_val, y_val)
-            voting.fit(X_train, y_train, X_val, y_val)
+            two_stage.fit(X_train, y_train, X_test, y_test)
+            voting.fit(X_train, y_train, X_test, y_test)
 
             # Final evaluation
             def evaluate(X, y, prefix):

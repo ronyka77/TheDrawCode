@@ -295,13 +295,21 @@ class PoissonXGCalculator:
             api_prediction_data = pd.read_csv(api_prediction_path)
             api_training_data = pd.read_csv(api_training_path)
             
-            api_data = api_data.rename(columns={
+            api_training_data = api_training_data.rename(columns={
                 'home_possession_mean': 'Home_possession_mean',
                 'home_shot_on_target_mean': 'Home_shot_on_target_mean',
                 'away_goal_difference_cum': 'Away_goal_difference_cum',
                 'home_points_cum': 'Home_points_cum',
                 'away_points_cum': 'Away_points_cum'
             })
+            api_prediction_data = api_prediction_data.rename(columns={
+                'home_possession_mean': 'Home_possession_mean',
+                'home_shot_on_target_mean': 'Home_shot_on_target_mean',
+                'away_goal_difference_cum': 'Away_goal_difference_cum',
+                'home_points_cum': 'Home_points_cum',
+                'away_points_cum': 'Away_points_cum'
+            })
+            
             self.add_poisson_xG(training_data, 'training')
             self.add_poisson_xG(training_data_new, 'training_new')
             self.add_poisson_xG(prediction_data, 'prediction')

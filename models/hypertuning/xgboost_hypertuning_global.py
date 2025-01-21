@@ -396,7 +396,7 @@ class GlobalHypertuner:
     
 def tune_global_model():
     """Main function to tune the global model."""
-    logger = ExperimentLogger(experiment_name="global_xgboost_hypertuning")
+    logger = ExperimentLogger(experiment_name="global_xgboost_hypertuning", log_dir='./logs/xgboost_hypertuning')
     
     try:
         # Initialize hypertuner with target metrics

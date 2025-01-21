@@ -773,9 +773,9 @@ def import_training_data_goals(goal_type: str):
 
 if __name__ == "__main__":
     # Define the file path and target column
-    # update_training_data_for_draws()
-    # print("Training data updated successfully")
+    update_training_data_for_draws()
+    print("Training data updated successfully")
     # update_prediction_data()
     # print("Prediction data updated successfully")
     
-    sync_mlflow()
+    # sync_mlflow()

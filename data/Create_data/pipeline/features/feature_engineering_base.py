@@ -519,7 +519,7 @@ class FeatureEngineer_base:
             all_teams = df['home_encoded'].unique() + df['away_encoded'].unique()
             all_teams = np.unique(all_teams)
             
-            all_matches = df[['running_id','home_encoded','away_encoded','date_encoded']].unique()
+            all_matches = df[['running_id','home_encoded','away_encoded','date_encoded','is_draw']].unique()
             all_matches.sort('date_encoded',ascending=True)
             
             # Momentum and Form Features
@@ -541,19 +541,41 @@ class FeatureEngineer_base:
 
             # Timing and Context Features
             if 'is_draw' in df.columns and 'date_encoded' in df.columns:
-                df['days_since_last_draw'] = df.groupby('home_encoded')['is_draw'].apply(lambda x: (x == 1).groupby((x != 1).cumsum()).cumsum()).reset_index(level=0, drop=True)
-
+                df['home_last_draw_date'] = 0
+                df['away_last_draw_date'] = 0
+                
+                for index, row in df.iterrows():
+                    home_team = row['home_encoded']
+                    away_team = row['away_encoded']
+                    current_date = row['date_encoded']
+                    
+                    home_last_draw = all_matches[
+                        ((all_matches['home_encoded'] == home_team) | (all_matches['away_encoded'] == home_team)) &
+                        (all_matches['date_encoded'] < current_date) &
+                        (all_matches['is_draw'] == 1)
+                    ]['date_encoded'].max()
+                    
+                    away_last_draw = all_matches[
+                        ((all_matches['home_encoded'] == away_team) | (all_matches['away_encoded'] == away_team)) &
+                        (all_matches['date_encoded'] < current_date) &
+                        (all_matches['is_draw'] == 1)
+                    ]['date_encoded'].max()
+                    
+                    df.at[index, 'home_last_draw_date'] = home_last_draw if not pd.isna(home_last_draw) else 0
+                    df.at[index, 'away_last_draw_date'] = away_last_draw if not pd.isna(away_last_draw) else 0
+                    
+                df['home_days_since_last_draw'] = (df['date_encoded'] - df['home_last_draw_date']).dt.days
+                df['away_days_since_last_draw'] = (df['date_encoded'] - df['away_last_draw_date']).dt.days
+                
             if 'date_encoded' in df.columns:
                 df['season_phase'] = pd.cut(df['date_encoded'], bins=3, labels=['early', 'mid', 'late'])
                 for phase in ['early', 'mid', 'late']:
                     df[f'home_performance_{phase}'] = df.groupby(['home_encoded', 'season_phase'])['home_points_cum'].transform('mean')
                     df[f'away_performance_{phase}'] = df.groupby(['away_encoded', 'season_phase'])['Away_points_cum'].transform('mean')
 
-            if 'date_encoded' in df.columns:
                 df['home_fixture_congestion'] = df.groupby('home_encoded')['date_encoded'].rolling(window=14).count().reset_index(level=0, drop=True)
                 df['away_fixture_congestion'] = df.groupby('away_encoded')['date_encoded'].rolling(window=14).count().reset_index(level=0, drop=True)
 
-            if 'date_encoded' in df.columns:
                 df['home_rest_days'] = df.groupby('home_encoded')['date_encoded'].diff().dt.days
                 df['away_rest_days'] = df.groupby('away_encoded')['date_encoded'].diff().dt.days
                 df['rest_advantage'] = df['home_rest_days'] - df['away_rest_days']
@@ -573,12 +595,12 @@ class FeatureEngineer_base:
                                             abs(df['home_corners_rollingaverage'] - df['away_corners_rollingaverage'])
 
             if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean', 'home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_passes_rollingaverage', 'away_passes_rollingaverage']):
-                df['home_tactical_flexibility'] = df.groupby('home_encoded').rolling(window=5)['Home_possession_mean'].var().reset_index(level=0, drop=True) + \
-                                                df.groupby('home_encoded').rolling(window=5)['home_shots_rollingaverage'].var().reset_index(level=0, drop=True) + \
-                                                df.groupby('home_encoded').rolling(window=5)['home_passes_rollingaverage'].var().reset_index(level=0, drop=True)
-                df['away_tactical_flexibility'] = df.groupby('away_encoded').rolling(window=5)['away_possession_mean'].var().reset_index(level=0, drop=True) + \
-                                                df.groupby('away_encoded').rolling(window=5)['away_shots_rollingaverage'].var().reset_index(level=0, drop=True) + \
-                                                df.groupby('away_encoded').rolling(window=5)['away_passes_rollingaverage'].var().reset_index(level=0, drop=True)
+                df['home_tactical_flexibility'] = df['Home_possession_mean'] + \
+                                                df['home_shots_rollingaverage'] + \
+                                                df['home_passes_rollingaverage']
+                df['away_tactical_flexibility'] = df['away_possession_mean'] + \
+                                                df['away_shots_rollingaverage'] + \
+                                                df['away_passes_rollingaverage']
 
             # Historical Pattern Features
             if 'h2h_draws' in df.columns:
