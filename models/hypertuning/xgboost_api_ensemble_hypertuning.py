@@ -33,8 +33,8 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import create_evaluation_sets_draws, import_training_data_draws_new, setup_mlflow_tracking, get_selected_columns_draws
-from models.xgboost_ensemble_model import TwoStageEnsemble, VotingEnsemble
+from utils.create_evaluation_set import create_evaluation_sets_draws_api, import_training_data_draws_api, setup_mlflow_tracking, get_selected_api_columns_draws
+from models.xgboost_api_ensemble_model import TwoStageEnsemble, VotingEnsemble
 
 
 def setup_xgboost_temp_directory(logger: ExperimentLogger, project_root: Path) -> str:
@@ -83,7 +83,7 @@ class EnsembleHypertuner:
     """Hyperparameter tuner for ensemble XGBoost models."""
     
     def __init__(self, logger: Optional[ExperimentLogger] = None, temp_dir: str = None):
-        self.logger = logger or ExperimentLogger()
+        self.logger =  logger or ExperimentLogger(experiment_name="xgboost_api_ensemble_hypertuning", log_dir='./logs/xgboost_ensemble_hypertuning')
         
         # Set up XGBoost temp directory using the new function
         self.temp_dir = temp_dir or setup_xgboost_temp_directory(self.logger, project_root)
@@ -101,7 +101,7 @@ class EnsembleHypertuner:
                      y_val: pd.Series,
                      X_test: pd.DataFrame,
                      y_test: pd.Series,
-                     n_trials: int = 200) -> Dict[str, Any]:
+                     n_trials: int = 10) -> Dict[str, Any]:
         """Tune hyperparameters for both ensemble models."""
         
         study = optuna.create_study(direction='maximize')
@@ -282,8 +282,8 @@ class EnsembleHypertuner:
 
 def tune_ensemble_model():
     """Main function to tune the ensemble model."""
-    logger = ExperimentLogger(experiment_name="xgboost_ensemble_hypertuning")
-    experiment_name = "xgboost_ensemble_hypertuning"
+    logger = ExperimentLogger(experiment_name="xgboost_api_ensemble_hypertuning", log_dir='./logs/xgboost_ensemble_hypertuning')
+    experiment_name = "xgboost_api_ensemble_hypertuning"
     temp_dir = setup_xgboost_temp_directory(logger, project_root)
        
     # Setup MLflow tracking with explicit artifact location
@@ -291,8 +291,8 @@ def tune_ensemble_model():
 
     try:
         # Load and prepare data
-        X_train, y_train, X_test, y_test = import_training_data_draws_new()
-        X_val, y_val = create_evaluation_sets_draws()
+        X_train, y_train, X_test, y_test = import_training_data_draws_api()
+        X_val, y_val = create_evaluation_sets_draws_api()
         
         print(f"X_train: {X_train.shape}")
         print(f"X_val: {X_val.shape}")
@@ -301,7 +301,7 @@ def tune_ensemble_model():
         print(f"y_val: {y_val.shape}")
         print(f"y_test: {y_test.shape}")
         
-        with mlflow.start_run(run_name="ensemble_hypertuning"):
+        with mlflow.start_run(run_name="api_ensemble_hypertuning"):
             hypertuner = EnsembleHypertuner(logger=logger, temp_dir=temp_dir)
             # Log data statistics
             mlflow.log_params({
@@ -318,7 +318,7 @@ def tune_ensemble_model():
                 X_train, y_train,
                 X_val, y_val,
                 X_test, y_test,
-                n_trials=200
+                n_trials=70
             )
             
             # Train final models with best parameters

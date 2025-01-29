@@ -1,9 +1,14 @@
 import pymongo
 from typing import List, Dict
 import pandas as pd
+try:
+    # Set the configuration key
+    pd.set_option('future.no_silent_downcasting', True)
+except KeyError as e:
+    print(f"Configuration key not found: {e}")
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class MongoDBFeatures:
     """
@@ -46,20 +51,23 @@ class MongoDBFeatures:
         """
         try:
             normalized_data = []
+            error_count = 0
             for fixture in fixtures_with_stats:
                 # Debug print to see the structure
-                print(f"Fixture structure: {fixture.keys()}")
-                print(f"Home team data: {fixture['home'].keys()}")
+                # print(f"Fixture structure: {fixture.keys()}")
+                # print(f"Home team data: {fixture['home'].keys()}")
                 
                 # Extract home team stats - add safety checks
                 home_stats = fixture.get('home', {}).get('stats', {})
                 if not home_stats:
+                    error_count += 1
                     print(f"Missing home stats for fixture: {fixture.get('fixture_id')}")
                     continue
                 
                 # Extract away team stats - add safety checks    
                 away_stats = fixture.get('away', {}).get('stats', {})
                 if not away_stats:
+                    error_count += 1
                     print(f"Missing away stats for fixture: {fixture.get('fixture_id')}")
                     continue
                 
@@ -178,11 +186,11 @@ class MongoDBFeatures:
                     'away_passes_accuracy': away_passes_accuracy,
                     'away_passes': away_passes
                 })
-        
+
             fixtures_dataframe = pd.DataFrame(normalized_data)
-            
+            print(f"fixtures_dataframe: {fixtures_dataframe.shape}")
             fixtures_dataframe['date'] = pd.to_datetime(fixtures_dataframe['date'], format='mixed', utc=True).dt.strftime('%Y-%m-%d %H:%M')
-            
+            print(f"fixtures_dataframe: {fixtures_dataframe.shape}")
             for col in fixtures_dataframe.columns:
                 if fixtures_dataframe[col].dtype == 'object':
                     if fixtures_dataframe[col].str.contains('%').any():
@@ -190,7 +198,7 @@ class MongoDBFeatures:
                         if '_accuracy' not in col:
                             fixtures_dataframe.rename(columns={col: col + '_accuracy'}, inplace=True)
                         
-            pd.set_option('future.no_silent_downcasting', True)
+            # pd.set_option('future.no_silent_downcasting', True)
             fixtures_dataframe.fillna(0, inplace=True)
             fixtures_dataframe = fixtures_dataframe.infer_objects(copy=False)
             fixtures_dataframe.reset_index(drop=True, inplace=True)
@@ -199,6 +207,7 @@ class MongoDBFeatures:
         except Exception as e:
             print(f"Error normalizing fixtures data: {e}")
             print(f"Problem fixture: {fixture}")  # Print problematic fixture
+            print(f"Error count: {error_count}")
             return pd.DataFrame()
     
     def export_to_excel(self, fixtures_dataframe: pd.DataFrame, file_path: str) -> None:
@@ -450,36 +459,36 @@ class MongoDBFeatures:
                                               row['week_of_year'],
                                               'home_points',
                                               'away_points'), axis=1).ffill()
-            print('Rolling values: home_saves_rolling')
-            dataframe['home_saves_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_saves','away_saves'), axis=1).ffill()
-            print('Rolling values: home_shots_on_target_rolling')
-            dataframe['home_shots_on_target_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_shots_on_goal','away_shots_on_goal'), axis=1).ffill()
+            # print('Rolling values: home_saves_rolling')
+            # dataframe['home_saves_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_saves','away_saves'), axis=1).ffill()
+            # print('Rolling values: home_shots_on_target_rolling')
+            # dataframe['home_shots_on_target_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_shots_on_goal','away_shots_on_goal'), axis=1).ffill()
             print('Rolling values: home_passes_accuracy_rolling')
             dataframe['home_passes_accuracy_rolling'] = dataframe.apply(lambda row: 
                 self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
                                         row['league_encoded'],row['season_encoded'],
                                         row['year'],row['week_of_year'],
                                         'home_passes_accuracy','away_passes_accuracy'), axis=1).ffill()
-            print('Rolling values: home_fouls_rolling')
-            dataframe['home_fouls_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_fouls','away_fouls'), axis=1).ffill()
-            print('Rolling values: home_goal_difference_rolling')
-            dataframe['home_goal_difference_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_goal_difference','away_goal_difference'), axis=1).ffill()
+            # print('Rolling values: home_fouls_rolling')
+            # dataframe['home_fouls_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_fouls','away_fouls'), axis=1).ffill()
+            # print('Rolling values: home_goal_difference_rolling')
+            # dataframe['home_goal_difference_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_goal_difference','away_goal_difference'), axis=1).ffill()
             print('Rolling values: home_win_rolling')
             dataframe['home_win_rolling'] = dataframe.apply(lambda row: 
                 self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
@@ -498,48 +507,48 @@ class MongoDBFeatures:
                                         row['league_encoded'],row['season_encoded'],
                                         row['year'],row['week_of_year'],
                                         'home_red_cards','away_red_cards'), axis=1).ffill()
-            print('Rolling values: home_yellow_cards_rolling')
-            dataframe['home_yellow_cards_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_yellow_cards','away_yellow_cards'), axis=1).ffill()
+            # print('Rolling values: home_yellow_cards_rolling')
+            # dataframe['home_yellow_cards_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['home_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_yellow_cards','away_yellow_cards'), axis=1).ffill()
             print('Rolling values: away_points_rolling')
             dataframe['away_points_rolling'] = dataframe.apply(lambda row: 
                 self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
                                         row['league_encoded'],row['season_encoded'],
                                         row['year'],row['week_of_year'],
                                         'home_points','away_points'), axis=1).ffill()
-            print('Rolling values: away_saves_rolling')
-            dataframe['away_saves_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_saves','away_saves'), axis=1).ffill()
-            print('Rolling values: away_shots_on_target_rolling')
-            dataframe['away_shots_on_target_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_shots_on_goal','away_shots_on_goal'), axis=1).ffill()
+            # print('Rolling values: away_saves_rolling')
+            # dataframe['away_saves_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_saves','away_saves'), axis=1).ffill()
+            # print('Rolling values: away_shots_on_target_rolling')
+            # dataframe['away_shots_on_target_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_shots_on_goal','away_shots_on_goal'), axis=1).ffill()
             print('Rolling values: away_passes_accuracy_rolling')
             dataframe['away_passes_accuracy_rolling'] = dataframe.apply(lambda row: 
                 self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
                                         row['league_encoded'],row['season_encoded'],
                                         row['year'],row['week_of_year'],
                                         'home_passes_accuracy','away_passes_accuracy'), axis=1).ffill()
-            print('Rolling values: away_fouls_rolling')
-            dataframe['away_fouls_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_fouls','away_fouls'), axis=1).ffill()
-            print('Rolling values: away_goal_difference_rolling')
-            dataframe['away_goal_difference_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_goal_difference','away_goal_difference'), axis=1).ffill()
+            # print('Rolling values: away_fouls_rolling')
+            # dataframe['away_fouls_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_fouls','away_fouls'), axis=1).ffill()
+            # print('Rolling values: away_goal_difference_rolling')
+            # dataframe['away_goal_difference_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_goal_difference','away_goal_difference'), axis=1).ffill()
             print('Rolling values: away_win_rolling')
             dataframe['away_win_rolling'] = dataframe.apply(lambda row: 
                 self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
@@ -558,12 +567,12 @@ class MongoDBFeatures:
                                         row['league_encoded'],row['season_encoded'],
                                         row['year'],row['week_of_year'],
                                         'home_red_cards','away_red_cards'), axis=1).ffill()
-            print('Rolling values: away_yellow_cards_rolling')
-            dataframe['away_yellow_cards_rolling'] = dataframe.apply(lambda row: 
-                self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-                                        row['league_encoded'],row['season_encoded'],
-                                        row['year'],row['week_of_year'],
-                                        'home_yellow_cards','away_yellow_cards'), axis=1).ffill()
+            # print('Rolling values: away_yellow_cards_rolling')
+            # dataframe['away_yellow_cards_rolling'] = dataframe.apply(lambda row: 
+            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
+            #                             row['league_encoded'],row['season_encoded'],
+            #                             row['year'],row['week_of_year'],
+            #                             'home_yellow_cards','away_yellow_cards'), axis=1).ffill()
             
             print("Rolling averages added")
             return dataframe
@@ -606,6 +615,91 @@ class MongoDBFeatures:
             print(f"Error calculating rolling values(probably column not in rolling_colums list): {e}")
             return 0
 
+    def get_future_matches(self):
+        """
+        Retrieves all future fixtures from the MongoDB fixtures collection where score.fulltime.home is blank
+        and returns them as a pandas DataFrame with specific columns.
+
+        Returns:
+            pd.DataFrame: DataFrame containing future fixtures with selected columns.
+        """
+        today = datetime.utcnow()
+        two_weeks = (today + timedelta(days=14)).strftime('%Y-%m-%d %H:%M')
+        query = {
+            "score.fulltime.home": None,
+            "score.fulltime.away": None,
+            "date": {
+                "$lte": two_weeks
+            }
+        }
+        projection = {
+            "fixture_id": 1,
+            "away.team_id": 1,
+            "away.team_name": 1,
+            "date": 1,
+            "home.team_id": 1,
+            "home.team_name": 1,
+            "league_id": 1,
+            "league_name": 1,
+            "league_round": 1,
+            "league_season": 1,
+            "referee": 1,
+            "venue_id": 1,
+            "venue_name": 1
+        }
+        fixtures = self.fixtures_collection.find(query, projection)
+        fixture_list = list(fixtures)
+        
+        # Normalize home and away arrays
+        for fixture in fixture_list:
+            if 'home' in fixture and isinstance(fixture['home'], dict):
+                fixture.update({f"home_{key}": value for key, value in fixture['home'].items()})
+                del fixture['home']
+            if 'away' in fixture and isinstance(fixture['away'], dict):
+                fixture.update({f"away_{key}": value for key, value in fixture['away'].items()})
+                del fixture['away']
+        
+        # Create DataFrame and check for required columns
+        df = pd.DataFrame(fixture_list)
+        print(df.columns)
+        # Verify required columns exist
+        required_columns = {
+            'away_team_id': 'away_team_id',
+            'away_team_name': 'away_team_name',
+            'home_team_id': 'home_team_id',
+            'home_team_name': 'home_team_name'
+        }
+        
+        # Check for missing columns and handle them
+        missing_columns = [col for col in required_columns.keys() if col not in df.columns]
+        if missing_columns:
+            for col in missing_columns:
+                print(f"Missing column: {col}")
+                df[col] = None  # Add missing columns with None values
+        
+        # Select and rename columns
+        columns = [
+            'fixture_id', 'away_team_id', 'away_team_name', 
+            'date', 'home_team_id', 'home_team_name',
+            'league_id', 'league_name', 'league_round', 'league_season',
+            'referee', 'venue_id', 'venue_name'
+        ]
+        
+        df = df[columns]
+        df.columns = [
+            'fixture_id', 'away_team_id', 'away_team_name', 
+            'date', 'home_team_id', 'home_team_name',
+            'league_id', 'league_name', 'league_round', 'league_season',
+            'referee', 'venue_id', 'venue_name'
+        ]
+        
+        print(f"Found {len(df)} future fixtures without scores.")
+        export_path = 'data/Create_data/data_files/base/api_future_matches.xlsx'
+        df.to_excel(export_path, index=False)
+        print(f"Future matches exported to Excel: {export_path}")
+        return df
+
+
 def main():
     mongodb_features = MongoDBFeatures()
     print("Getting fixtures with stats")
@@ -614,10 +708,14 @@ def main():
     fixtures_dataframe = mongodb_features.normalize_fixtures_data(fixtures_with_stats)
     fixtures_dataframe_final = mongodb_features.add_features(fixtures_dataframe)
     print(f"Final dataframe shape: {fixtures_dataframe_final.shape}")
-
+    
     export_path = 'data/Create_data/data_files/base/api_football_current_features.xlsx'
     mongodb_features.export_to_excel(fixtures_dataframe_final, export_path)
     print("Data exported to Excel")
+    
+    print("Getting future matches")
+    future_matches = mongodb_features.get_future_matches()
+    print(f"Future matches shape: {future_matches.shape}")
 
 if __name__ == "__main__":
     main()

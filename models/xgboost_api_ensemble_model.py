@@ -36,7 +36,7 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import create_evaluation_sets_draws, import_training_data_draws_new, setup_mlflow_tracking
+from utils.create_evaluation_set import create_evaluation_sets_draws_api, import_training_data_draws_api, setup_mlflow_tracking
 
 def setup_xgboost_temp_directory(logger: ExperimentLogger, project_root: Path) -> str:
     """Set up and verify XGBoost temporary directory.
@@ -407,16 +407,16 @@ class VotingEnsemble:
 
 def train_ensemble_model() -> Dict[str, Any]:
     """Train and evaluate the ensemble model."""
-    logger = ExperimentLogger()
-    experiment_name = "xgboost_ensemble_draw_model"
+    logger = ExperimentLogger(experiment_name="xgboost_api_ensemble_model", log_dir='./logs/xgboost_ensemble_model')
+    experiment_name = "xgboost_api_ensemble_model"
     mlruns_dir = setup_mlflow_tracking(experiment_name)
    
     temp_dir = setup_xgboost_temp_directory(logger, project_root)
     
     try:
         # Load data
-        X_train, y_train, X_test, y_test = import_training_data_draws_new()
-        X_val, y_val = create_evaluation_sets_draws()
+        X_train, y_train, X_test, y_test = import_training_data_draws_api()
+        X_val, y_val = create_evaluation_sets_draws_api()
         
         ic(y_train.sum(), y_val.sum(), y_test.sum())  # Check class distribution
         
@@ -447,7 +447,7 @@ def train_ensemble_model() -> Dict[str, Any]:
             ic(f"{name} metrics:", metrics)
             return metrics
         
-        with mlflow.start_run(run_name="xgboost_ensemble_draw_model") as run:
+        with mlflow.start_run(run_name="xgboost_api_ensemble_model") as run:
             # Add k-fold validation
             kf = KFold(n_splits=5, shuffle=True, random_state=42)
             val_precisions = []

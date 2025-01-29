@@ -45,9 +45,9 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import get_selected_columns_draws, create_evaluation_sets_draws, import_training_data_draws_new, setup_mlflow_tracking
+from utils.create_evaluation_set import get_selected_api_columns_draws, create_evaluation_sets_draws_api, import_training_data_draws_api, setup_mlflow_tracking
 
-experiment_name = "xgboost_draw_model"
+experiment_name = "xgboost_api_model"
 mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 class XGBoostModel(BaseEstimator, ClassifierMixin):
@@ -64,31 +64,27 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         # Global training parameters
         # Start of Selection
         self.global_params = {
-            'colsample_bytree': 0.9999726750855427,
-            'draw_ratio_test': 0.26506935687263555,
-            'draw_ratio_train': 0.2650731584258325,
-            'draw_ratio_val': 0.2831669044222539,
-            'gamma': 17.40877852886544,
-            'learning_rate': 0.003699875137062915,
-            'min_child_weight': 167,
-            'n_estimators': 20259,
-            'precision_weight': 0.6,
-            'reg_alpha': 1.709558229999919,
-            'reg_lambda': 2.8889937655135887,
-            'scale_pos_weight': 2.979024690535834,
-            'subsample': 0.9993210763643339,
+            'colsample_bytree': 0.6326244049159165,
+            'gamma': 2.277462973881582,
+            'learning_rate': 0.012239960389414113,
+            'min_child_weight': 250,
+            'n_estimators': 19605,
+            'reg_alpha': 0.07956634443021414,
+            'reg_lambda': 0.3392475206143923,
+            'scale_pos_weight': 1.4113957295480144,
+            'subsample': 0.5399522463762816,
             'objective': 'binary:logistic',
             'tree_method': 'hist',
             'eval_metric': ['error', 'auc', 'aucpr'],
             'verbosity': 0,
-            'early_stopping': 100,
+            'early_stopping_rounds': 500,
             'random_state': 42
         }
         
         # Initialize other attributes
         self.model = None
         self.feature_importance = {}
-        self.selected_features = get_selected_columns_draws()
+        self.selected_features = get_selected_api_columns_draws()
         self.threshold = 0.55  # Default threshold for predictions
 
     def _validate_data(
@@ -348,20 +344,18 @@ def convert_int_columns(df):
 
 def train_with_mlflow():
     """Train XGBoost model with MLflow tracking."""
-    logger = ExperimentLogger()
+    logger = ExperimentLogger(experiment_name="xgboost_api_model", log_dir='./logs/xgboost_model')
     
-    features_train, target_train, features_test, target_test = import_training_data_draws_new()
-    features_val, target_val = create_evaluation_sets_draws()
+    features_train, target_train, features_test, target_test = import_training_data_draws_api()
+    features_val, target_val = create_evaluation_sets_draws_api()
     
-    with mlflow.start_run(run_name=f"xgboost_binary_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
+    with mlflow.start_run(run_name=f"xgboost_api_model"):
         # Log dataset info
         mlflow.log_params({
             "train_samples": len(features_train),
             "val_samples": len(features_val),
             "test_samples": len(features_test),
-            "n_features_original": features_train.shape[1],
-            "draw_ratio_train": (target_train == 1).mean(),
-            "draw_ratio_val": (target_val == 1).mean()
+            "n_features_original": features_train.shape[1]
         })
         
         # Create and train model

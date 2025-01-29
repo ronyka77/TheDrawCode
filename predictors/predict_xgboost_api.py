@@ -13,9 +13,9 @@ from pymongo import MongoClient
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.create_evaluation_set import get_selected_columns_draws, get_real_scores_from_excel, setup_mlflow_tracking
+from utils.create_evaluation_set import get_selected_api_columns_draws, get_real_api_scores_from_excel, setup_mlflow_tracking
 
-selected_columns = get_selected_columns_draws()
+
 mlruns_dir = setup_mlflow_tracking("xgboost_draw_model")
 
 class DrawPredictor:
@@ -28,18 +28,18 @@ class DrawPredictor:
         
         
         self.model = mlflow.xgboost.load_model(model_uri)
-        self.required_columns = self._load_required_columns()
+        self.required_columns = get_selected_api_columns_draws()
         # Load the threshold from the model if available
         self.threshold = getattr(self.model, 'threshold', 0.55)
     
-    @staticmethod
-    def _load_required_columns() -> list:
-        """Load required columns from serving payload."""
-        serving_payload = json.loads("""{
-          "dataframe_split": {
-            "columns": """ + json.dumps(selected_columns) + """ }
-        }""")  # Your full serving payload here
-        return serving_payload["dataframe_split"]["columns"]
+    # @staticmethod
+    # def _load_required_columns() -> list:
+    #     """Load required columns from serving payload."""
+    #     serving_payload = json.loads("""{
+    #       "dataframe_split": {
+    #         "columns": """ + json.dumps(selected_columns) + """ }
+    #     }""")  # Your full serving payload here
+    #     return serving_payload["dataframe_split"]["columns"]
     
     def _validate_input(self, df: pd.DataFrame) -> None:
         """Validate input dataframe has all required columns."""
@@ -49,12 +49,14 @@ class DrawPredictor:
     
     def predict(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Make predictions and return results with probabilities."""
-        self._validate_input(df)
-        predict_df = df[selected_columns]
+        
+        predict_df = df[self.required_columns]
+        # self._validate_input(predict_df)
         # Get probabilities
         probas = self.model.predict_proba(predict_df)
         predictions = self.model.predict(predict_df)
-        
+   
+
         # Prepare results
         results = {
             'predictions': predictions.tolist(),
@@ -64,7 +66,6 @@ class DrawPredictor:
             'positive_predictions': int(predictions.sum()),
             'prediction_rate': float(predictions.mean())
         }
-        
         return results
     
     def predict_single_match(self, row: pd.Series) -> Dict[str, Any]:
@@ -100,21 +101,28 @@ def _preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
                 print(f"Could not convert column {col}: {str(e)}")
                 continue
     
-    # Handle date encoding if needed
-    if 'Datum' in df.columns:
-        earliest_date = pd.to_datetime("2020-08-11")
-        df['date_encoded'] = (pd.to_datetime(df['Datum']) - earliest_date).dt.days
-        df['date_encoded'] = df['date_encoded'].astype(int)
-    
     return df
 
-def make_prediction(prediction_data, model_uri) -> pd.DataFrame:
+def make_prediction(prediction_data, model_uri, selected_columns) -> pd.DataFrame:
     """Make predictions and return results with probabilities."""
     try:
         # Initialize predictor
         predictor = DrawPredictor(model_uri)
-        
+
         prediction_df = prediction_data.copy()
+
+        print(f"len(prediction_df): {len(prediction_df)}")
+        
+        # Check if 'match_outcome' exists before creating 'is_draw'
+        if 'match_outcome' in prediction_df.columns:
+            prediction_df['is_draw'] = prediction_df['match_outcome'] == 2
+            prediction_df['is_draw'] = prediction_df['is_draw'].astype(int)
+        else:
+            # If 'match_outcome' doesn't exist, set 'is_draw' to None
+            prediction_df['is_draw'] = None
+            print("match_outcome not found in prediction_df")
+        
+        prediction_data = prediction_data[selected_columns]
         
         # Make predictions
         results = predictor.predict(prediction_data)
@@ -122,22 +130,25 @@ def make_prediction(prediction_data, model_uri) -> pd.DataFrame:
         # Add predictions to dataframe
         prediction_df['draw_predicted'] = results['predictions']
         prediction_df['draw_probability'] = [round(prob, 2) for prob in results['draw_probabilities']]
-        prediction_df['date_encoded'] = prediction_data['date_encoded']
         
         # Get real scores from MongoDB
-        if 'running_id' in prediction_df.columns:
-            real_scores = get_real_scores_from_excel(prediction_df['running_id'].tolist())
-            
+        if 'fixture_id' in prediction_df.columns:
+            real_scores = get_real_api_scores_from_excel(prediction_df['fixture_id'].tolist())
+
+
             # Add real results to output
             real_scores_df = pd.DataFrame.from_dict(real_scores, orient='index')
             real_scores_df.reset_index(inplace=True)
-            real_scores_df.rename(columns={'index': 'running_id'}, inplace=True)
-            
-            # Merge prediction_df with real_scores_df on running_id
-            prediction_df = prediction_df.merge(real_scores_df, on='running_id', how='left')
+            real_scores_df.rename(columns={'index': 'fixture_id'}, inplace=True)
+
+
+            # Merge prediction_df with real_scores_df on fixture_id
+            columns_to_add = [col for col in real_scores_df.columns if col not in prediction_df.columns]
+            prediction_df = prediction_df.merge(real_scores_df[['fixture_id'] + columns_to_add], on='fixture_id', how='left')
             
             # Calculate accuracy metrics
-            matches_with_results = prediction_df[prediction_df['is_draw'].notna()]
+            matches_with_results = prediction_df
+            
             if len(matches_with_results) > 0:
                 accuracy = (matches_with_results['draw_predicted'] == 
                             matches_with_results['is_draw']).mean()
@@ -163,35 +174,46 @@ def make_prediction(prediction_data, model_uri) -> pd.DataFrame:
         
     except Exception as e:
         print(f"Error during prediction: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Traceback: {e.__traceback__}")
+        print(f"Full exception details: {e.__dict__ if hasattr(e, '__dict__') else 'No additional details'}")
         raise
         
 def main():
-    # Set up paths
-    data_path = Path("./data/prediction/prediction_data.csv")
-   
-    # Model URIs to evaluate
-    model_uris = [
-        'da08fdb512f44696b56c54026af24ba9',
-        '5d49d28c6eb24cf494886f1d8e0237d5',
-        '15bf37e511e84007980b636af5692a06',
-        '60b3b68ace6d49e292acbf69a96c8d01'
-    ]
-
+    
+    
     best_precision = 0
     best_model_uri = None
     best_predictions = None
+    # Model URIs to evaluate
+    model_uris = [
+        '748f41c0dd1549b2902059943ceb138b',
+        '089521ea475843e8a0ca5bce95e16917',
+        '78bb6d9f63464c7795d37057b9a6b6da',
+        '37541534fb6146f9bb7dddd45f475dc9',
+        '2213b64028e64040a7f6cb43954c59bf',
+        '0384e6ebda00434788ead3c3bb7710fc',
+        '89cfa2d46f894f1ea2ff6e3addf31b6c',
+        '7cadcde8111f47739846a2d13b685756',
+        'bfe4f50485d1423d9de264ccea3f5c48',
+        'c8ad0c45ebd6492ea59ede02ef324880'
+    ]
     
     # Load and preprocess prediction data
-    prediction_df = pd.read_csv(data_path, decimal=',')
+    data_path = Path("./data/prediction/api_prediction_data.csv")
+    prediction_df = pd.read_csv(data_path)
     prediction_data = _preprocess_data(prediction_df)
     print(f"Loaded {len(prediction_data)} matches for prediction")
+    
+    selected_columns = get_selected_api_columns_draws()
+    print(f"len(selected_columns): {len(selected_columns)}")
     
     # Evaluate each model
     for uri in model_uris:
         try:
             uri_full = f"runs:/{uri}/model_global"
-            predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full)
-            
+            predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full, selected_columns)
+        
             if precision > best_precision and draws_recall > 0.2:
                 best_precision = precision
                 best_model_uri = uri
@@ -211,7 +233,7 @@ def main():
         predicted_df = best_predictions
    
     # Save results
-    output_path = Path("./data/prediction/predictions_xgboost.xlsx")
+    output_path = Path("./data/prediction/predictions_xgboost_api.xlsx")
     predicted_df.to_excel(output_path, index=False)
     print(f"\nPredictions saved to: {output_path}")
 

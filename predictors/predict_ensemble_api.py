@@ -234,16 +234,14 @@ def make_prediction(prediction_data, run_id: str, experiment_id: str, mlruns_dir
 
 def main():
     # Set up paths
-    project_root = Path(__file__).resolve().parents[1]
-    data_path = project_root / "data/prediction/prediction_data.csv"
+    data_path = project_root / "data/prediction/api_prediction_data.csv"
     experiment_name = "xgboost_ensemble_draw_model"
     mlruns_dir = setup_mlflow_tracking(experiment_name)
     experiment_id = mlflow.get_experiment_by_name(experiment_name).experiment_id
     
     # Model run IDs to evaluate
     run_ids = [
-        "d762089f280f45dc89cbe8e6dc415141",
-        "bd9e9eec9e974563b665ac2d92beda8e"
+        "c5ed1feedfa8412ea36dee15bce048cb"
     ]
 
     best_precision = 0

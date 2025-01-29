@@ -346,75 +346,113 @@ def update_prediction_data():
     except Exception as e:
         print(f"Error updating prediction data: {str(e)}")
 
+def update_api_training_data_for_draws():
+    """
+    Update training data for draws by adding advanced goal features and saving to training_data.xlsx
+    """
+    try:
+        # Load existing training data
+        data_path = "data/api_training_final.xlsx"
+        data = pd.read_excel(data_path)
 
-# GET NEW TRAINING DATA FOR DRAWS 
-# def get_selected_columns_draws():
-#     selected_columns_new = [
-#         "h2h_draw_rate", #marad
-#         "h2h_draws",  #marad
-#         "historical_draw_tendency", #marad
-#         "combined_draw_rate", #marad
-#         "away_h2h_wins", #marad
-#         "home_h2h_dominance", #marad
-#         "home_h2h_wins", #marad
-#         "home_historical_strength", #marad
-#         "league_home_draw_rate", #marad
-#         "form_weighted_xg_diff",  #marad
-#         "away_draw_rate", #marad
-#         "h2h_matches", #marad
-#         "home_draw_rate", #marad
-#         "elo_difference", #marad
-#         "elo_similarity_form_similarity", #marad
-#         "home_team_elo", #marad
-#         "away_historical_strength", #marad
-#         "Away_offsides_mean", #marad
-#         "home_corners_rollingaverage", #marad!!!
-#         "Away_points_cum", #marad
-#         "elo_similarity", #marad
-#         "away_h2h_dominance", #marad
-#         "Home_points_cum",
-#         "weighted_h2h_draw_rate",
-#         "position_equilibrium",
-#         "away_corners_mean",
-#         "home_avg_attendance",
-#         "Home_team_matches",
-#         "date_encoded", #marad
-#         "away_team_elo",
-#         "home_poisson_xG",
-#         "away_crowd_resistance",  #marad
-#         "h2h_avg_goals",  #marad
-#         "home_passing_efficiency", #marad
-#         "home_defense_index",
-#         "away_possession_impact",
-#         "Home_draws",
-#         "venue_encoded",
-#         "league_draw_rate_composite",
-#         "league_away_draw_rate",
-#         "home_form_weighted_xg",
-#         "league_draw_rate",
-#         "league_position_impact",
-#         "league_season_stage_draw_rate",
-#         "league_competitiveness",
-#         "ref_goal_tendency",
-#         "Home_passes_mean",
-#         "home_attack_strength",
-#         "Away_saves_mean",
-#         "mid_season_factor",
-#         "away_avg_attendance",
-#         "away_total_strength",
-#         "home_interceptions_mean",
-#         "away_shot_on_target_rollingaverage",
-#         "referee_foul_rate",
-#         "home_average_points",
-#         "Home_offsides_mean",
-#         "Away_goal_difference_cum",
-#         "home_style_compatibility",
-#         "referee_goals_per_game",
-#         "season_progress",
-#         "Away_fouls_mean",
-#         "form_stability"
-#     ]
-#     return selected_columns_new
+        # Initialize the feature engineer
+        feature_engineer = AdvancedGoalFeatureEngineer()
+
+        # Add advanced goal features
+        updated_data = feature_engineer.add_goal_features(data)
+        print(updated_data.shape)
+
+        # Save updated data back to Excel
+        updated_data.to_excel(data_path, index=False)
+
+    except Exception as e:
+        print(f"Error updating training data for draws: {str(e)}")
+
+def update_api_prediction_eval_data():
+    """
+    Update prediction data by adding advanced goal features and saving to predictions_eval.xlsx.
+    """
+    try:
+        # Load existing prediction data
+        data_path = "data/prediction/api_prediction_final.xlsx"
+        data = pd.read_excel(data_path)
+        
+        # Initialize the feature engineer
+        feature_engineer = AdvancedGoalFeatureEngineer()
+
+        # Add advanced goal features
+        updated_data = feature_engineer.add_goal_features(data)
+        print(f"Updated prediction data shape: {updated_data.shape}")
+
+        # Save updated data back to Excel
+        updated_data.to_excel(data_path, index=False)
+
+    except Exception as e:
+        print(f"Error updating prediction data: {str(e)}")
+
+def update_api_prediction_data():
+    """
+    Update prediction data by adding advanced goal features and saving to predictions_eval.xlsx.
+    """
+    try:
+        # Load existing prediction data
+        data_path = "data/prediction/api_prediction_data.csv"
+        data_path_new = "data/prediction/api_prediction_data_new.csv"
+        data = pd.read_csv(data_path)
+        # Load existing prediction data
+        data_path_eval = "data/prediction/api_prediction_eval.xlsx"
+        data_eval = pd.read_excel(data_path_eval)
+        
+        # Initialize the feature engineer
+        feature_engineer = AdvancedGoalFeatureEngineer()
+
+        # Add advanced goal features
+        updated_data = feature_engineer.add_goal_features(data)
+        print(f"Updated prediction data shape: {updated_data.shape}")
+
+        # Merge with api_prediction_eval but only add columns which are not exists in prediction_data
+        merged_data = merge_and_append(updated_data, data_eval)
+        
+        # Save updated data back to Excel
+        merged_data.to_csv(data_path_new, index=False)
+
+    except Exception as e:
+        print(f"Error updating prediction data: {str(e)}")
+
+def merge_and_append(updated_data, data_eval):
+    """
+    Merge two DataFrames:
+    - For same columns: Append rows from data_eval to the bottom of updated_data.
+    - For new columns: Add new columns from data_eval to updated_data.
+    
+    Parameters:
+        updated_data (pd.DataFrame): The primary DataFrame to be updated.
+        data_eval (pd.DataFrame): The DataFrame to merge and append.
+        on (str): The column to merge on (default: 'fixture_id').
+    
+    Returns:
+        pd.DataFrame: The merged and updated DataFrame.
+    """
+    # Identify common and new columns
+    common_columns = [col for col in updated_data.columns if col in data_eval.columns]
+    new_columns = [col for col in updated_data.columns if col not in data_eval.columns]
+    
+    # Append rows for common columns
+    merged_data = pd.concat(
+        [data_eval, updated_data[common_columns]],
+        axis=0,
+        ignore_index=True
+    )
+    
+    # Add new columns
+    for col in new_columns:
+        merged_data[col] = updated_data[col]
+    
+    # Print updated shape
+    print(f"Updated prediction data shape after merge: {merged_data.shape}")
+    return merged_data
+
+# CREATE EVALUATION SETS
 def get_selected_columns_draws():
     selected_columns = [
         # Very High Impact (>0.01)
@@ -617,7 +655,371 @@ def create_evaluation_sets_draws():
     return X, y
 
 
+#  FOR API
+def get_selected_api_columns_draws():
+    selected_columns = [
+        'referee_draw_rate',                         # 0.0922
+        'venue_draw_rate',                           # 0.0676
+        'Away_goal_difference_cum',                  # 0.0305
+        'xg_momentum_similarity',                    # 0.0211
+        'home_poisson_xG',                           # 0.0188
+        'away_poisson_xG',                           # 0.0164
+        'home_goal_difference_rollingaverage',       # 0.0159
+        'away_xg_momentum',                          # 0.0144
+        'league_draw_rate_composite',                # 0.0143
+        'away_goal_difference_rollingaverage',       # 0.0141
+        'draw_xg_indicator',                         # 0.0110
+        'away_performance',                          # 0.0098
+        'away_average_points',                       # 0.0097
+        'league_draw_rate',                          # 0.0094
+        'home_draw_rate',                            # 0.0090
+        'Away_fouls_mean',                           # 0.0081
+        'away_days_since_last_draw',                 # 0.0079
+        'Away_offsides_mean',                        # 0.0077
+        'xg_form_equilibrium',                       # 0.0076
+        'league_away_draw_rate',                     # 0.0075
+        'home_shots_on_target_accuracy_rollingaverage', # 0.0073
+        'home_corners_mean',                         # 0.0072
+        'form_weighted_xg_diff',                     # 0.0072
+        'away_league_position',                      # 0.0071
+        'away_offensive_sustainability',             # 0.0070
+        'Home_offsides_mean',                        # 0.0070
+        'referee_goals_per_game',                    # 0.0070
+        'defensive_stability',                       # 0.0069
+        'seasonal_draw_pattern',                     # 0.0068
+        'Home_fouls_mean',                           # 0.0066
+        'historical_draw_tendency',                  # 0.0065
+        'ref_goal_tendency',                         # 0.0065
+        'home_corners_rollingaverage',               # 0.0064
+        'away_shots_on_target_accuracy_rollingaverage', # 0.0064
+        'away_corners_rollingaverage',               # 0.0061
+        'away_defense_index',                        # 0.0061
+        'away_possession_mean',                      # 0.0061
+        'avg_league_position',                       # 0.0059
+        'mid_season_factor',                         # 0.0058
+        'away_win_rate',                             # 0.0058
+        'weighted_h2h_draw_rate',                    # 0.0058
+        'fixture_id',                                # 0.0058
+        'combined_draw_rate',                        # 0.0057
+        'possession_balance',                        # 0.0056
+        'form_stability',                            # 0.0056
+        'draw_propensity_score',                     # 0.0056
+        'home_saves_rollingaverage',                 # 0.0055
+        'away_season_form',                          # 0.0055
+        'home_defense_index',                        # 0.0055
+        'Away_saves_mean',                           # 0.0054
+        'away_form_stability',                       # 0.0054
+        'away_corners_mean',                         # 0.0053
+        'home_passing_efficiency',                   # 0.0053
+        'Home_possession_mean',                      # 0.0053
+        'home_offensive_sustainability',             # 0.0052
+        'away_form_weighted_xg',                     # 0.0052
+        'away_saves_rollingaverage',                 # 0.0051
+        'home_win_rate',                             # 0.0050
+        'home_crowd_factor',                         # 0.0050
+        'home_average_points',                       # 0.0050
+        'Home_saves_mean'                            # 0.0050
+    ]
+    
+    return selected_columns
+
+def import_training_data_draws_api():
+    """Import training data for draw predictions."""
+    data_path = "data/api_training_final.xlsx"
+    data = pd.read_excel(data_path)
+    
+    # Create target variable
+    data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+    
+    # Get selected columns
+    selected_columns = get_selected_api_columns_draws()
+    
+    # Replace inf and nan values
+    data = data.replace([np.inf, -np.inf], 0)
+    data = data.fillna(0)
+    
+    for col in data.columns:
+        data[col] = pd.to_numeric(data[col], errors='coerce')
+    
+    # Convert all numeric-like columns (excluding problematic_cols that have already been handled)
+    for col in data.columns:
+        try:
+            # Convert string numbers with either dots or commas
+            data[col] = (data[col].astype(str)
+                        .str.strip()
+                        .str.strip("'\"")
+                        .str.replace(' ', '')
+                        .str.replace(',', '.')
+                        .replace('', '0')  # Replace empty strings with 0
+                        .astype(float))
+        except (ValueError, AttributeError) as e:
+            print(f"Training data: Could not convert column {col}: {str(e)}")
+            data = data.drop(columns=[col], errors='ignore')
+            continue
+        
+    # Define integer columns that should remain as int64
+    int_columns = [
+        'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
+        'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
+    ]
+    
+    # Convert integer columns back to int64
+    for col in int_columns:
+        if col in data.columns:
+            data[col] = data[col].astype('int64')
+    
+    # Verify all selected columns are numeric
+    for col in selected_columns:
+        if data[col].dtype == 'object':
+            print(f"Training data: Column {col} is still object type after conversion")
+            selected_columns.remove(col)
+    
+    # Split into train and test sets
+    train_data, test_data = train_test_split(
+        data,
+        test_size=0.2,
+        random_state=42,
+        stratify=data['is_draw']
+    )
+    
+    # Select features and target
+    X_train = train_data[selected_columns]
+    y_train = train_data['is_draw']
+    X_test = test_data[selected_columns]
+    y_test = test_data['is_draw']
+    
+    # Add verification of dtypes
+    print("\nVerifying final dtypes:")
+    non_numeric_cols = X_train.select_dtypes(include=['object']).columns
+    if len(non_numeric_cols) > 0:
+        print(f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
+    
+    print("\nInteger columns dtypes:")
+    for col in int_columns:
+        if col in X_train.columns:
+            print(f"{col}: {X_train[col].dtype}")
+    
+    return X_train, y_train, X_test, y_test
+
+def import_feature_select_draws_api():
+    """Import training data for draw predictions."""
+    data_path = "data/api_training_final.xlsx"
+    data = pd.read_excel(data_path)
+    
+    # Create target variable
+    data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+
+    # Replace inf and nan values
+    data = data.replace([np.inf, -np.inf], 0)
+    data = data.fillna(0)
+    
+    for col in data.columns:
+        data[col] = pd.to_numeric(data[col], errors='coerce')
+    
+    # Convert all numeric-like columns (excluding problematic_cols that have already been handled)
+    for col in data.columns:
+        try:
+            # Convert string numbers with either dots or commas
+            data[col] = (data[col].astype(str)
+                        .str.strip()
+                        .str.strip("'\"")
+                        .str.replace(' ', '')
+                        .str.replace(',', '.')
+                        .replace('', '0')  # Replace empty strings with 0
+                        .astype(float))
+        except (ValueError, AttributeError) as e:
+            print(f"Training data: Could not convert column {col}: {str(e)}")
+            data = data.drop(columns=[col], errors='ignore')
+            continue
+        
+    # Define integer columns that should remain as int64
+    int_columns = [
+        'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
+        'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
+    ]
+    
+    # Convert integer columns back to int64
+    for col in int_columns:
+        if col in data.columns:
+            data[col] = data[col].astype('int64')
+    
+    # Split into train and test sets
+    train_data, test_data = train_test_split(
+        data,
+        test_size=0.2,
+        random_state=42,
+        stratify=data['is_draw']
+    )
+    
+    # Select features and target
+    columns_to_drop = ['is_draw','match_outcome','home_goals','away_goals','total_goals','score']
+    X_train = train_data.drop(columns=columns_to_drop, errors='ignore')
+    y_train = train_data['is_draw']
+    X_test = test_data.drop(columns=columns_to_drop, errors='ignore')
+    y_test = test_data['is_draw']
+    
+    # Add verification of dtypes
+    print("\nVerifying final dtypes:")
+    non_numeric_cols = X_train.select_dtypes(include=['object']).columns
+    if len(non_numeric_cols) > 0:
+        print(f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
+    
+    print("\nInteger columns dtypes:")
+    for col in int_columns:
+        if col in X_train.columns:
+            print(f"{col}: {X_train[col].dtype}")
+    
+    return X_train, y_train, X_test, y_test
+
+def create_evaluation_sets_draws_api():
+    """
+    Load data from an Excel file and create evaluation sets for training.
+
+    Parameters:
+    - file_path: str, path to the Excel file.
+    - target_column: str, the name of the target column in the dataset.
+
+    Returns:
+    - X_eval: pd.DataFrame, features for evaluation.
+    - y_eval: pd.Series, target for evaluation.
+    """
+    file_path = "data/prediction/api_prediction_eval.xlsx"
+    target_column = "is_draw"
+    # Load data from the Excel file
+    data = pd.read_excel(file_path)
+    # Filter data where 'score' is not NA
+    data = data.dropna(subset=['match_outcome'])
+    selected_columns = get_selected_api_columns_draws()
+    data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+    # Ensure 'date_encoded' column exists
+    if 'date_encoded' not in data.columns:
+        # Define the reference date
+        reference_date = pd.Timestamp('2020-08-11')
+        
+        # Calculate 'date_encoded' as days since the reference date
+        data['date_encoded'] = (pd.to_datetime(data['Datum']) - reference_date).dt.days
+    
+    # Separate features and target (make sure you are working on a copy if needed)
+    X = data[selected_columns].copy()
+    y = data[target_column]
+
+    # Convert all numeric-like columns to numeric types, handling errors by coercing
+    for col in X.columns:
+        X[col] = pd.to_numeric(X[col], errors='coerce')
+
+   # Convert all numeric-like columns (excluding problematic_cols that have already been handled)
+    for col in data.columns:
+        try:
+            # Convert string numbers with either dots or commas
+            data[col] = (data[col].astype(str)
+                        .str.strip()
+                        .str.strip("'\"")
+                        .str.replace(' ', '')
+                        .str.replace(',', '.')
+                        .replace('', '0')  # Replace empty strings with 0
+                        .astype(float))
+        except (ValueError, AttributeError) as e:
+            print(f"Evaluation data: Could not convert column {col}: {str(e)}")
+            data = data.drop(columns=[col], errors='ignore')
+            continue
+
+    # Separate features and target
+    X = X[selected_columns]
+    y = y        
+
+    # Add this before returning
+    non_numeric_cols = X.select_dtypes(include=['object']).columns
+    if len(non_numeric_cols) > 0:
+        print(f"Warning: Found object columns: {list(non_numeric_cols)}")
+    
+    return X, y
+
+def create_prediction_set_api():
+    """
+    Load data from an Excel file and create evaluation sets for training.
+
+    Parameters:
+    - file_path: str, path to the Excel file.
+    - target_column: str, the name of the target column in the dataset.
+
+    Returns:
+    - X_eval: pd.DataFrame, features for evaluation.
+    - y_eval: pd.Series, target for evaluation.
+    """
+    file_path = "data/prediction/api_prediction_data.csv"
+    # Load data from the Excel file
+    data = pd.read_csv(file_path)
+    # Filter data where 'score' is not NA
+    
+    selected_columns = get_selected_api_columns_draws()
+   
+    # Ensure 'date_encoded' column exists
+    if 'date_encoded' not in data.columns:
+        # Define the reference date
+        reference_date = pd.Timestamp('2020-08-11')
+        
+        # Calculate 'date_encoded' as days since the reference date
+        data['date_encoded'] = (pd.to_datetime(data['Datum']) - reference_date).dt.days
+
+   # Convert all numeric-like columns (excluding problematic_cols that have already been handled)
+    for col in data.columns:
+        try:
+            # Convert string numbers with either dots or commas
+            data[col] = (data[col].astype(str)
+                        .str.strip()
+                        .str.strip("'\"")
+                        .str.replace(' ', '')
+                        .str.replace(',', '.')
+                        .replace('', '0')  # Replace empty strings with 0
+                        .astype(float))
+        except (ValueError, AttributeError) as e:
+            print(f"Evaluation data: Could not convert column {col}: {str(e)}")
+            data = data.drop(columns=[col], errors='ignore')
+            continue
+
+    # Separate features and target
+    X = X[selected_columns]     
+
+    # Add this before returning
+    non_numeric_cols = X.select_dtypes(include=['object']).columns
+    if len(non_numeric_cols) > 0:
+        print(f"Warning: Found object columns: {list(non_numeric_cols)}")
+    
+    return X
+
+
 # OTHER FUNCTIONS
+def get_real_api_scores_from_excel(fixture_ids: List[str]) -> Dict[str, Dict]:
+    """Get real match scores from an Excel file."""
+    try:
+        # Set up paths
+        data_path = Path("./data/prediction/api_prediction_eval.xlsx")
+        # Load Excel file
+        df = pd.read_excel(data_path)
+        
+        # Filter matches by running_ids
+        filtered_df = df[df['fixture_id'].isin(fixture_ids)]
+        
+        # Convert to dictionary with running_id as key
+        results = {}
+        for _, match in filtered_df.iterrows():
+            fixture_id = match['fixture_id']   
+            results[fixture_id] = {
+                'home_team': match['Home'],
+                'away_team': match['Away'],
+                'date': match['Datum'],
+                'league': match['league_name'],
+                'match_outcome': match['match_outcome']
+            }
+        
+        if 'is_draw' not in results[fixture_id]:
+            results[fixture_id]['is_draw'] = results[fixture_id]['match_outcome'] == 2
+        return results
+    
+    except Exception as e:
+        print(f"Error reading Excel file: {str(e)}")
+        return {}
+
 def get_real_scores_from_excel(running_ids: List[str]) -> Dict[str, Dict]:
     """Get real match scores from an Excel file."""
     try:
@@ -773,9 +1175,11 @@ def import_training_data_goals(goal_type: str):
 
 if __name__ == "__main__":
     # Define the file path and target column
-    update_training_data_for_draws()
+    update_api_training_data_for_draws()
     print("Training data updated successfully")
-    # update_prediction_data()
+    update_api_prediction_eval_data()
+    print("Prediction data updated successfully")
+    # update_api_prediction_data()
     # print("Prediction data updated successfully")
     
     # sync_mlflow()

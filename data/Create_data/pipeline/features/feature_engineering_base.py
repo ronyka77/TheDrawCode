@@ -50,6 +50,7 @@ class FeatureEngineer_base:
             # Then add draw-specific features
             df = self.engineer_draw_features(df)
             
+            df = self.add_advanced_features(df)
             # if self.is_prediction:
             #     # Export the DataFrame to an Excel file
             #     output_file_path = "./data/prediction/feature_engineered_data_prediction.xlsx"
@@ -516,137 +517,228 @@ class FeatureEngineer_base:
             
             df['is_draw'] = (df['match_outcome'] == 2).astype(int)
             
-            all_teams = df['home_encoded'].unique() + df['away_encoded'].unique()
+            all_teams = np.concatenate([df['home_encoded'].unique(), df['away_encoded'].unique()])
             all_teams = np.unique(all_teams)
-            
-            all_matches = df[['running_id','home_encoded','away_encoded','date_encoded','is_draw']].unique()
-            all_matches.sort('date_encoded',ascending=True)
+            all_matches = df[['running_id','home_encoded','away_encoded','date_encoded','is_draw']]
+            all_matches = all_matches.sort_values('date_encoded',ascending=True)
             
             # Momentum and Form Features
+            print('goal_differential_trend')
             if all(col in df.columns for col in ['home_goal_difference_rollingaverage', 'away_goal_difference_rollingaverage']):
                 df['goal_differential_trend'] = self.calculate_exponential_decay(df, 'home_goal_difference_rollingaverage') - \
                                                 self.calculate_exponential_decay(df, 'away_goal_difference_rollingaverage')
 
             if 'is_draw' in df.columns:
+                print('home_draw_streak_length')
                 df['home_draw_streak_length'] = df.groupby('home_encoded')['is_draw'].cumsum()
                 df['away_draw_streak_length'] = df.groupby('away_encoded')['is_draw'].cumsum()
 
             if all(col in df.columns for col in ['home_points_cum', 'Away_points_cum']):
+                print('home_form_consistency_index')
                 df['home_form_consistency_index'] = df.groupby('home_encoded')['home_points_cum'].rolling(window=5).var().reset_index(level=0, drop=True)
                 df['away_form_consistency_index'] = df.groupby('away_encoded')['Away_points_cum'].rolling(window=5).var().reset_index(level=0, drop=True)
 
             if all(col in df.columns for col in ['home_points_cum', 'Away_points_cum']):
+                print('home_points_acceleration')
                 df['home_points_acceleration'] = df.groupby('home_encoded')['home_points_cum'].rolling(window=5).apply(lambda x: np.polyfit(range(len(x)), x, 2)[0]).reset_index(level=0, drop=True)
                 df['away_points_acceleration'] = df.groupby('away_encoded')['Away_points_cum'].rolling(window=5).apply(lambda x: np.polyfit(range(len(x)), x, 2)[0]).reset_index(level=0, drop=True)
 
             # Timing and Context Features
             if 'is_draw' in df.columns and 'date_encoded' in df.columns:
+                print('home_last_draw_date')
                 df['home_last_draw_date'] = 0
                 df['away_last_draw_date'] = 0
+                df['home_last_match_date'] = 0
+                df['away_last_match_date'] = 0
                 
                 for index, row in df.iterrows():
                     home_team = row['home_encoded']
                     away_team = row['away_encoded']
                     current_date = row['date_encoded']
                     
-                    home_last_draw = all_matches[
+                    home_last_match = all_matches[
                         ((all_matches['home_encoded'] == home_team) | (all_matches['away_encoded'] == home_team)) &
-                        (all_matches['date_encoded'] < current_date) &
-                        (all_matches['is_draw'] == 1)
-                    ]['date_encoded'].max()
+                        (all_matches['date_encoded'] < current_date) 
+                    ]
                     
-                    away_last_draw = all_matches[
+                    away_last_match = all_matches[
                         ((all_matches['home_encoded'] == away_team) | (all_matches['away_encoded'] == away_team)) &
-                        (all_matches['date_encoded'] < current_date) &
-                        (all_matches['is_draw'] == 1)
-                    ]['date_encoded'].max()
+                        (all_matches['date_encoded'] < current_date) 
+                    ]
+                    
+                    home_last_draw = home_last_match[home_last_match['is_draw'] == 1]['date_encoded'].max()
+                    away_last_draw = away_last_match[away_last_match['is_draw'] == 1]['date_encoded'].max()
+                    home_rest_days = current_date - home_last_match['date_encoded'].max()
+                    away_rest_days = current_date - away_last_match['date_encoded'].max()
                     
                     df.at[index, 'home_last_draw_date'] = home_last_draw if not pd.isna(home_last_draw) else 0
                     df.at[index, 'away_last_draw_date'] = away_last_draw if not pd.isna(away_last_draw) else 0
+                    df.at[index, 'home_rest_days'] = home_rest_days if not pd.isna(home_rest_days) else 0
+                    df.at[index, 'away_rest_days'] = away_rest_days if not pd.isna(away_rest_days) else 0
                     
-                df['home_days_since_last_draw'] = (df['date_encoded'] - df['home_last_draw_date']).dt.days
-                df['away_days_since_last_draw'] = (df['date_encoded'] - df['away_last_draw_date']).dt.days
+                df['home_days_since_last_draw'] = (df['date_encoded'] - df['home_last_draw_date'])
+                df['away_days_since_last_draw'] = (df['date_encoded'] - df['away_last_draw_date'])
                 
-            if 'date_encoded' in df.columns:
-                df['season_phase'] = pd.cut(df['date_encoded'], bins=3, labels=['early', 'mid', 'late'])
-                for phase in ['early', 'mid', 'late']:
-                    df[f'home_performance_{phase}'] = df.groupby(['home_encoded', 'season_phase'])['home_points_cum'].transform('mean')
-                    df[f'away_performance_{phase}'] = df.groupby(['away_encoded', 'season_phase'])['Away_points_cum'].transform('mean')
-
-                df['home_fixture_congestion'] = df.groupby('home_encoded')['date_encoded'].rolling(window=14).count().reset_index(level=0, drop=True)
-                df['away_fixture_congestion'] = df.groupby('away_encoded')['date_encoded'].rolling(window=14).count().reset_index(level=0, drop=True)
-
-                df['home_rest_days'] = df.groupby('home_encoded')['date_encoded'].diff().dt.days
-                df['away_rest_days'] = df.groupby('away_encoded')['date_encoded'].diff().dt.days
+                df['home_rest_days'] = df['home_rest_days']
+                df['away_rest_days'] = df['away_rest_days']
                 df['rest_advantage'] = df['home_rest_days'] - df['away_rest_days']
+                
+
+            if 'date_encoded' in df.columns:
+                print('season_phase')
+                try:
+                    df['season_phase'] = pd.cut(df['date_encoded'], bins=3, labels=['early', 'mid', 'late'])
+                except Exception as e:
+                    print(f"Error in season_phase: {str(e)}")
+                    df['season_phase'] = pd.cut(df['date_encoded'], bins=3, labels=['early', 'mid', 'late'])
+                
+                try:
+                    for phase in ['early', 'mid', 'late']:
+                        print(f'home_performance_{phase}')
+                        df[f'home_performance_{phase}'] = df.groupby(['home_encoded', 'season_phase'], observed=False)['Home_points_cum'].transform('mean')
+                        df[f'away_performance_{phase}'] = df.groupby(['away_encoded', 'season_phase'], observed=False)['Away_points_cum'].transform('mean')
+                except Exception as e:
+                    print(f"Error in home_performance_{phase}: {str(e)}")
+
+                print('home_fixture_congestion')
+                try:    
+                    df['home_fixture_congestion'] = df.groupby('home_encoded')['date_encoded'].rolling(window=14).count().reset_index(level=0, drop=True)
+                    df['away_fixture_congestion'] = df.groupby('away_encoded')['date_encoded'].rolling(window=14).count().reset_index(level=0, drop=True)
+                except Exception as e:
+                    print(f"Error in home_fixture_congestion: {str(e)}")
 
             # Style Compatibility Metrics
-            if all(col in df.columns for col in ['home_saves_rollingaverage', 'away_saves_rollingaverage', 'home_interceptions_rollingaverage', 'away_interceptions_rollingaverage', 'home_fouls_rollingaverage', 'away_fouls_rollingaverage']):
-                df['defensive_style_similarity'] = 1 - (abs(df['home_saves_rollingaverage'] - df['away_saves_rollingaverage']) + \
+            print('defensive_style_similarity')
+            try:
+                if all(col in df.columns for col in ['home_saves_rollingaverage', 'away_saves_rollingaverage', 'home_interceptions_rollingaverage', 'away_interceptions_rollingaverage', 'home_fouls_rollingaverage', 'away_fouls_rollingaverage']):
+                    df['defensive_style_similarity'] = 1 - (abs(df['home_saves_rollingaverage'] - df['away_saves_rollingaverage']) + \
                                                         abs(df['home_interceptions_rollingaverage'] - df['away_interceptions_rollingaverage']) + \
                                                         abs(df['home_fouls_rollingaverage'] - df['away_fouls_rollingaverage']))
+            except Exception as e:
+                print(f"Error in defensive_style_similarity: {str(e)}")
 
-            if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean']):
-                df['possession_style_clash'] = abs(df['Home_possession_mean'] - df['away_possession_mean'])
+            print('possession_style_clash')
+            try:
+                if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean']):
+                    df['possession_style_clash'] = abs(df['Home_possession_mean'] - df['away_possession_mean'])
+            except Exception as e:
+                print(f"Error in possession_style_clash: {str(e)}")
 
-            if all(col in df.columns for col in ['home_passes_rollingaverage', 'away_passes_rollingaverage', 'home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_corners_rollingaverage', 'away_corners_rollingaverage']):
-                df['tempo_differential'] = abs(df['home_passes_rollingaverage'] - df['away_passes_rollingaverage']) + \
+            print('tempo_differential')
+            try:
+                if all(col in df.columns for col in ['home_passes_rollingaverage', 'away_passes_rollingaverage', 'home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_corners_rollingaverage', 'away_corners_rollingaverage']):
+                    df['tempo_differential'] = abs(df['home_passes_rollingaverage'] - df['away_passes_rollingaverage']) + \
                                             abs(df['home_shots_rollingaverage'] - df['away_shots_rollingaverage']) + \
                                             abs(df['home_corners_rollingaverage'] - df['away_corners_rollingaverage'])
+            except Exception as e:
+                print(f"Error in tempo_differential: {str(e)}")
 
-            if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean', 'home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_passes_rollingaverage', 'away_passes_rollingaverage']):
-                df['home_tactical_flexibility'] = df['Home_possession_mean'] + \
+
+            print('home_tactical_flexibility')
+            try:
+                if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean', 'home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_passes_rollingaverage', 'away_passes_rollingaverage']):
+                    df['home_tactical_flexibility'] = df['Home_possession_mean'] + \
                                                 df['home_shots_rollingaverage'] + \
                                                 df['home_passes_rollingaverage']
-                df['away_tactical_flexibility'] = df['away_possession_mean'] + \
+                    df['away_tactical_flexibility'] = df['away_possession_mean'] + \
                                                 df['away_shots_rollingaverage'] + \
                                                 df['away_passes_rollingaverage']
+            except Exception as e:
+                print(f"Error in home_tactical_flexibility: {str(e)}")
 
             # Historical Pattern Features
-            if 'h2h_draws' in df.columns:
-                df['h2h_draw_frequency_weighted'] = self.calculate_exponential_decay(df, 'h2h_draws')
+            try:
+                if 'h2h_draws' in df.columns:
+                    print('h2h_draw_frequency_weighted')
+                    df['h2h_draw_frequency_weighted'] = self.calculate_exponential_decay(df, 'h2h_draws')
+            except Exception as e:
+                print(f"Error in h2h_draw_frequency_weighted: {str(e)}")
 
-            if 'venue_encoded' in df.columns:
-                df['venue_draw_tendency'] = df.groupby('venue_encoded')['is_draw'].transform('mean')
 
-            if 'referee_encoded' in df.columns:
-                df['referee_draw_pattern_index'] = df.groupby('referee_encoded')['is_draw'].transform('mean')
+            try:
+                if 'venue_encoded' in df.columns:
+                    print('venue_draw_tendency')
+                    df['venue_draw_tendency'] = df.groupby('venue_encoded')['is_draw'].transform('mean')
+            except Exception as e:
+                print(f"Error in venue_draw_tendency: {str(e)}")
 
-            if all(col in df.columns for col in ['h2h_draws', 'league_draw_rate_composite']):
-                df['matchup_draw_probability'] = df['h2h_draws'] * 0.5 + df['league_draw_rate_composite'] * 0.5
+            try:
+                if 'referee_encoded' in df.columns:
+                    print('referee_draw_pattern_index')
+                    df['referee_draw_pattern_index'] = df.groupby('referee_encoded')['is_draw'].transform('mean')
+            except Exception as e:
+                print(f"Error in referee_draw_pattern_index: {str(e)}")
 
-            # Performance Equilibrium Metrics
-            if all(col in df.columns for col in ['home_saves_rollingaverage', 'away_saves_rollingaverage', 'home_interceptions_rollingaverage', 'away_interceptions_rollingaverage']):
-                df['defensive_equilibrium_score'] = 1 - (abs(df['home_saves_rollingaverage'] - df['away_saves_rollingaverage']) + \
+            try:
+                if all(col in df.columns for col in ['h2h_draws', 'league_draw_rate_composite']):
+                    print('matchup_draw_probability')
+                    df['matchup_draw_probability'] = df['h2h_draws'] * 0.5 + df['league_draw_rate_composite'] * 0.5
+            except Exception as e:
+                print(f"Error in matchup_draw_probability: {str(e)}")
+
+            try:
+                print('defensive_equilibrium_score')
+                if all(col in df.columns for col in ['home_saves_rollingaverage', 'away_saves_rollingaverage', 'home_interceptions_rollingaverage', 'away_interceptions_rollingaverage']):
+                    df['defensive_equilibrium_score'] = 1 - (abs(df['home_saves_rollingaverage'] - df['away_saves_rollingaverage']) + \
                                                         abs(df['home_interceptions_rollingaverage'] - df['away_interceptions_rollingaverage']))
+            except Exception as e:
+                print(f"Error in defensive_equilibrium_score: {str(e)}")
 
-            if all(col in df.columns for col in ['home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_goals_rollingaverage', 'away_goals_rollingaverage']):
-                df['attacking_efficiency_balance'] = 1 - (abs(df['home_shots_rollingaverage'] - df['away_shots_rollingaverage']) + \
+            try:
+                print('attacking_efficiency_balance')
+                if all(col in df.columns for col in ['home_shots_rollingaverage', 'away_shots_rollingaverage', 'home_goals_rollingaverage', 'away_goals_rollingaverage']):
+                    df['attacking_efficiency_balance'] = 1 - (abs(df['home_shots_rollingaverage'] - df['away_shots_rollingaverage']) + \
                                                         abs(df['home_goals_rollingaverage'] - df['away_goals_rollingaverage']))
+            except Exception as e:
+                print(f"Error in attacking_efficiency_balance: {str(e)}")
 
-            if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean', 'home_passes_rollingaverage', 'away_passes_rollingaverage']):
-                df['pressure_resistance_ratio'] = (df['Home_possession_mean'] / df['away_possession_mean']) * \
+            try:
+                print('pressure_resistance_ratio')
+                if all(col in df.columns for col in ['Home_possession_mean', 'away_possession_mean', 'home_passes_rollingaverage', 'away_passes_rollingaverage']):
+                    df['pressure_resistance_ratio'] = (df['Home_possession_mean'] / df['away_possession_mean']) * \
                                                 (df['home_passes_rollingaverage'] / df['away_passes_rollingaverage'])
+            except Exception as e:
+                print(f"Error in pressure_resistance_ratio: {str(e)}")
 
-            if all(col in df.columns for col in ['home_form_momentum', 'away_form_momentum']):
-                df['momentum_equilibrium_index'] = 1 - abs(df['home_form_momentum'] - df['away_form_momentum'])
+            try:
+                print('momentum_equilibrium_index')
+                if all(col in df.columns for col in ['home_form_momentum', 'away_form_momentum']):
+                    df['momentum_equilibrium_index'] = 1 - abs(df['home_form_momentum'] - df['away_form_momentum'])
+            except Exception as e:
+                print(f"Error in momentum_equilibrium_index: {str(e)}")
 
             # Composite Indicators
-            if all(col in df.columns for col in ['is_draw', 'h2h_draws']):
-                df['draw_propensity_score'] = df['is_draw'].rolling(window=5).mean() * 0.6 + df['h2h_draws'] * 0.4
+            try:
+                if all(col in df.columns for col in ['is_draw', 'h2h_draws']):
+                    print('draw_propensity_score')
+                    df['draw_propensity_score'] = df['is_draw'].rolling(window=5).mean() * 0.6 + df['h2h_draws'] * 0.4
+            except Exception as e:
+                print(f"Error in draw_propensity_score: {str(e)}")
 
-            if all(col in df.columns for col in ['home_points_cum', 'Away_points_cum']):
-                df['home_team_stability_index'] = df.groupby('home_encoded')['home_points_cum'].rolling(window=5).std().reset_index(level=0, drop=True)
-                df['away_team_stability_index'] = df.groupby('away_encoded')['Away_points_cum'].rolling(window=5).std().reset_index(level=0, drop=True)
+            try:
+                if all(col in df.columns for col in ['home_points_cum', 'Away_points_cum']):
+                    print('home_team_stability_index')
+                    df['home_team_stability_index'] = df.groupby('home_encoded')['home_points_cum'].rolling(window=5).std().reset_index(level=0, drop=True)
+                    df['away_team_stability_index'] = df.groupby('away_encoded')['Away_points_cum'].rolling(window=5).std().reset_index(level=0, drop=True)
+            except Exception as e:
+                print(f"Error in home_team_stability_index: {str(e)}")
 
-            if all(col in df.columns for col in ['home_form_consistency_index', 'away_form_consistency_index', 'h2h_draws']):
-                df['matchup_volatility_score'] = (df['home_form_consistency_index'] + df['away_form_consistency_index']) * 0.7 + \
+            try:
+                if all(col in df.columns for col in ['home_form_consistency_index', 'away_form_consistency_index', 'h2h_draws']):
+                    print('matchup_volatility_score')
+                    df['matchup_volatility_score'] = (df['home_form_consistency_index'] + df['away_form_consistency_index']) * 0.7 + \
                                                 df['h2h_draws'] * 0.3
+            except Exception as e:
+                print(f"Error in matchup_volatility_score: {str(e)}")
 
-            if all(col in df.columns for col in ['defensive_style_similarity', 'possession_style_clash', 'h2h_draw_frequency_weighted']):
-                df['tactical_deadlock_probability'] = df['defensive_style_similarity'] * 0.4 + \
+            try:
+                if all(col in df.columns for col in ['defensive_style_similarity', 'possession_style_clash', 'h2h_draw_frequency_weighted']):
+                    print('tactical_deadlock_probability')
+                    df['tactical_deadlock_probability'] = df['defensive_style_similarity'] * 0.4 + \
                                                     df['possession_style_clash'] * 0.3 + \
                                                     df['h2h_draw_frequency_weighted'] * 0.3
+            except Exception as e:
+                print(f"Error in tactical_deadlock_probability: {str(e)}")
 
             return df
 

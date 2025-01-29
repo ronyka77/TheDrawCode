@@ -319,7 +319,7 @@ class ApiFootball:
                     return {}
             except Exception as e:
                 self.logger.error(f"Error checking date for fixture {fixture_id}: {e}")
-            time.sleep(10)
+            time.sleep(3)
             return {}
     
     def get_fixture_ids_without_statistics(self) -> List[int]:
@@ -330,20 +330,6 @@ class ApiFootball:
         Returns:
             List[int]: List of fixture IDs without statistics that meet the criteria.
         """
-        # target_league_ids = [
-        #     39, 40, #ENGLAND
-        #     61, 62, #FRANCE
-        #     78, 79, #GERMANY
-        #     88, #Netherlands
-        #     94, #Portugal
-        #     128, #Argentina
-        #     135, 136, #Italy  
-        #     140, 141, #SPAIN
-        #     203, #Turkey
-        #     207, #Switzerland
-        #     262, #Mexico
-        #     283 #Romania
-        #     ]
         
         league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
         with open(league_ids_file_path, 'r') as f:
@@ -368,7 +354,7 @@ class ApiFootball:
         Retrieves fixtures for each league ID found in 'league_ids.json'.
         """
         league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
-        seasons = [2021,2022,2024]
+        seasons = [2024, 2025]
         try:
             with open(league_ids_file_path, 'r') as f:
                 league_ids_data = json.load(f)
@@ -421,6 +407,88 @@ class ApiFootball:
                 request_count = 0
                 start_time = time.time()
 
+    def get_league_statistics_from_mongodb(self) -> Dict[int, int]:
+        """
+        Retrieves statistics from MongoDB showing count of fixtures per league where FT score is not null.
+        
+        Returns:
+            Dict[int, int]: Dictionary mapping league_id to count of fixtures with non-null FT scores
+        """
+        try:
+            # Aggregation pipeline to count non-null FT scores per league
+            pipeline = [
+                {
+                    "$match": {
+                        "score.fulltime.home": {"$exists": True, "$ne": None}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$league_id",
+                        "count": {"$sum": 1}
+                    }
+                }
+            ]
+            
+            # Execute aggregation using self.fixtures_collection
+            results = self.fixtures_collection.aggregate(pipeline)
+            
+            # Convert results to dictionary
+            league_counts = {result['_id']: result['count'] for result in results}
+            
+            # Print as table
+            print("\nLeague Statistics:")
+            print("+------------+------------+")
+            print("| League ID  | Fixture Count |")
+            print("+------------+------------+")
+            for league_id, count in sorted(league_counts.items(), key=lambda item: item[0]):
+                print(f"| {str(league_id).center(10)} | {str(count).center(12)} |")
+            print("+------------+------------+")
+            
+            return league_counts
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving league statistics from MongoDB: {e}")
+            return {}
+
+    def delete_fixtures_not_in_leagues(self) -> None:
+        """
+        Deletes fixtures from MongoDB where league_id is not in league_ids.json.
+        """
+        try:
+            # Load league IDs from JSON file
+            league_ids_dir = os.path.join(self.project_root, "data", "Create_data", "api-football")
+            league_ids_path = os.path.join(league_ids_dir, "league_ids.json")
+            with open(league_ids_path, 'r') as f:
+                league_ids = [league['league_id'] for league in json.load(f)]
+                
+            print(f"league_ids: {league_ids}")
+            if len(league_ids) > 0:
+                # Delete fixtures where league_id is not in the list
+                result = self.fixtures_collection.delete_many(
+                    {"league_id": {"$nin": league_ids}}
+                )
+                result = self.fixtures_collection.delete_many(
+                    {
+                        "$or": [
+                            {"league_id": {"$nin": league_ids}},
+                            {
+                                "score.fulltime.home": None,
+                                "date": {"$lt": "2024-10-01"}
+                            }
+                        ]
+                    }
+                )
+                
+                self.logger.info(f"Deleted {result.deleted_count} fixtures with invalid league IDs")
+                print(f"Deleted {result.deleted_count} fixtures with invalid league IDs")
+            else:
+                self.logger.warning("No league IDs found in league_ids.json")
+                print("No league IDs found in league_ids.json")
+                
+        except Exception as e:
+            self.logger.error(f"Error deleting fixtures: {e}")
+
 def main():
     api_key = '9d97f6f9804b592c86be814e246a077d'
     if not api_key:
@@ -430,9 +498,13 @@ def main():
     logger = ExperimentLogger()
     api_football = ApiFootball(api_key, logger)
     
-    # api_football.get_fixtures_for_leagues()
+    api_football.get_fixtures_for_leagues()
     
     api_football.get_statistics_for_fixtures()
+    
+    # api_football.get_league_statistics_from_mongodb()
+    
+    api_football.delete_fixtures_not_in_leagues()
 
   
 

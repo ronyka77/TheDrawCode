@@ -16,16 +16,16 @@ class ELOCalculator:
         os.makedirs(self.model_dir, exist_ok=True)
         
         # Define data paths
-        self.training_data_path = './data_files/model_data_training_newPoisson.xlsx'
-        self.training_data_path_new = './data_files/model_data_training_withPoisson.xlsx'
-        self.prediction_data_path = './data_files/model_data_prediction_newPoisson.xlsx'
+        # self.training_data_path = './data_files/model_data_training_newPoisson.xlsx'
+        # self.training_data_path_new = './data_files/model_data_training_withPoisson.xlsx'
+        # self.prediction_data_path = './data_files/model_data_prediction_newPoisson.xlsx'
         self.api_prediction_data_path = './data_files/api_football_prediction_newPoisson.xlsx'
         self.api_training_data_path = './data_files/api_football_training_newPoisson.xlsx'
         
         # Define export paths
-        self.training_export_path = './data_files/model_data_training_newPoisson.xlsx'
-        self.training_export_path_new = './data_files/model_data_training_withPoisson.xlsx'
-        self.prediction_export_path = './data_files/model_data_prediction_newPoisson.xlsx'
+        # self.training_export_path = './data_files/model_data_training_newPoisson.xlsx'
+        # self.training_export_path_new = './data_files/model_data_training_withPoisson.xlsx'
+        # self.prediction_export_path = './data_files/model_data_prediction_newPoisson.xlsx'
         self.api_prediction_export_path = './data_files/api_football_prediction_newPoisson.xlsx'
         self.api_training_export_path = './data_files/api_football_training_newPoisson.xlsx'
         
@@ -42,6 +42,10 @@ class ELOCalculator:
         Higher K-factor for more predictable leagues, lower for more volatile ones.
         """
         try:
+            # Handle cases where team matches are zero to avoid division by zero
+            league_data['Home_team_matches'] = league_data['Home_team_matches'].replace(0, 1)
+            league_data['Away_team_matches'] = league_data['Away_team_matches'].replace(0, 1)
+            
             # Calculate league competitiveness metrics
             win_rate_std = np.std(pd.concat([league_data['home_win_rate'], 
                                            league_data['away_win_rate']]))
@@ -178,42 +182,51 @@ class ELOCalculator:
                         df[col] = df[col].apply(lambda x: float(str(x).replace(',', '.')) if isinstance(x, str) else float(x))
                 return df
 
-            # Process training data
-            self.logger.info("Processing training data...")
-            training_data = pd.read_excel(self.training_data_path)
-            training_data = convert_numeric_columns(training_data)
-            training_data = training_data.sort_values('Datum')
-            training_data = self.add_elo_scores(training_data)
-            training_data.to_excel(self.training_export_path, index=False)
-            self.logger.info("Training data processed and saved")
+            # # Process training data
+            # self.logger.info("Processing training data...")
+            # training_data = pd.read_excel(self.training_data_path)
+            # training_data = convert_numeric_columns(training_data)
+            # training_data = training_data.sort_values('Datum')
+            # training_data = self.add_elo_scores(training_data)
+            # training_data.to_excel(self.training_export_path, index=False)
+            # self.logger.info("Training data processed and saved")
             
-            # Process new training data with Poisson
-            self.logger.info("Processing new training data with Poisson...")
-            training_data_new = pd.read_excel(self.training_data_path_new)
-            training_data_new = convert_numeric_columns(training_data_new)
-            training_data_new = training_data_new.sort_values('Datum')
-            training_data_new = self.add_elo_scores(training_data_new)
-            training_data_new.to_excel(self.training_export_path_new, index=False)
-            self.logger.info("Training data with Poisson processed and saved")
+            # # Process new training data with Poisson
+            # self.logger.info("Processing new training data with Poisson...")
+            # training_data_new = pd.read_excel(self.training_data_path_new)
+            # training_data_new = convert_numeric_columns(training_data_new)
+            # training_data_new = training_data_new.sort_values('Datum')
+            # training_data_new = self.add_elo_scores(training_data_new)
+            # training_data_new.to_excel(self.training_export_path_new, index=False)
+            # self.logger.info("Training data with Poisson processed and saved")
 
-            # Process prediction data
-            self.logger.info("Processing prediction data...")
-            prediction_data = pd.read_excel(self.prediction_data_path)
-            prediction_data = convert_numeric_columns(prediction_data)
-            prediction_data = prediction_data.sort_values('Datum')
-            prediction_data = self.add_elo_scores(prediction_data)
-            prediction_data.to_excel(self.prediction_export_path, index=False)
-            self.logger.info("Prediction data processed and saved")
+            # # Process prediction data
+            # self.logger.info("Processing prediction data...")
+            # prediction_data = pd.read_excel(self.prediction_data_path)
+            # prediction_data = convert_numeric_columns(prediction_data)
+            # prediction_data = prediction_data.sort_values('Datum')
+            # prediction_data = self.add_elo_scores(prediction_data)
+            # prediction_data.to_excel(self.prediction_export_path, index=False)
+            # self.logger.info("Prediction data processed and saved")
             
             # Process API data
-            self.logger.info("Processing API data...")
-            api_data = pd.read_excel(self.api_data_path)
-            api_data = convert_numeric_columns(api_data)
-            api_data = api_data.sort_values('Datum')
-            api_data = self.add_elo_scores(api_data)
-            api_data.to_excel(self.api_export_path, index=False)
-            self.logger.info("API data processed and saved")
+            self.logger.info("Processing API prediction data...")
+            api_prediction_data = pd.read_excel(self.api_prediction_data_path)
+            api_prediction_data = convert_numeric_columns(api_prediction_data)
+            api_prediction_data = api_prediction_data.sort_values('Datum')
+            api_prediction_data = self.add_elo_scores(api_prediction_data)
+            api_prediction_data.to_excel(self.api_prediction_export_path, index=False)
+            self.logger.info("API prediction data processed and saved")
 
+            # Process API training data
+            self.logger.info("Processing API training data...")
+            api_training_data = pd.read_excel(self.api_training_data_path)
+            api_training_data = convert_numeric_columns(api_training_data)
+            api_training_data = api_training_data.sort_values('Datum')
+            api_training_data = self.add_elo_scores(api_training_data)
+            api_training_data.to_excel(self.api_training_export_path, index=False)
+            self.logger.info("API training data processed and saved")
+            
         except Exception as e:
             self.logger.error(f"Error in process_data: {str(e)}")
             raise

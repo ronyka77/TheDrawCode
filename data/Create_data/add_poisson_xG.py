@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Tuple, List, Optional
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.linear_model import PoissonRegressor
 
 class PoissonXGCalculator:
     """Enhanced Poisson Expected Goals (xG) Calculator for soccer matches."""
@@ -144,7 +145,7 @@ class PoissonXGCalculator:
         except Exception as e:
             self.logger.error(f"Error in feature preparation: {str(e)}")
             raise
-            
+        
     def fit(self, df: pd.DataFrame) -> None:
         """Fit separate Poisson regression models for home and away goals."""
         try:
@@ -154,21 +155,14 @@ class PoissonXGCalculator:
             self.logger.info("Preparing features for model fitting...")
             X = self._prepare_features(df, is_training=True)
             
-            # Train home goals model
+            # Train home goals model with L2 regularization
             self.logger.info("Fitting home goals Poisson model...")
-            self.home_model = sm.GLM(
-                df['home_goals'],
-                X,
-                family=sm.families.Poisson()
-            ).fit()
+            self.home_model = PoissonRegressor(alpha=1.0, max_iter=1000).fit(X, df['home_goals'])
             
-            # Train away goals model
+            # Train away goals model with L2 regularization
             self.logger.info("Fitting away goals Poisson model...")
-            self.away_model = sm.GLM(
-                df['away_goals'],
-                X,
-                family=sm.families.Poisson()
-            ).fit()
+            self.away_model = PoissonRegressor(alpha=1.0, max_iter=1000).fit(X, df['away_goals'])
+            
             
             # Evaluate model performance
             home_predictions = self.home_model.predict(X)
@@ -191,15 +185,23 @@ class PoissonXGCalculator:
             self.logger.info(f"RMSE: {np.sqrt(away_mse):.4f}")
             self.logger.info(f"R2 Score: {away_r2:.4f}")
             
-            # Log model summaries
-            self.logger.info("\nHome Model Summary:")
-            self.logger.info(self.home_model.summary().as_text())
-            self.logger.info("\nAway Model Summary:")
-            self.logger.info(self.away_model.summary().as_text())
+            # Log model coefficients
+            self.logger.info("\nHome Model Coefficients:")
+            for feature, coef in zip(X.columns, self.home_model.coef_):
+                self.logger.info(f"{feature}: {coef:.4f}")
+            
+            self.logger.info("\nAway Model Coefficients:")
+            for feature, coef in zip(X.columns, self.away_model.coef_):
+                self.logger.info(f"{feature}: {coef:.4f}")
+            
+            # Example: Check for multicollinearity
+            correlation_matrix = df[self.all_features].corr()
+            highly_correlated_features = np.where(np.abs(correlation_matrix) > 0.8)
+            print("Highly correlated features:", highly_correlated_features)
             
         except Exception as e:
             self.logger.error(f"Error in model fitting: {str(e)}")
-            raise
+            raise   
             
     def predict(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate separate home and away xG predictions for matches."""
@@ -207,17 +209,44 @@ class PoissonXGCalculator:
             self._validate_data(df, is_training=False)
             X = self._prepare_features(df, is_training=False)
             
+            print(f"X shape: {X.shape}")
+            
             # Generate predictions using separate models
-            df['home_poisson_xG'] = self.home_model.predict(X)
-            df['away_poisson_xG'] = self.away_model.predict(X)
+            home_predictions = self.home_model.predict(X)
+            away_predictions = self.away_model.predict(X)
+            
+            # Clip predictions to avoid overflow
+            home_predictions = np.clip(home_predictions, -150, 150)
+            away_predictions = np.clip(away_predictions, -150, 150)
             
             # Ensure predictions are non-negative
-            df['home_poisson_xG'] = df['home_poisson_xG'].clip(lower=0)
-            df['away_poisson_xG'] = df['away_poisson_xG'].clip(lower=0)
+            df['home_poisson_xG'] = np.maximum(home_predictions, 0)
+            df['away_poisson_xG'] = np.maximum(away_predictions, 0)
             
             # Round predictions to 3 decimal places for readability
             df['home_poisson_xG'] = df['home_poisson_xG'].round(3)
             df['away_poisson_xG'] = df['away_poisson_xG'].round(3)
+            
+            # Example: Check if feature values are within expected range
+            for col in self.all_features:
+                if df[col].max() > 100 or df[col].min() < -100:
+                    self.logger.warning(f"Feature {col} has extreme values: min={df[col].min()}, max={df[col].max()}")
+            
+            # Log model parameters and feature statistics for debugging
+            if hasattr(self.home_model, 'params'):
+                self.logger.debug("Home Model Parameters:")
+                self.logger.debug(self.home_model.params)
+            else:
+                self.logger.debug("Home Model does not have 'params' attribute.")
+            
+            if hasattr(self.away_model, 'params'):
+                self.logger.debug("Away Model Parameters:")
+                self.logger.debug(self.away_model.params)
+            else:
+                self.logger.debug("Away Model does not have 'params' attribute.")
+            
+            self.logger.debug("Feature Statistics:")
+            self.logger.debug(df[self.all_features].describe())
             
             return df
             
@@ -234,7 +263,7 @@ class PoissonXGCalculator:
             df['Date'] = pd.to_datetime(df['Date'])
             df = df.sort_values('Date')
         
-        if type == 'training' or type == 'training_new':
+        if type == 'training' or type == 'api_training':
             # Fit model on training data
             self.logger.info("Training model on historical data...")
             self.fit(df)
@@ -249,7 +278,8 @@ class PoissonXGCalculator:
             'prediction': ('./data_files/model_data_prediction_newPoisson.xlsx'),
             'merged': ('./data_files/merged_data_prediction_newPoisson.csv'),
             'api_prediction': ('./data_files/api_football_prediction_newPoisson.xlsx'),
-            'api_training': ('./data_files/api_football_training_newPoisson.xlsx')
+            'api_training': ('./data_files/api_football_training_newPoisson.xlsx'),
+            'api_future': ('./data_files/api_football_future_newPoisson.xlsx')
         }
         
         output_path = datasets[type]
@@ -281,19 +311,39 @@ class PoissonXGCalculator:
             self.logger.info("Starting data processing...")
             
             # Load training data
-            training_path = './data_files/PowerBI/model_data_training.csv'
-            training_path_new = './data_files/PowerBI/model_data_training2.csv'
-            prediction_path = './data_files/PowerBI/model_data_prediction.csv'
-            merged_path = './data_files/PowerBI/merged_data_prediction.csv'
-            api_prediction_path = './data_files/PowerBI/api_football_prediction.csv'
-            api_training_path = './data_files/PowerBI/api_football_training.csv'
-            self.logger.info(f"Loading training data from {training_path}")
-            training_data = pd.read_csv(training_path)
-            training_data_new = pd.read_csv(training_path_new)
-            prediction_data = pd.read_csv(prediction_path)
-            merged_data = pd.read_csv(merged_path)
-            api_prediction_data = pd.read_csv(api_prediction_path)
-            api_training_data = pd.read_csv(api_training_path)
+            # training_path = './data_files/PowerBI/model_data_training.csv'
+            # training_path_new = './data_files/PowerBI/model_data_training2.csv'
+            # prediction_path = './data_files/PowerBI/model_data_prediction.csv'
+            # merged_path = './data_files/PowerBI/merged_data_prediction.csv'
+            api_prediction_path = './data_files/PowerBI/api_data_prediction.xlsx'
+            api_training_path = './data_files/PowerBI/api_data_training.xlsx'
+            api_future_path = './data_files/PowerBI/api_football_future.csv'
+            
+            # training_data = pd.read_csv(training_path)
+            # training_data_new = pd.read_csv(training_path_new)
+            # prediction_data = pd.read_csv(prediction_path)
+            # merged_data = pd.read_csv(merged_path)
+   
+
+            # Read Excel files with openpyxl, treating 'Infinity' and similar strings as NaN
+            self.logger.info(f"Loading prediction data from {api_prediction_path}")
+            api_prediction_data = pd.read_excel(
+                api_prediction_path,
+                engine='openpyxl',
+                na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
+            ).replace([np.inf, -np.inf], np.nan)
+            
+            self.logger.info(f"Loading training data from {api_training_path}")
+            api_training_data = pd.read_excel(
+                api_training_path,
+                engine='openpyxl',
+                na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
+            ).replace([np.inf, -np.inf], np.nan)
+            
+            self.logger.info(f"Loading future data from {api_future_path}")
+            api_future_data = pd.read_csv(api_future_path, 
+                                        na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
+                                        ).replace([np.inf, -np.inf], np.nan)
             
             api_training_data = api_training_data.rename(columns={
                 'home_possession_mean': 'Home_possession_mean',
@@ -309,13 +359,21 @@ class PoissonXGCalculator:
                 'home_points_cum': 'Home_points_cum',
                 'away_points_cum': 'Away_points_cum'
             })
+            api_future_data = api_future_data.rename(columns={
+                'home_possession_mean': 'Home_possession_mean',
+                'home_shot_on_target_mean': 'Home_shot_on_target_mean',
+                'away_goal_difference_cum': 'Away_goal_difference_cum',
+                'home_points_cum': 'Home_points_cum',
+                'away_points_cum': 'Away_points_cum'
+            })
             
-            self.add_poisson_xG(training_data, 'training')
-            self.add_poisson_xG(training_data_new, 'training_new')
-            self.add_poisson_xG(prediction_data, 'prediction')
-            self.add_poisson_xG(merged_data, 'merged')
-            self.add_poisson_xG(api_prediction_data, 'api_prediction')
+            # self.add_poisson_xG(training_data, 'training')
+            # self.add_poisson_xG(training_data_new, 'training_new')
+            # self.add_poisson_xG(prediction_data, 'prediction')
+            # self.add_poisson_xG(merged_data, 'merged')
             self.add_poisson_xG(api_training_data, 'api_training')
+            self.add_poisson_xG(api_prediction_data, 'api_prediction')
+            self.add_poisson_xG(api_future_data, 'api_future')
            
             
         except Exception as e:

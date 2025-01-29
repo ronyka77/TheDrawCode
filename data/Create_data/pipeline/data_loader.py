@@ -7,8 +7,13 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_manager import ProcessedDataManager
+
+# Add the project root directory to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+print(f"project_root data_loader: {project_root}")
+
+# from data_manager import ProcessedDataManager
 from logger import ExperimentLogger
 from pipeline.config_loader import load_config
 
@@ -64,11 +69,11 @@ class DataLoader:
             # Get feature groups from feature config
             self.feature_groups = self.feature_config['feature_groups']
             
-            # Initialize components
-            self.data_manager = ProcessedDataManager(
-                base_path=str(self.processed_data_path),
-                data_path=str(self.raw_data_path)
-            )
+            # # Initialize components
+            # self.data_manager = ProcessedDataManager(
+            #     base_path=str(self.processed_data_path),
+            #     data_path=str(self.raw_data_path)
+            # )
             
             # Initialize containers
             self.scalers: Dict[str, StandardScaler] = {}

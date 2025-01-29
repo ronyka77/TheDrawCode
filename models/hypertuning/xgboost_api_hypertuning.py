@@ -18,9 +18,9 @@ sys.path.append(str(project_root))
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import create_evaluation_sets_draws, get_selected_columns_draws, import_training_data_draws_new, setup_mlflow_tracking
+from utils.create_evaluation_set import create_evaluation_sets_draws_api, get_selected_api_columns_draws, import_training_data_draws_api, setup_mlflow_tracking
 
-selected_columns = get_selected_columns_draws()
+selected_columns = get_selected_api_columns_draws()
 experiment_name = "global_xgboost_hypertuning"
 mlruns_dir = setup_mlflow_tracking(experiment_name)
 
@@ -108,28 +108,28 @@ class GlobalHypertuner:
                 'early_stopping_rounds': 500,
                 'eval_metric': ['error', 'auc', 'aucpr'],
                 # Widen range for learning rate
-                'learning_rate': trial.suggest_float('learning_rate', 0.0005, 0.05, log=True),
+                'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.02, log=True),
                 
                 # Widen range for min_child_weight
-                'min_child_weight': trial.suggest_int('min_child_weight', 20, 200),
+                'min_child_weight': trial.suggest_int('min_child_weight', 20, 300),
                 
                 # Widen range for gamma
                 'gamma': trial.suggest_float('gamma', 2.0, 20.0),
                 
                 # Widen range for subsample
-                'subsample': trial.suggest_float('subsample', 0.4, 1.0),
+                'subsample': trial.suggest_float('subsample', 0.3, 1.0),
                 
                 # Widen range for colsample_bytree
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.4, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 1.0),
                 
                 # Widen range for scale_pos_weight
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.5, 10.0) * (0.26/safe_draw_rate),
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.5, 10.0),
                 
                 # Widen range for reg_alpha
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.1, 20.0, log=True),
+                'reg_alpha': trial.suggest_float('reg_alpha', 0.05, 10.0, log=True),
                 
                 # Widen range for reg_lambda
-                'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0, log=True),
+                'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 20.0, log=True),
                 
                 # Widen range for n_estimators
                 'n_estimators': trial.suggest_int('n_estimators', 5000, 25000)
@@ -139,7 +139,7 @@ class GlobalHypertuner:
             model.fit(
                 features_train, 
                 target_train,
-                eval_set=[(features_train, target_train)],
+                eval_set=[(features_test, target_test)],
                 verbose=False
             )
             
@@ -173,15 +173,15 @@ class GlobalHypertuner:
             recall_score_value = metrics['recall'] / self.target_recall
             
             # Prioritize precision more heavily
-            precision_weight = 0.7
-            recall_weight = 0.3
+            precision_weight = 0.8
+            recall_weight = 0.2
             weighted_score = (precision_score_value * precision_weight + 
                             recall_score_value * recall_weight)
             
              # Add precision threshold penalty
-            if metrics['precision'] < 0.38:
+            if metrics['precision'] < 0.37:
                 weighted_score *= 0.6
-            if metrics['precision'] > 0.70:
+            if metrics['precision'] > 0.45:
                 weighted_score *= 1.3
             if metrics['recall'] < 0.20:
                 weighted_score *= 0.6
@@ -352,6 +352,7 @@ class GlobalHypertuner:
             model_full.fit(
                 full_features,
                 full_target,
+                eval_set=[(features_val, target_val)],
                 verbose=False
             )
             
@@ -404,14 +405,16 @@ def tune_global_model():
             logger=logger,
             target_precision=0.50,  # Target precision threshold
             target_recall=0.60,     # Target recall threshold
-            precision_weight=0.7     # Weight for precision vs recall balance
+            precision_weight=0.8     # Weight for precision vs recall balance
         )
         
-        X_train, y_train, X_test, y_test = import_training_data_draws_new()
-        X_val, y_val = create_evaluation_sets_draws()
+        X_train, y_train, X_test, y_test = import_training_data_draws_api()
+        X_val, y_val = create_evaluation_sets_draws_api()
+        print(X_train.shape)
         print(X_val.shape)
+        print(X_test.shape)
         
-        with mlflow.start_run(run_name=f"global_xgboost_tuning"):
+        with mlflow.start_run(run_name=f"api_xgboost_tuning"):
             # Log target metrics and data statistics
             params_to_log = {
                 "target_precision": 0.50,
@@ -438,7 +441,7 @@ def tune_global_model():
                 y_val,
                 X_test,
                 y_test,
-                n_trials=200
+                n_trials=100
             )
             
             mlflow.log_params(best_params)

@@ -149,21 +149,21 @@ class AdvancedGoalFeatureEngineer:
                 df['away_shot_on_target_mean']).fillna(0)
 
             # 13. Team Style Compatibility
-            df['home_style_compatibility'] = (df['Home_possession_mean'] * df['home_interceptions_mean'] * 
+            df['home_style_compatibility'] = (df['Home_possession_mean'] * 
                 df['Home_passes_mean']).div(1000).fillna(0)
-            df['away_style_compatibility'] = (df['away_possession_mean'] * df['away_interceptions_mean'] * 
+            df['away_style_compatibility'] = (df['away_possession_mean']  * 
                 df['Away_passes_mean']).div(1000).fillna(0)
 
             # 14. Attendance Impact on Performance
-            df['home_crowd_factor'] = (df['home_avg_attendance'] * df['home_win_rate'] * 
+            df['home_crowd_factor'] = ( df['home_win_rate'] * 
                 df['home_form_momentum']).div(10000).fillna(0)
-            df['away_crowd_resistance'] = (df['away_avg_attendance'] * df['away_win_rate'] * 
+            df['away_crowd_resistance'] = (df['away_win_rate'] * 
                 df['away_form_momentum']).div(10000).fillna(0)
 
             # 15. Defensive Organization
-            df['home_defensive_organization'] = (df['home_interceptions_mean'] * df['Home_saves_mean'] * 
+            df['home_defensive_organization'] = ( df['Home_saves_mean'] * 
                 (1 - df['home_defense_weakness'])).fillna(0)
-            df['away_defensive_organization'] = (df['away_interceptions_mean'] * df['Away_saves_mean'] * 
+            df['away_defensive_organization'] = ( df['Away_saves_mean'] * 
                 (1 - df['away_defense_weakness'])).fillna(0)
 
             # 16. Attack Conversion Quality

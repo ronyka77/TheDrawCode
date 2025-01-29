@@ -363,10 +363,10 @@ def load_and_prepare_data():
 
     # Rolling averages and cumulative sums
     print('Start calculating Cumulative values...')
-    data['home_points_cumulative'] = data.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_points'].cumsum()
-    data['away_points_cumulative'] = data.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_points'].cumsum()
-    data['home_goal_diff_cumulative'] = data.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_goal_difference'].cumsum()
-    data['away_goal_diff_cumulative'] = data.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_goal_difference'].cumsum()
+    data['home_points_cumulative'] = data.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_points'].cumsum() - data['home_points']
+    data['away_points_cumulative'] = data.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_points'].cumsum() - data['away_points']
+    data['home_goal_diff_cumulative'] = data.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_goal_difference'].cumsum() - data['home_goal_difference']
+    data['away_goal_diff_cumulative'] = data.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_goal_difference'].cumsum() - data['away_goal_difference']
     return data 
     
 def add_cumulative_sums(dataframe):

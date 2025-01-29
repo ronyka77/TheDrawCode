@@ -45,9 +45,9 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import get_selected_columns_draws, create_evaluation_sets_draws, import_training_data_draws_new, setup_mlflow_tracking
+from utils.create_evaluation_set import get_selected_api_columns_draws, create_evaluation_sets_draws_api, import_training_data_draws_api, setup_mlflow_tracking
 
-experiment_name = "xgboost_draw_model"
+experiment_name = "xgboost_api_model"
 mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 class XGBoostModel(BaseEstimator, ClassifierMixin):
@@ -64,19 +64,19 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         # Global training parameters
         # Start of Selection
         self.global_params = {
-            'colsample_bytree': 0.9999726750855427,
+            'colsample_bytree': 0.6018123551068222,
             'draw_ratio_test': 0.26506935687263555,
             'draw_ratio_train': 0.2650731584258325,
             'draw_ratio_val': 0.2831669044222539,
-            'gamma': 17.40877852886544,
-            'learning_rate': 0.003699875137062915,
-            'min_child_weight': 167,
-            'n_estimators': 20259,
+            'gamma': 15.624386217474662,
+            'learning_rate': 0.00048678779408906206,
+            'min_child_weight': 267,
+            'n_estimators': 8677,
             'precision_weight': 0.6,
-            'reg_alpha': 1.709558229999919,
-            'reg_lambda': 2.8889937655135887,
-            'scale_pos_weight': 2.979024690535834,
-            'subsample': 0.9993210763643339,
+            'reg_alpha': 0.6828043818962779,
+            'reg_lambda': 3.5189510841856597,
+            'scale_pos_weight': 2.403795279981725,
+            'subsample': 0.5698762040708009,
             'objective': 'binary:logistic',
             'tree_method': 'hist',
             'eval_metric': ['error', 'auc', 'aucpr'],
@@ -88,7 +88,7 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         # Initialize other attributes
         self.model = None
         self.feature_importance = {}
-        self.selected_features = get_selected_columns_draws()
+        self.selected_features = get_selected_api_columns_draws()
         self.threshold = 0.55  # Default threshold for predictions
 
     def _validate_data(
@@ -142,6 +142,18 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         
         return x_train_df, y_train_s, x_val_df, y_val_s
 
+    # XGBoost Focal Loss approximation (custom objective)
+    def focal_loss(self, preds, dtrain):
+        """Custom focal loss function for XGBoost."""
+        labels = dtrain.get_label()  # This works because dtrain is a DMatrix
+        alpha = 0.75  # Adjust to prioritize draws
+        gamma = 2.0   # Penalizes misclassified draws harder
+        p = 1 / (1 + np.exp(-preds))  # Sigmoid to get probabilities
+        grad = (alpha * labels * (1 - p)**gamma * (-p)) + ((1 - alpha) * (1 - labels) * p**gamma * (1 - p))
+        hess = (alpha * labels * (1 - p)**gamma * p * (1 - p)) + ((1 - alpha) * (1 - labels) * p**gamma * p * (1 - p))
+        return grad, hess
+
+
     def _log_completion_metrics(
         self,
         X_val: Optional[pd.DataFrame],
@@ -176,7 +188,8 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             
             # Modified scoring to prioritize precision
             if precision >= 0.35:  # Higher minimum precision requirement
-                score = precision * min(recall, 0.30)  # Lower recall cap
+                print(f"new threshold: {threshold} precision: {precision} recall: {recall}")
+                score = precision * min(recall, 0.20)  # Lower recall cap
                 if score > best_score:
                     best_score = score
                     best_metrics.update({
@@ -198,29 +211,32 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         target_val: Optional[Union[pd.Series, np.ndarray]] = None) -> None:
         """Train the model globally."""
         
-        features_train_selected = features_train[self.selected_features]
-        features_val_selected = features_val[self.selected_features] if features_val is not None else None
-        features_test_selected = features_test[self.selected_features] if features_test is not None else None
-        
-        # Initialize XGBClassifier with aligned params from hypertuning
-        self.model = xgb.XGBClassifier(**self.global_params)
-        
-        # Fit the model
-        if features_test_selected is not None:
-            self.model.fit(
-                features_train_selected, 
-                target_train, 
-                eval_set=[(features_test_selected, target_test)],
-                verbose=False
-            )
-        else:
-            self.model.fit(features_train_selected, target_train)
+        # Convert data to DMatrix
+        dtrain = xgb.DMatrix(features_train[self.selected_features], label=target_train)
+        dtest = xgb.DMatrix(features_test[self.selected_features], label=target_test) if features_test is not None else None
+        dval = xgb.DMatrix(features_val[self.selected_features], label=target_val) if features_val is not None else None
+
+        # Initialize XGBoost training parameters
+        params = {
+            **self.global_params,
+            'objective': 'binary:logistic'  # Default objective, will be overridden by custom objective
+        }
+
+        # Train the model using xgb.train() for custom objectives
+        self.model = xgb.train(
+            params=params,
+            dtrain=dtrain,
+            # obj=self.focal_loss,  # Pass the custom objective function
+            evals=[(dtest, 'test')] if dtest is not None else None,
+            verbose_eval=False
+        )
         
         # Optimize threshold if validation data is provided
-        if features_val_selected is not None:
-            val_probs = self.model.predict_proba(features_val_selected)[:, 1]
+        if dval is not None:
+            val_probs = self.model.predict(dval)
             self.threshold = self._optimize_threshold(target_val, val_probs)
-
+       
+            
     def predict_proba(self, features: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """Predict probabilities using the global model."""
         features_df = pd.DataFrame(features)
@@ -228,10 +244,17 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         # Apply feature selection
         features_selected = features_df[self.selected_features]
         
-        # Use predict_proba directly since we're using XGBClassifier
-        probas = self.model.predict_proba(features_selected)
+        # Convert to DMatrix
+        dmatrix = xgb.DMatrix(features_selected)
         
-        return probas
+        # Get raw predictions from Booster
+        raw_preds = self.model.predict(dmatrix)
+        
+        # Convert raw predictions to probabilities using sigmoid
+        probas = 1 / (1 + np.exp(-raw_preds))
+        
+        # Return probabilities in the same format as predict_proba
+        return np.vstack([1 - probas, probas]).T
 
     def predict(self, features: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """Predict using the global threshold."""
@@ -348,20 +371,18 @@ def convert_int_columns(df):
 
 def train_with_mlflow():
     """Train XGBoost model with MLflow tracking."""
-    logger = ExperimentLogger()
+    logger = ExperimentLogger(experiment_name="xgboost_api_model", log_dir='./logs/xgboost_model')
     
-    features_train, target_train, features_test, target_test = import_training_data_draws_new()
-    features_val, target_val = create_evaluation_sets_draws()
+    features_train, target_train, features_test, target_test = import_training_data_draws_api()
+    features_val, target_val = create_evaluation_sets_draws_api()
     
-    with mlflow.start_run(run_name=f"xgboost_binary_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
+    with mlflow.start_run(run_name=f"xgboost_api_model"):
         # Log dataset info
         mlflow.log_params({
             "train_samples": len(features_train),
             "val_samples": len(features_val),
             "test_samples": len(features_test),
-            "n_features_original": features_train.shape[1],
-            "draw_ratio_train": (target_train == 1).mean(),
-            "draw_ratio_val": (target_val == 1).mean()
+            "n_features_original": features_train.shape[1]
         })
         
         # Create and train model
