@@ -28,10 +28,10 @@ from utils.mlflow_utils import MLFlowConfig, MLFlowManager
 
 # MLFLOW SETUP
 def setup_mlflow_tracking(experiment_name: str) -> str:
-    """Configure MLflow tracking location"""
+    """Configure MLflow tracking location and return the mlruns directory."""
     mlflow_manager = MLFlowManager()
     mlflow_manager.setup_experiment(experiment_name)
-    return
+    return mlflow_manager.mlruns_dir  # Return the mlruns directory
 
 def sync_mlflow():
     mlflow_manager = MLFlowManager()
@@ -396,9 +396,9 @@ def update_api_prediction_data():
     """
     try:
         # Load existing prediction data
-        data_path = "data/prediction/api_prediction_data.csv"
-        data_path_new = "data/prediction/api_prediction_data_new.csv"
-        data = pd.read_csv(data_path)
+        data_path = "data/prediction/api_prediction_data.xlsx"
+        data_path_new = "data/prediction/api_prediction_data_new.xlsx"
+        data = pd.read_excel(data_path)
         # Load existing prediction data
         data_path_eval = "data/prediction/api_prediction_eval.xlsx"
         data_eval = pd.read_excel(data_path_eval)
@@ -412,9 +412,10 @@ def update_api_prediction_data():
 
         # Merge with api_prediction_eval but only add columns which are not exists in prediction_data
         merged_data = merge_and_append(updated_data, data_eval)
-        
+        # Drop duplicates based on fixture_id column
+        merged_data = merged_data.drop_duplicates(subset=['fixture_id'], keep='first')
         # Save updated data back to Excel
-        merged_data.to_csv(data_path_new, index=False)
+        merged_data.to_excel(data_path_new, index=False)
 
     except Exception as e:
         print(f"Error updating prediction data: {str(e)}")
@@ -946,9 +947,9 @@ def create_prediction_set_api():
     - X_eval: pd.DataFrame, features for evaluation.
     - y_eval: pd.Series, target for evaluation.
     """
-    file_path = "data/prediction/api_prediction_data.csv"
+    file_path = "data/prediction/api_prediction_data_new.xlsx"
     # Load data from the Excel file
-    data = pd.read_csv(file_path)
+    data = pd.read_excel(file_path)
     # Filter data where 'score' is not NA
     
     selected_columns = get_selected_api_columns_draws()
@@ -978,7 +979,7 @@ def create_prediction_set_api():
             continue
 
     # Separate features and target
-    X = X[selected_columns]     
+    X = data[selected_columns]     
 
     # Add this before returning
     non_numeric_cols = X.select_dtypes(include=['object']).columns
@@ -1007,13 +1008,15 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> Dict[str, Dict]:
             results[fixture_id] = {
                 'home_team': match['Home'],
                 'away_team': match['Away'],
-                'date': match['Datum'],
+                'date': match['Date'],
                 'league': match['league_name'],
                 'match_outcome': match['match_outcome']
             }
         
         if 'is_draw' not in results[fixture_id]:
             results[fixture_id]['is_draw'] = results[fixture_id]['match_outcome'] == 2
+            
+        print(f"Retrieved {len(results)} real scores")
         return results
     
     except Exception as e:
@@ -1174,12 +1177,12 @@ def import_training_data_goals(goal_type: str):
     return X_train, y_train, X_test, y_test
 
 if __name__ == "__main__":
-    # Define the file path and target column
+
     update_api_training_data_for_draws()
     print("Training data updated successfully")
-    update_api_prediction_eval_data()
-    print("Prediction data updated successfully")
-    # update_api_prediction_data()
+    # update_api_prediction_eval_data()
     # print("Prediction data updated successfully")
+    update_api_prediction_data()
+    print("Prediction data updated successfully")
     
     # sync_mlflow()

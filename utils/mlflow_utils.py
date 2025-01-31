@@ -70,6 +70,7 @@ class MLFlowManager:
     def __init__(self):
         self.config = MLFlowConfig()
         self.logger = self.config.logger
+        self.mlruns_dir = self.config.config["local_path_uri"]  
         # print(f"config: {self.config.config}")
         
 

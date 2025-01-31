@@ -26,9 +26,9 @@ except Exception as e:
     sys.path.append(os.getcwd().parent)
     print(f"Current directory: {os.getcwd().parent}")
 
-from utils.create_evaluation_set import get_selected_columns_draws, setup_mlflow_tracking, create_evaluation_sets_draws, get_real_scores_from_excel
+from utils.create_evaluation_set import get_selected_api_columns_draws, setup_mlflow_tracking, create_prediction_set_api, get_real_api_scores_from_excel
 
-selected_columns = get_selected_columns_draws()
+selected_columns = get_selected_api_columns_draws()
 
 class DrawPredictor:
     """Predictor class for draw predictions using the stacked model."""
@@ -145,7 +145,7 @@ def _preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
         ic("Date encoding complete")
     
     # Store non-numeric columns we want to keep
-    keep_columns = ['running_id', 'Datum', 'Home', 'Away', 'league']
+    keep_columns = ['fixture_id', 'Datum', 'Home', 'Away', 'league']
     stored_columns = {col: df[col].copy() for col in keep_columns if col in df.columns}
     
     # Replace comma with dot for numeric columns
@@ -185,28 +185,28 @@ def make_prediction(prediction_data, run_id: str, experiment_id: str, mlruns_dir
         ic(f"Loading model from: {model_path}")
         predictor = DrawPredictor(run_id, experiment_id, mlruns_dir)
         
-        # Keep a copy of running_id before prediction
-        running_ids = prediction_data['running_id'].copy() if 'running_id' in prediction_data.columns else None
+        # Keep a copy of fixture_id before prediction
+        fixture_ids = prediction_data['fixture_id'].copy() if 'fixture_id' in prediction_data.columns else None
         
         # Make predictions
         results = predictor.predict(prediction_data)
         
         precision = 0.0
         
-        # Get real scores from Excel only if we have running_ids
-        if running_ids is not None:
+        # Get real scores from Excel only if we have fixture_ids
+        if fixture_ids is not None:
             # ic("Getting real scores for validation")
-            real_scores = get_real_scores_from_excel(running_ids.tolist())
+            real_scores = get_real_scores_from_excel(fixture_ids.tolist())
             # ic(f"Retrieved {len(real_scores)} real scores")
             
             if real_scores:  # Only proceed if we got some real scores
                 # Add real results to output
                 real_scores_df = pd.DataFrame.from_dict(real_scores, orient='index')
                 real_scores_df.reset_index(inplace=True)
-                real_scores_df.rename(columns={'index': 'running_id'}, inplace=True)
+                real_scores_df.rename(columns={'index': 'fixture_id'}, inplace=True)
                 
-                # Merge prediction_df with real_scores_df on running_id
-                prediction_df = prediction_df.merge(real_scores_df, on='running_id', how='left')
+                # Merge prediction_df with real_scores_df on fixture_id
+                prediction_df = prediction_df.merge(real_scores_df, on='fixture_id', how='left')
                 
                 # Calculate accuracy metrics
                 matches_with_results = prediction_df[prediction_df['is_draw'].notna()]
@@ -225,7 +225,7 @@ def make_prediction(prediction_data, run_id: str, experiment_id: str, mlruns_dir
                         precision = true_positives / (true_positives + false_positives)
                         ic(f"Draw prediction precision: {precision:.2%}")
         else:
-            ic("No running_ids provided, skipping real scores")
+            ic("No fixture_ids provided, skipping real scores")
         return prediction_df, precision
         
     except Exception as e:
@@ -234,9 +234,10 @@ def make_prediction(prediction_data, run_id: str, experiment_id: str, mlruns_dir
 
 def main():
     # Set up paths
-    data_path = project_root / "data/prediction/api_prediction_data.csv"
-    experiment_name = "xgboost_ensemble_draw_model"
+    data_path = project_root / "data/prediction/api_prediction_data_new.xlsx"
+    experiment_name = "xgboost_api_ensemble_model"
     mlruns_dir = setup_mlflow_tracking(experiment_name)
+    print(f"MLruns directory: {str(mlruns_dir)}")
     experiment_id = mlflow.get_experiment_by_name(experiment_name).experiment_id
     
     # Model run IDs to evaluate
@@ -249,31 +250,32 @@ def main():
     best_predictions = None
     
     # Load and preprocess prediction data
-    prediction_df = pd.read_csv(data_path, decimal=',')
+    prediction_df = pd.read_excel(data_path)
+    if 'match_outcome' in prediction_df.columns:
+        prediction_df = prediction_df.drop(columns=['match_outcome'])
     prediction_data = _preprocess_data(prediction_df)
+    if 'match_outcome' in prediction_data.columns:
+        prediction_data = prediction_data.drop(columns=['match_outcome'])
     
-    # Keep a copy of running_id before prediction
-    running_ids = prediction_data['running_id'].copy() if 'running_id' in prediction_data.columns else None
+    # Keep a copy of fixture_id before prediction
+    fixture_ids = prediction_df['fixture_id'].copy() if 'fixture_id' in prediction_df.columns else None
     
     # Get selected columns for model input
-    model_columns = get_selected_columns_draws()
-    prediction_data_model = prediction_data[model_columns]
-    print(f"Loaded {len(prediction_data)} matches for prediction")
+    model_columns = get_selected_api_columns_draws()
+    print(f"Number of model columns: {len(model_columns)}")
+    # # Verify all model columns exist in prediction data
+    # missing_columns = [col for col in model_columns if col not in prediction_data.columns]
+    # if missing_columns:
+    #     print(f"Warning: Missing {len(missing_columns)} columns in prediction data: {missing_columns}")
+    # # Select only columns that exist in both model_columns and prediction_data
+    # available_columns = [col for col in model_columns if col in prediction_data.columns]
+    # prediction_data_model = prediction_data[available_columns]
+    prediction_data_model = create_prediction_set_api()
+    print(f"Loaded {prediction_data_model.shape} matches for prediction")
     
     # Evaluate each model
     for run_id in run_ids:
         try:
-            # Reset prediction_df for each iteration to avoid data corruption
-            prediction_df = pd.read_csv(data_path, decimal=',')
-            prediction_data = _preprocess_data(prediction_df)
-            
-            # Keep a copy of running_id before prediction
-            running_ids = prediction_data['running_id'].copy() if 'running_id' in prediction_data.columns else None
-            
-            # Get selected columns for model input
-            model_columns = get_selected_columns_draws()
-            prediction_data_model = prediction_data[model_columns]
-            
             # predicted_df, precision = make_prediction(prediction_data_model, run_id)
             # Use MLruns directory structure
             model_path = Path(mlruns_dir) / experiment_id / run_id / "artifacts"
@@ -289,26 +291,28 @@ def main():
             prediction_df['draw_probability'] = results['draw_probabilities'].round(2).astype(float)
             precision = 0.0
             
-            # Get real scores from Excel only if we have running_ids
-            if running_ids is not None:
+            # Get real scores from Excel only if we have fixture_ids
+            if fixture_ids is not None:
                 # ic("Getting real scores for validation")
-                real_scores = get_real_scores_from_excel(running_ids.tolist())
+                real_scores = get_real_api_scores_from_excel(fixture_ids.tolist())
                 ic(f"Retrieved {len(real_scores)} real scores")
                 real_scores_df = pd.DataFrame.from_dict(real_scores, orient='index')
-                # ic(f"Real scores DataFrame columns: {real_scores_df.columns}")
                 real_scores_df.reset_index(inplace=True)
-                real_scores_df.rename(columns={'index': 'running_id'}, inplace=True)
-                real_scores_df['running_id'] = real_scores_df['running_id'].astype(int)
-                ic(f"Running ID type in real_scores_df: {real_scores_df['running_id'].dtype}")
-                ic(f"Running ID type in prediction_df: {prediction_df['running_id'].dtype}")
+                real_scores_df.rename(columns={'index': 'fixture_id'}, inplace=True)
+                # Ensure consistent numeric type for fixture_id
+                real_scores_df['fixture_id'] = pd.to_numeric(real_scores_df['fixture_id'], errors='coerce').astype('int64')
+                prediction_df['fixture_id'] = pd.to_numeric(prediction_df['fixture_id'], errors='coerce').astype('int64')
+                ic(f"Running ID type in real_scores_df: {real_scores_df['fixture_id'].dtype}")
+                ic(f"Running ID type in prediction_df: {prediction_df['fixture_id'].dtype}")
                 
                 if real_scores:  # Only proceed if we got some real scores
-                    # Merge prediction_df with real_scores_df on running_id
-                    prediction_df = prediction_df.merge(real_scores_df, on='running_id', how='left')
+                    # Merge prediction_df with real_scores_df on fixture_id
+                    prediction_df = prediction_df.merge(real_scores_df, on='fixture_id', how='left')
                     
                     # Calculate accuracy metrics
                     matches_with_results = prediction_df[prediction_df['is_draw'].notna()]
                     if len(matches_with_results) > 0:
+                        print(f"matches_with_results: {matches_with_results}")
                         accuracy = (matches_with_results['draw_predicted'] == 
                                     matches_with_results['is_draw']).mean()
                         draws_recall = ((matches_with_results['draw_predicted'] == 1) & 
@@ -331,7 +335,7 @@ def main():
                         else:
                             print("No true positives or false positives found")
             else:
-                ic("No running_ids provided, skipping real scores")
+                ic("No fixture_ids provided, skipping real scores")
                 
             
             if precision > best_precision:
@@ -350,7 +354,7 @@ def main():
     # Use best model for final predictions
     if best_predictions is not None:
         # Save results
-        output_path = project_root / "data/prediction/predictions_ensemble.xlsx"
+        output_path = project_root / "data/prediction/predictions_api_ensemble.xlsx"
         best_predictions.to_excel(output_path, index=False)
         print(f"\nPredictions saved to: {output_path}")
 

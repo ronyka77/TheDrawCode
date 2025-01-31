@@ -43,13 +43,13 @@ class ELOCalculator:
         """
         try:
             # Handle cases where team matches are zero to avoid division by zero
-            league_data['Home_team_matches'] = league_data['Home_team_matches'].replace(0, 1)
-            league_data['Away_team_matches'] = league_data['Away_team_matches'].replace(0, 1)
+            league_data.loc[:, 'Home_team_matches'] = league_data['Home_team_matches'].mask(league_data['Home_team_matches'] == 0, 1)
+            league_data.loc[:, 'Away_team_matches'] = league_data['Away_team_matches'].mask(league_data['Away_team_matches'] == 0, 1)
             
             # Calculate league competitiveness metrics
             win_rate_std = np.std(pd.concat([league_data['home_win_rate'], 
                                            league_data['away_win_rate']]))
-            
+                
             points_std = np.std(pd.concat([league_data['home_average_points'], 
                                          league_data['away_average_points']]))
             

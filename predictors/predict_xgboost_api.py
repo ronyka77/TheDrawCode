@@ -181,7 +181,6 @@ def make_prediction(prediction_data, model_uri, selected_columns) -> pd.DataFram
         
 def main():
     
-    
     best_precision = 0
     best_model_uri = None
     best_predictions = None
@@ -196,12 +195,16 @@ def main():
         '89cfa2d46f894f1ea2ff6e3addf31b6c',
         '7cadcde8111f47739846a2d13b685756',
         'bfe4f50485d1423d9de264ccea3f5c48',
-        'c8ad0c45ebd6492ea59ede02ef324880'
+        'c8ad0c45ebd6492ea59ede02ef324880',
+        'b14c7b37ff05400481664a1b6f06b162',
+        'aec24ab6270b4b8da897797f1e81ebb8',
+        '4752b87834224d2aa22c7c3e24309c75',
+        '336cdc8718654dc782a8a7e51f96914a'
     ]
     
     # Load and preprocess prediction data
-    data_path = Path("./data/prediction/api_prediction_data.csv")
-    prediction_df = pd.read_csv(data_path)
+    data_path = Path("./data/prediction/api_prediction_data_new.xlsx")
+    prediction_df = pd.read_excel(data_path)
     prediction_data = _preprocess_data(prediction_df)
     print(f"Loaded {len(prediction_data)} matches for prediction")
     

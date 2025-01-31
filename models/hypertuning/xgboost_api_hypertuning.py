@@ -108,31 +108,31 @@ class GlobalHypertuner:
                 'early_stopping_rounds': 500,
                 'eval_metric': ['error', 'auc', 'aucpr'],
                 # Widen range for learning rate
-                'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.02, log=True),
+                'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.1, log=True),
                 
                 # Widen range for min_child_weight
-                'min_child_weight': trial.suggest_int('min_child_weight', 20, 300),
+                'min_child_weight': trial.suggest_int('min_child_weight', 10, 500),
                 
                 # Widen range for gamma
-                'gamma': trial.suggest_float('gamma', 2.0, 20.0),
+                'gamma': trial.suggest_float('gamma', 1.0, 30.0),
                 
                 # Widen range for subsample
-                'subsample': trial.suggest_float('subsample', 0.3, 1.0),
+                'subsample': trial.suggest_float('subsample', 0.2, 1.0),
                 
                 # Widen range for colsample_bytree
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.2, 1.0),
                 
                 # Widen range for scale_pos_weight
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.5, 10.0),
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.1, 20.0),
                 
                 # Widen range for reg_alpha
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.05, 10.0, log=True),
+                'reg_alpha': trial.suggest_float('reg_alpha', 0.01, 20.0, log=True),
                 
                 # Widen range for reg_lambda
-                'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 20.0, log=True),
+                'reg_lambda': trial.suggest_float('reg_lambda', 0.01, 30.0, log=True),
                 
                 # Widen range for n_estimators
-                'n_estimators': trial.suggest_int('n_estimators', 5000, 25000)
+                'n_estimators': trial.suggest_int('n_estimators', 3000, 30000)
             }
             
             model = xgb.XGBClassifier(**param)
@@ -441,7 +441,7 @@ def tune_global_model():
                 y_val,
                 X_test,
                 y_test,
-                n_trials=100
+                n_trials=300
             )
             
             mlflow.log_params(best_params)

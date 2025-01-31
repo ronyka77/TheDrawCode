@@ -186,21 +186,41 @@ class MongoDBFeatures:
                     'away_passes_accuracy': away_passes_accuracy,
                     'away_passes': away_passes
                 })
-
             fixtures_dataframe = pd.DataFrame(normalized_data)
             print(f"fixtures_dataframe: {fixtures_dataframe.shape}")
-            fixtures_dataframe['date'] = pd.to_datetime(fixtures_dataframe['date'], format='mixed', utc=True).dt.strftime('%Y-%m-%d %H:%M')
-            print(f"fixtures_dataframe: {fixtures_dataframe.shape}")
+            
+            # Handle date parsing with error handling
+            try:
+                fixtures_dataframe['date'] = pd.to_datetime(fixtures_dataframe['date'], errors='coerce')
+                # Convert to string format only if datetime parsing succeeded
+                valid_dates = fixtures_dataframe['date'].notnull()
+                fixtures_dataframe.loc[valid_dates, 'date'] = fixtures_dataframe.loc[valid_dates, 'date'].apply(lambda x: x.strftime('%Y-%m-%d %H:%M'))
+                # Count and print invalid dates before filling
+                invalid_dates_count = fixtures_dataframe['date'].isnull().sum()
+                print(f"Found {invalid_dates_count} invalid dates")
+                # Fill invalid dates with a default value
+                fixtures_dataframe['date'].fillna('1970-01-01 00:00', inplace=True)
+            except Exception as e:
+                print(f"Error parsing dates: {e}")
+                fixtures_dataframe['date'] = '1970-01-01 00:00'
+            
+            print(f"fixtures_dataframe after date processing: {fixtures_dataframe.shape}")
+            
             for col in fixtures_dataframe.columns:
                 if fixtures_dataframe[col].dtype == 'object':
-                    if fixtures_dataframe[col].str.contains('%').any():
-                        fixtures_dataframe[col] = fixtures_dataframe[col].str.rstrip('%').astype(float) / 100.0
-                        if '_accuracy' not in col:
-                            fixtures_dataframe.rename(columns={col: col + '_accuracy'}, inplace=True)
+                    # Handle percentage columns with error checking
+                    try:
+                        if fixtures_dataframe[col].str.contains('%').any():
+                            fixtures_dataframe[col] = fixtures_dataframe[col].str.rstrip('%').astype(float) / 100.0
+                            if '_accuracy' not in col:
+                                fixtures_dataframe.rename(columns={col: col + '_accuracy'}, inplace=True)
+                    except Exception as e:
+                        print(f"Error processing column {col}: {e}")
+                        continue
                         
             # pd.set_option('future.no_silent_downcasting', True)
             fixtures_dataframe.fillna(0, inplace=True)
-            fixtures_dataframe = fixtures_dataframe.infer_objects(copy=False)
+            fixtures_dataframe = fixtures_dataframe.infer_objects()
             fixtures_dataframe.reset_index(drop=True, inplace=True)
             print(f"Normalized fixtures data: {fixtures_dataframe.shape}")
             return fixtures_dataframe

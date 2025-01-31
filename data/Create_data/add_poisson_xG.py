@@ -194,11 +194,6 @@ class PoissonXGCalculator:
             for feature, coef in zip(X.columns, self.away_model.coef_):
                 self.logger.info(f"{feature}: {coef:.4f}")
             
-            # Example: Check for multicollinearity
-            correlation_matrix = df[self.all_features].corr()
-            highly_correlated_features = np.where(np.abs(correlation_matrix) > 0.8)
-            print("Highly correlated features:", highly_correlated_features)
-            
         except Exception as e:
             self.logger.error(f"Error in model fitting: {str(e)}")
             raise   
@@ -207,6 +202,17 @@ class PoissonXGCalculator:
         """Generate separate home and away xG predictions for matches."""
         try:
             self._validate_data(df, is_training=False)
+            
+            # Convert strings to numeric values
+            for col in self.all_features:
+                if df[col].dtype == 'object':
+                    try:
+                        # Replace commas with periods and convert to float
+                        df[col] = df[col].str.replace(',', '.').astype(float)
+                    except Exception as e:
+                        self.logger.warning(f"Could not convert column {col} to numeric: {str(e)}")
+            
+            # Prepare features for prediction
             X = self._prepare_features(df, is_training=False)
             
             print(f"X shape: {X.shape}")
@@ -229,7 +235,7 @@ class PoissonXGCalculator:
             
             # Example: Check if feature values are within expected range
             for col in self.all_features:
-                if df[col].max() > 100 or df[col].min() < -100:
+                if df[col].max() > 105 or df[col].min() < -105:
                     self.logger.warning(f"Feature {col} has extreme values: min={df[col].min()}, max={df[col].max()}")
             
             # Log model parameters and feature statistics for debugging
