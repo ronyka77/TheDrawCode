@@ -115,62 +115,60 @@ class EnhancedFeatureSelector:
         best_score = -np.inf
         best_weights = None
         
-        # Start MLflow run
-        with mlflow.start_run(run_name=f"weight_optimization_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-            # Generate all weight combinations
-            weight_combinations = []
-            for gain in weight_grid['gain']:
-                for weight in weight_grid['weight']:
-                    for cover in weight_grid['cover']:
-                        if abs(gain + weight + cover - 1.0) < 1e-10:  # Sum to 1
-                            weight_combinations.append((gain, weight, cover))
-            
-            # Evaluate each combination
-            for gain, weight, cover in weight_combinations:
-                try:
-                    # Calculate composite scores
-                    importance_scores = self._calculate_composite_scores(
-                        X, y, model, {'gain': gain, 'weight': weight, 'cover': cover}
-                    )
+        # Generate all weight combinations
+        weight_combinations = []
+        for gain in weight_grid['gain']:
+            for weight in weight_grid['weight']:
+                for cover in weight_grid['cover']:
+                    if abs(gain + weight + cover - 1.0) < 1e-10:  # Sum to 1
+                        weight_combinations.append((gain, weight, cover))
+        
+        # Evaluate each combination
+        for gain, weight, cover in weight_combinations:
+            try:
+                # Calculate composite scores
+                importance_scores = self._calculate_composite_scores(
+                    X, y, model, {'gain': gain, 'weight': weight, 'cover': cover}
+                )
+                
+                # Select top features based on scores
+                top_features = self._select_top_features(
+                    importance_scores,
+                    X,
+                    min_features=self.target_features[0]
+                )
+                
+                # Evaluate feature set
+                score = self._evaluate_feature_set(X[top_features], y, model)
+                
+                # Log to MLflow
+                mlflow.log_metrics({
+                    'cv_score': score,
+                    'n_features': len(top_features)
+                })
+                
+                if score > best_score:
+                    best_score = score
+                    best_weights = {'gain': gain, 'weight': weight, 'cover': cover}
                     
-                    # Select top features based on scores
-                    top_features = self._select_top_features(
-                        importance_scores,
-                        X,
-                        min_features=self.target_features[0]
-                    )
-                    
-                    # Evaluate feature set
-                    score = self._evaluate_feature_set(X[top_features], y, model)
-                    
-                    # Log to MLflow
+                    # Log best weights
                     mlflow.log_metrics({
-                        'cv_score': score,
-                        'n_features': len(top_features)
+                        'best_gain_weight': gain,
+                        'best_weight_weight': weight,
+                        'best_cover_weight': cover,
+                        'best_cv_score': score
                     })
                     
-                    if score > best_score:
-                        best_score = score
-                        best_weights = {'gain': gain, 'weight': weight, 'cover': cover}
-                        
-                        # Log best weights
-                        mlflow.log_metrics({
-                            'best_gain_weight': gain,
-                            'best_weight_weight': weight,
-                            'best_cover_weight': cover,
-                            'best_cv_score': score
-                        })
-                        
-                except Exception as e:
-                    self.logger.error(f"Error evaluating weights {(gain, weight, cover)}: {str(e)}")
-                    continue
-                    
-            # Log optimization results
-            self.logger.info(f"Best weights found: {best_weights}")
-            self.logger.info(f"Best cross-validation score: {best_score:.4f}")
-            
-            return best_weights
-            
+            except Exception as e:
+                self.logger.error(f"Error evaluating weights {(gain, weight, cover)}: {str(e)}")
+                continue
+                
+        # Log optimization results
+        self.logger.info(f"Best weights found: {best_weights}")
+        self.logger.info(f"Best cross-validation score: {best_score:.4f}")
+        
+        return best_weights
+        
     def _calculate_composite_scores(
         self,
         X: pd.DataFrame,
@@ -318,41 +316,6 @@ class EnhancedFeatureSelector:
                 
         return correlated_groups
         
-    def plot_correlation_matrix(
-        self,
-        X: pd.DataFrame,
-        selected_features: List[str],
-        output_path: str
-    ) -> None:
-        """Plot correlation matrix for selected features.
-        
-        Args:
-            X: Feature DataFrame
-            selected_features: List of features to plot
-            output_path: Path to save the plot
-        """
-        # Calculate correlation matrix
-        correlation_matrix = X[selected_features].corr()
-        
-        # Create plot
-        plt.figure(figsize=(12, 8))
-        sns.heatmap(
-            correlation_matrix,
-            annot=True,
-            cmap='coolwarm',
-            center=0,
-            fmt='.2f'
-        )
-        plt.title('Feature Correlation Matrix')
-        plt.tight_layout()
-        
-        # Save plot
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Log to MLflow
-        mlflow.log_artifact(output_path)
-        
     def perform_stability_selection(
         self,
         X: pd.DataFrame,
@@ -378,122 +341,67 @@ class EnhancedFeatureSelector:
         feature_counts = {feature: 0 for feature in X.columns}
         feature_scores = {feature: [] for feature in X.columns}
         
-        with mlflow.start_run(run_name=f"stability_selection_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-            for i in range(self.n_bootstrap):
-                try:
-                    # Create bootstrap sample
-                    indices = np.random.choice(
-                        len(X),
-                        size=len(X),
-                        replace=True
-                    )
-                    X_boot = X.iloc[indices]
-                    y_boot = y.iloc[indices]
-                    
-                    # Calculate feature importance for this bootstrap
-                    importance_scores = self._calculate_composite_scores(
-                        X_boot,
-                        y_boot,
-                        model,
-                        weights
-                    )
-                    
-                    # Select top features
-                    selected = self._select_top_features(
-                        importance_scores,
-                        X_boot,
-                        min_features=self.target_features[0]
-                    )
-                    
-                    # Update counts and scores
-                    for feature in selected:
-                        feature_counts[feature] += 1
-                        if feature in importance_scores:
-                            feature_scores[feature].append(importance_scores[feature])
-                            
-                    # Log progress
-                    if (i + 1) % 5 == 0:
-                        self.logger.info(f"Completed {i + 1}/{self.n_bootstrap} iterations")
-                        
-                except Exception as e:
-                    self.logger.error(f"Error in bootstrap iteration {i}: {str(e)}")
-                    continue
-            
-            # Calculate stability scores
-            stability_scores = {}
-            for feature in X.columns:
-                selection_freq = feature_counts[feature] / self.n_bootstrap
-                mean_score = np.mean(feature_scores[feature]) if feature_scores[feature] else 0
-                stability_scores[feature] = selection_freq * mean_score
+      
+        for i in range(self.n_bootstrap):
+            try:
+                # Create bootstrap sample
+                indices = np.random.choice(
+                    len(X),
+                    size=len(X),
+                    replace=True
+                )
+                X_boot = X.iloc[indices]
+                y_boot = y.iloc[indices]
                 
-            # Log stability results
-            stable_features = {
-                f: s for f, s in stability_scores.items()
-                if feature_counts[f] / self.n_bootstrap >= selection_threshold
-            }
+                # Calculate feature importance for this bootstrap
+                importance_scores = self._calculate_composite_scores(
+                    X_boot,
+                    y_boot,
+                    model,
+                    weights
+                )
+                
+                # Select top features
+                selected = self._select_top_features(
+                    importance_scores,
+                    X_boot,
+                    min_features=self.target_features[0]
+                )
+                
+                # Update counts and scores
+                for feature in selected:
+                    feature_counts[feature] += 1
+                    if feature in importance_scores:
+                        feature_scores[feature].append(importance_scores[feature])
+                        
+                # Log progress
+                if (i + 1) % 5 == 0:
+                    self.logger.info(f"Completed {i + 1}/{self.n_bootstrap} iterations")
+                    
+            except Exception as e:
+                self.logger.error(f"Error in bootstrap iteration {i}: {str(e)}")
+                continue
+        
+        # Calculate stability scores
+        stability_scores = {}
+        for feature in X.columns:
+            selection_freq = feature_counts[feature] / self.n_bootstrap
+            mean_score = np.mean(feature_scores[feature]) if feature_scores[feature] else 0
+            stability_scores[feature] = selection_freq * mean_score
             
-            mlflow.log_metrics({
-                'n_stable_features': len(stable_features),
-                'mean_stability_score': np.mean(list(stability_scores.values()))
-            })
+        # Log stability results
+        stable_features = {
+            f: s for f, s in stability_scores.items()
+            if feature_counts[f] / self.n_bootstrap >= selection_threshold
+        }
+        
+        mlflow.log_metrics({
+            'n_stable_features': len(stable_features),
+            'mean_stability_score': np.mean(list(stability_scores.values()))
+        })
+        
+        return stability_scores
             
-            # Create and log stability plot
-            self._plot_stability_scores(
-                stability_scores,
-                feature_counts,
-                self.n_bootstrap,
-                selection_threshold
-            )
-            
-            return stability_scores
-            
-    def _plot_stability_scores(
-        self,
-        stability_scores: Dict[str, float],
-        feature_counts: Dict[str, int],
-        n_bootstrap: int,
-        threshold: float
-    ) -> None:
-        """Plot stability selection results."""
-        plt.figure(figsize=(12, 6))
-        
-        # Sort features by stability score
-        sorted_features = sorted(
-            stability_scores.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )
-        features = [f[0] for f in sorted_features]
-        scores = [f[1] for f in sorted_features]
-        
-        # Create selection frequency plot
-        frequencies = [feature_counts[f] / n_bootstrap for f in features]
-        
-        plt.subplot(1, 2, 1)
-        plt.barh(range(len(features)), frequencies)
-        plt.axvline(x=threshold, color='r', linestyle='--', label=f'Threshold ({threshold})')
-        plt.yticks(range(len(features)), features)
-        plt.xlabel('Selection Frequency')
-        plt.title('Feature Selection Stability')
-        plt.legend()
-        
-        # Create stability score plot
-        plt.subplot(1, 2, 2)
-        plt.barh(range(len(features)), scores)
-        plt.yticks(range(len(features)), features)
-        plt.xlabel('Stability Score')
-        plt.title('Feature Stability Scores')
-        
-        plt.tight_layout()
-        
-        # Save and log plot
-        plot_path = "stability_selection.png"
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        mlflow.log_artifact(plot_path)
-        os.remove(plot_path)
-        
     def perform_iterative_elimination(
         self,
         X: pd.DataFrame,
@@ -527,96 +435,70 @@ class EnhancedFeatureSelector:
         best_features = remaining_features.copy()
         scores_history = []
         
-        with mlflow.start_run(run_name=f"iterative_elimination_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-            while len(remaining_features) > min_features:
-                try:
-                    # Evaluate current feature set
-                    score = self._evaluate_feature_set(
-                        X[remaining_features],
-                        y,
-                        model,
-                        cv=cv
-                    )
-                    scores_history.append((len(remaining_features), score))
+        while len(remaining_features) > min_features:
+            try:
+                # Evaluate current feature set
+                score = self._evaluate_feature_set(
+                    X[remaining_features],
+                    y,
+                    model,
+                    cv=cv
+                )
+                scores_history.append((len(remaining_features), score))
+                
+                # Update best score and features
+                if score > best_score:
+                    best_score = score
+                    best_features = remaining_features.copy()
                     
-                    # Update best score and features
-                    if score > best_score:
-                        best_score = score
-                        best_features = remaining_features.copy()
-                        
-                    # Calculate feature importance
-                    importance_scores = self._calculate_composite_scores(
-                        X[remaining_features],
-                        y,
-                        model,
-                        weights={'gain': 0.5, 'weight': 0.3, 'cover': 0.2}
-                    )
-                    
-                    # Remove least important features
-                    sorted_features = sorted(
-                        importance_scores.items(),
-                        key=lambda x: x[1]
-                    )
-                    
-                    # Determine number of features to remove
-                    n_remove = min(step_size, len(remaining_features) - min_features)
-                    if n_remove <= 0:
-                        break
-                        
-                    # Remove features
-                    features_to_remove = [f[0] for f in sorted_features[:n_remove]]
-                    remaining_features = [f for f in remaining_features if f not in features_to_remove]
-                    
-                    # Log progress
-                    self.logger.info(
-                        f"Removed {n_remove} features. "
-                        f"Remaining: {len(remaining_features)}, "
-                        f"Score: {score:.4f}"
-                    )
-                    
-                    # Log metrics
-                    mlflow.log_metrics({
-                        'current_score': score,
-                        'n_features': len(remaining_features)
-                    })
-                    
-                except Exception as e:
-                    self.logger.error(f"Error in elimination iteration: {str(e)}")
+                # Calculate feature importance
+                importance_scores = self._calculate_composite_scores(
+                    X[remaining_features],
+                    y,
+                    model,
+                    weights={'gain': 0.5, 'weight': 0.3, 'cover': 0.2}
+                )
+                
+                # Remove least important features
+                sorted_features = sorted(
+                    importance_scores.items(),
+                    key=lambda x: x[1]
+                )
+                
+                # Determine number of features to remove
+                n_remove = min(step_size, len(remaining_features) - min_features)
+                if n_remove <= 0:
                     break
                     
-            # Create and log elimination plot
-            self._plot_elimination_curve(scores_history)
+                # Remove features
+                features_to_remove = [f[0] for f in sorted_features[:n_remove]]
+                remaining_features = [f for f in remaining_features if f not in features_to_remove]
+                
+                # Log progress
+                self.logger.info(
+                    f"Removed {n_remove} features. "
+                    f"Remaining: {len(remaining_features)}, "
+                    f"Score: {score:.4f}"
+                )
+                
+                # Log metrics directly without nested run
+                mlflow.log_metrics({
+                    'current_score': score,
+                    'n_features': len(remaining_features)
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error in elimination iteration: {str(e)}")
+                break
+                
+        # Log final results directly
+        mlflow.log_metrics({
+            'best_score': best_score,
+            'n_selected_features': len(best_features)
+        })
+        
+        return best_features
             
-            # Log final results
-            mlflow.log_metrics({
-                'best_score': best_score,
-                'n_selected_features': len(best_features)
-            })
-            
-            return best_features
-            
-    def _plot_elimination_curve(
-        self,
-        scores_history: List[Tuple[int, float]]
-    ) -> None:
-        """Plot the feature elimination curve."""
-        n_features, scores = zip(*scores_history)
-        
-        plt.figure(figsize=(10, 6))
-        plt.plot(n_features, scores, 'b-', marker='o')
-        plt.xlabel('Number of Features')
-        plt.ylabel('Cross-validation Score')
-        plt.title('Feature Elimination Curve')
-        plt.grid(True)
-        
-        # Save and log plot
-        plot_path = "elimination_curve.png"
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        mlflow.log_artifact(plot_path)
-        os.remove(plot_path)
-        
     def select_features(
         self,
         X: pd.DataFrame,
@@ -683,9 +565,6 @@ class EnhancedFeatureSelector:
             # Store selected features
             self.selected_features = final_features
             
-            # Log final feature set
-            mlflow.log_param('n_final_features', len(final_features))
-            
             return final_features
             
         except Exception as e:
@@ -710,40 +589,41 @@ def run_feature_selection(
     )
     mlruns_dir = setup_mlflow_tracking(experiment_name)
     
-    try:
-        # Load data using feature selection import
-        logger.info("Loading and preparing data")
-        X_train, y_train, X_test, y_test = import_feature_select_draws_api()
-        logger.info(f"Loaded training data with shape: {X_train.shape}")
-        logger.info(f"Loaded test data with shape: {X_test.shape}")
-        
-        # Drop non-numeric columns
-        non_numeric_cols = [
-            'Referee', 'draw', 'venue_name', 'Home', 'Away', 'away_win', 'Date',
-            'referee_draw_rate', 'referee_draws', 'referee_match_count'
-        ]
-        X_train = X_train.drop(columns=non_numeric_cols, errors='ignore')
-        X_test = X_test.drop(columns=non_numeric_cols, errors='ignore')
-        logger.info("Dropped non-numeric columns")
-        
-        # Initialize feature selector
-        selector = EnhancedFeatureSelector(
-            n_bootstrap=10,
-            correlation_threshold=0.90,
-            target_features=(50, 80),
-            experiment_name=experiment_name
-        )
-        
-        # Initialize model for feature selection
-        model = xgb.XGBClassifier(
-            tree_method='hist',
-            device='cpu',
-            random_state=42
-        )
-        
-        # Run feature selection
-        logger.info("Starting feature selection process")
-        with mlflow.start_run(run_name=f"feature_selection_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+    # Start single MLflow run for the entire process
+    with mlflow.start_run(run_name=f"feature_selection_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+        try:
+            # Load data using feature selection import
+            logger.info("Loading and preparing data")
+            X_train, y_train, X_test, y_test = import_feature_select_draws_api()
+            logger.info(f"Loaded training data with shape: {X_train.shape}")
+            logger.info(f"Loaded test data with shape: {X_test.shape}")
+            
+            # Drop non-numeric columns
+            non_numeric_cols = [
+                'Referee', 'draw', 'venue_name', 'Home', 'Away', 'away_win', 'Date',
+                'referee_draw_rate', 'referee_draws', 'referee_match_count'
+            ]
+            X_train = X_train.drop(columns=non_numeric_cols, errors='ignore')
+            X_test = X_test.drop(columns=non_numeric_cols, errors='ignore')
+            logger.info("Dropped non-numeric columns")
+            
+            # Initialize feature selector
+            selector = EnhancedFeatureSelector(
+                n_bootstrap=10,
+                correlation_threshold=0.90,
+                target_features=(50, 80),
+                experiment_name=experiment_name
+            )
+            
+            # Initialize model for feature selection
+            model = xgb.XGBClassifier(
+                tree_method='hist',
+                device='cpu',
+                random_state=42
+            )
+            
+            # Run feature selection
+            logger.info("Starting feature selection process")
             selected_features = selector.select_features(X_train, y_train, model)
             
             # Save results
@@ -757,14 +637,6 @@ def run_feature_selection(
                     f.write(f"{feature}\n")
             logger.info(f"Saved selected features to {features_path}")
             mlflow.log_artifact(str(features_path))
-                    
-            # Create correlation matrix plot
-            selector.plot_correlation_matrix(
-                X_train[selected_features],
-                selected_features,
-                str(results_dir / "correlation_matrix.png")
-            )
-            logger.info("Created correlation matrix plot")
             
             # Log metrics
             mlflow.log_metrics({
@@ -803,14 +675,11 @@ def run_feature_selection(
             logger.info("Feature selection completed successfully")
             
             return selected_features
-        
-    except Exception as e:
-        error_code = getattr(e, 'error_code', DataProcessingError.FILE_CORRUPTED)
-        logger.error(
-            f"Error in feature selection process: {str(e)}",
-            error_code=error_code
-        )
-        raise
+            
+        except Exception as e:
+            error_code = getattr(e, 'error_code', DataProcessingError.FILE_CORRUPTED)
+            logger.error(f"Error in feature selection process (code {error_code}): {str(e)}")
+            raise
 
 if __name__ == "__main__":
     try:

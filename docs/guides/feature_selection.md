@@ -21,7 +21,7 @@ The main feature selection class that implements:
 - Multiple importance metrics (gain, weight, cover)
 - Composite scoring system
 - CPU-optimized training
-- Detailed logging and analysis
+- Detailed logging and metrics tracking
 
 ```python
 from utils.feature_selector_api import XGBoostFeatureSelector
@@ -104,20 +104,37 @@ Top Selected Features:
 
 ## Best Practices
 
-1. **Data Quality**
-   - Clean data before feature selection
-   - Handle missing values appropriately
-   - Remove constant or near-constant features
+1. Data Preparation
+   - Handle missing values
+   - Convert data types appropriately
+   - Remove constant/duplicate columns
 
-2. **Feature Count**
-   - Start with a larger feature set
-   - Use min_features parameter to ensure sufficient features
-   - Monitor feature importance distribution
+2. Parameter Tuning
+   - Adjust `n_bootstrap` based on dataset size
+   - Set `correlation_threshold` based on domain knowledge
+   - Define `target_features` range appropriately
 
-3. **Performance Optimization**
-   - Use CPU-optimized settings
-   - Enable early stopping for faster training
-   - Monitor memory usage with large datasets
+3. Performance Monitoring
+   - Review stability scores
+   - Check correlation groups
+   - Monitor elimination metrics
+   - Validate final feature set
+
+## Error Handling
+
+The system includes comprehensive error handling:
+- Data validation
+- Parameter verification
+- Process monitoring
+- Detailed logging
+
+## Maintenance
+
+Regular maintenance tasks:
+1. Review MLflow experiments
+2. Clean up temporary files
+3. Update feature selection criteria
+4. Validate against new data
 
 ## Windows 11 Considerations
 
@@ -196,3 +213,38 @@ Top Selected Features:
   - Initial feature selection implementation
   - Basic importance metrics
   - Simple logging 
+
+## Output and Results
+
+The system generates several outputs:
+
+1. Selected Features List
+   - Saved to `results/feature_selection/selected_features.txt`
+   - Contains final selected feature names
+
+2. MLflow Metrics
+   - Feature importance scores
+   - Selection stability metrics
+   - Cross-validation scores
+   - Performance metrics
+
+3. Model Configuration
+   - Saved as `model_config.json`
+   - Contains:
+     - Selected features
+     - Feature importance scores
+     - Stability scores
+
+## MLflow Integration
+
+The system automatically logs:
+- Optimization parameters
+- Feature importance scores
+- Selection metrics
+- Performance metrics
+- Model configuration
+
+Access MLflow UI to view:
+```bash
+mlflow ui --backend-store-uri file:///path/to/mlruns
+``` 

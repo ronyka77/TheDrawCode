@@ -637,12 +637,26 @@ def import_feature_select_draws_api():
     # Create target variable
     data['is_draw'] = (data['match_outcome'] == 2).astype(int)
 
-    # Replace inf and nan values
-    data = data.replace([np.inf, -np.inf], 0)
-    data = data.fillna(0)
-
-    for col in data.columns:
-        data[col] = pd.to_numeric(data[col], errors='coerce')
+     # Select features and target
+    columns_to_drop = [
+        'match_outcome',
+        'home_goals',
+        'away_goals',
+        'total_goals',
+        'score',
+        'Referee', 
+        'draw', 
+        'venue_name', 
+        'Home', 
+        'Away', 
+        'away_win', 
+        'Date',
+        'date',
+        'referee_draw_rate', 
+        'referee_draws', 
+        'referee_match_count'
+    ]
+    data = data.drop(columns=columns_to_drop, errors='ignore')
 
     # Convert all numeric-like columns (excluding problematic_cols that have
     # already been handled)
@@ -673,29 +687,13 @@ def import_feature_select_draws_api():
         stratify=data['is_draw']
     )
 
-    # Select features and target
-    columns_to_drop = [
-        'is_draw',
-        'match_outcome',
-        'home_goals',
-        'away_goals',
-        'total_goals',
-        'score',
-        'Referee', 
-        'draw', 
-        'venue_name', 
-        'Home', 
-        'Away', 
-        'away_win', 
-        'Date',
-        'referee_draw_rate', 
-        'referee_draws', 
-        'referee_match_count'
-    ]
-    X_train = train_data.drop(columns=columns_to_drop, errors='ignore')
+   
+    X_train = train_data.drop(columns='is_draw', errors='ignore')
     y_train = train_data['is_draw']
-    X_test = test_data.drop(columns=columns_to_drop, errors='ignore')
+    X_test = test_data.drop(columns='is_draw', errors='ignore')
     y_test = test_data['is_draw']
+
+
 
     # Add verification of dtypes
     print("\nVerifying final dtypes:")

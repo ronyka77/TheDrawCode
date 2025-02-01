@@ -124,6 +124,8 @@ class MLFlowManager:
 
         except Exception as e:
             self.logger.error(f"Error syncing with shared storage: {e}")
+            
+
 
     def backup_to_shared(self) -> None:
         """Backup local MLflow data to shared storage based on run IDs"""
@@ -277,9 +279,14 @@ class MLFlowManager:
 
     def create_missing_meta_yaml(self, run_path: Path, experiment_id: str, run_id: Optional[str] = None) -> None:
         """Create meta.yaml file if it doesn't exist"""
-        run_path = str(run_path).replace('\\', '/')
-        meta_path = run_path / 'meta.yaml'
         try:
+            # Convert run_path to Path object if it's a string
+            if isinstance(run_path, str):
+                run_path = Path(run_path)
+            
+            # Create the meta.yaml path using Path object
+            meta_path = run_path / 'meta.yaml'
+            
             if run_id is None:
                 meta_data = {
                     'artifact_location': f"file:///{run_path}",
@@ -290,8 +297,6 @@ class MLFlowManager:
                     'name': f"experiment_{experiment_id}"
                 }
             else:
-             
-                # Create basic meta.yaml structure
                 meta_data = {
                     'artifact_uri': f"file:///{run_path}/artifacts",
                     'end_time': int(time.time() * 1000),
@@ -309,15 +314,66 @@ class MLFlowManager:
                     'tags': [],
                     'user_id': os.getlogin()
                 }
-                
+            
             # Write the file
             with open(meta_path, 'w') as f:
                 yaml.safe_dump(meta_data, f)
-                
+            
             self.logger.info(f"Created missing meta.yaml at {meta_path}")
             
         except Exception as e:
             self.logger.error(f"Error creating meta.yaml: {str(e)}")
+            raise
+
+    def normalize_all_meta_yaml_paths(self) -> None:
+        """Normalize paths in all meta.yaml files in the mlruns directory"""
+        try:
+            mlruns_path = Path(self.mlruns_dir)
+            if not mlruns_path.exists():
+                self.logger.error(f"mlruns directory not found: {mlruns_path}")
+                return
+
+            # Get the local tracking URI
+            local_path = self.config.config["tracking_uri"]
+            
+            # Walk through all directories in mlruns
+            for root, dirs, files in os.walk(mlruns_path):
+                # Check if this is an experiment or run directory
+                path_parts = Path(root).parts
+                if len(path_parts) >= 2 and path_parts[-1].isdigit():
+                    # This is either an experiment or run directory
+                    meta_path = Path(root) / 'meta.yaml'
+                    
+                    if not meta_path.exists():
+                        try:
+                            # Determine if this is an experiment or run directory
+                            if len(path_parts) >= 3 and path_parts[-2].isdigit():
+                                # This is a run directory
+                                experiment_id = path_parts[-3]
+                                run_id = path_parts[-2]
+                                self.create_missing_meta_yaml(meta_path.parent, experiment_id, run_id)
+                                self.logger.info(f"Created missing run meta.yaml at {meta_path}")
+                            else:
+                                # This is an experiment directory
+                                experiment_id = path_parts[-1]
+                                self.create_missing_meta_yaml(meta_path.parent, experiment_id)
+                                self.logger.info(f"Created missing experiment meta.yaml at {meta_path}")
+                        except Exception as e:
+                            self.logger.error(f"Error creating meta.yaml at {meta_path}: {e}")
+                            continue
+                    
+                    # Normalize the paths in the meta.yaml
+                    try:
+                        self.normalize_meta_yaml_paths(meta_path, local_path)
+                        self.logger.info(f"Processed: {meta_path}")
+                    except Exception as e:
+                        self.logger.error(f"Error processing {meta_path}: {e}")
+                        continue
+
+            self.logger.info("Completed processing all meta.yaml files")
+            
+        except Exception as e:
+            self.logger.error(f"Error in normalize_all_meta_yaml_paths: {e}")
             raise
 
 def create_experiment_run(experiment_name: str, experiment_id: str):
@@ -360,7 +416,13 @@ if __name__ == "__main__":
     manager = MLFlowManager()
     client = MlflowClient()
    
-    manager.sync_with_shared()
-    manager.backup_to_shared()
+    # manager.sync_with_shared()
+    # manager.backup_to_shared()
+        
+    try:
+        manager.normalize_all_meta_yaml_paths()
+        print("Successfully processed all meta.yaml files")
+    except Exception as e:
+        print(f"Error processing meta.yaml files: {e}")
         
    
