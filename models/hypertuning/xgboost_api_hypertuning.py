@@ -1,3 +1,8 @@
+"""
+XGBoost model implementation for binary classification with global training capabilities.
+Provides methods for model training, prediction, and analysis with configurable parameters.
+"""
+
 # Standard library imports
 import os
 import sys
@@ -16,9 +21,35 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 project_root = Path(__file__).resolve().parents[2]
 sys.path.append(str(project_root))
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
+
 # Local imports
 from utils.logger import ExperimentLogger
 from utils.create_evaluation_set import create_evaluation_sets_draws_api, get_selected_api_columns_draws, import_training_data_draws_api, setup_mlflow_tracking
+
+# Core Configuration for CPU-Only Training
+HYPERPARAM_SPEC = {
+    'tree_method': 'hist',
+    'device': 'cpu',
+    'sampler': optuna.samplers.TPESampler(
+        consider_prior=True,
+        prior_weight=1.0,
+        n_startup_trials=10,
+        n_ei_candidates=24,
+        seed=42
+    ),
+    'ranges': {
+        'learning_rate': (0.0001, 0.1, 'log'),
+        'min_child_weight': (10, 500),
+        'gamma': (1.0, 30.0),
+        'subsample': (0.2, 1.0),
+        'colsample_bytree': (0.2, 1.0),
+        'scale_pos_weight': (0.1, 20.0),
+        'reg_alpha': (0.01, 20.0, 'log'),
+        'reg_lambda': (0.01, 30.0, 'log'),
+        'n_estimators': (3000, 30000),
+        'max_depth': (3, 12)  # Added max_depth parameter
+    }
+}
 
 selected_columns = get_selected_api_columns_draws()
 experiment_name = "global_xgboost_hypertuning"
@@ -47,14 +78,24 @@ class GlobalHypertuner:
                  logger: Optional[ExperimentLogger] = None,
                  target_precision: float = TARGET_PRECISION,
                  target_recall: float = TARGET_RECALL,
-                 precision_weight: float = PRECISION_WEIGHT     # Weight for precision vs recall
-                ):
+                 precision_weight: float = PRECISION_WEIGHT,
+                 hyperparam_spec: Dict = HYPERPARAM_SPEC):
+        """Initialize the hypertuner with specified configuration.
+        
+        Args:
+            logger: Optional logger instance
+            target_precision: Target precision threshold
+            target_recall: Target recall threshold
+            precision_weight: Weight for precision in optimization
+            hyperparam_spec: Hyperparameter specification dictionary
+        """
         self.logger = logger or ExperimentLogger()
         self.best_params: Dict[str, Any] = {}
         self.target_precision = target_precision
         self.target_recall = target_recall
         self.precision_weight = precision_weight
         self.best_metrics = {'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'threshold': 0.5}
+        self.hyperparam_spec = hyperparam_spec
     
     def _find_optimal_threshold(
         self,
@@ -102,120 +143,97 @@ class GlobalHypertuner:
             draw_rate = target_train.mean()
             safe_draw_rate = max(draw_rate, 0.001)
             
+            # Initialize parameters with CPU-specific settings
             param = {
                 'objective': 'binary:logistic',
-                'tree_method': 'hist',
+                'tree_method': self.hyperparam_spec['tree_method'],
+                'device': self.hyperparam_spec['device'],
                 'early_stopping_rounds': 500,
                 'eval_metric': ['error', 'auc', 'aucpr'],
-                # Widen range for learning rate
-                'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.1, log=True),
-                
-                # Widen range for min_child_weight
-                'min_child_weight': trial.suggest_int('min_child_weight', 10, 500),
-                
-                # Widen range for gamma
-                'gamma': trial.suggest_float('gamma', 1.0, 30.0),
-                
-                # Widen range for subsample
-                'subsample': trial.suggest_float('subsample', 0.2, 1.0),
-                
-                # Widen range for colsample_bytree
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.2, 1.0),
-                
-                # Widen range for scale_pos_weight
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.1, 20.0),
-                
-                # Widen range for reg_alpha
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.01, 20.0, log=True),
-                
-                # Widen range for reg_lambda
-                'reg_lambda': trial.suggest_float('reg_lambda', 0.01, 30.0, log=True),
-                
-                # Widen range for n_estimators
-                'n_estimators': trial.suggest_int('n_estimators', 3000, 30000)
+                'verbosity': 0,  # Reduce verbosity
+                'nthread': -1    # Use all CPU cores
             }
             
+            # Add hyperparameters based on ranges specification
+            for param_name, param_range in self.hyperparam_spec['ranges'].items():
+                if len(param_range) == 3 and param_range[2] == 'log':
+                    param[param_name] = trial.suggest_float(
+                        param_name, 
+                        param_range[0], 
+                        param_range[1], 
+                        log=True
+                    )
+                elif isinstance(param_range[0], int):
+                    param[param_name] = trial.suggest_int(
+                        param_name,
+                        param_range[0],
+                        param_range[1]
+                    )
+                else:
+                    param[param_name] = trial.suggest_float(
+                        param_name,
+                        param_range[0],
+                        param_range[1]
+                    )
+
+            # Create and train model
             model = xgb.XGBClassifier(**param)
+            
+            # Add early stopping callback
+            early_stopping_callback = xgb.callback.EarlyStopping(
+                rounds=param['early_stopping_rounds'],
+                metric_name='aucpr',
+                save_best=True
+            )
+            
+            # Fit model with callbacks
             model.fit(
                 features_train, 
                 target_train,
-                eval_set=[(features_test, target_test)],
+                eval_set=[(features_val, target_val)],
                 verbose=False
             )
             
-            threshold = 0.53
-            probas = model.predict_proba(features_val)[:, 1]
-            y_pred = (probas >= threshold).astype(int)
-            precision = precision_score(target_val, y_pred, zero_division=0)
-            recall = recall_score(target_val, y_pred, zero_division=0)
-            f1 = f1_score(target_val, y_pred, zero_division=0)
-            predicted_rate = float(y_pred.mean())
-            metrics = {
-                'precision': precision,
-                'recall': recall,
-                'f1': f1,
-                'threshold': threshold,
-                'predicted_rate': predicted_rate
-            }
+            # Find optimal threshold
+            threshold, metrics = self._find_optimal_threshold(
+                model, features_val, target_val
+            )
             
-            # Debug logging
-            print(f"\nTrial {trial.number} metrics:")
-            print(f"Precision: {metrics['precision']:.4f}")
-            print(f"Recall: {metrics['recall']:.4f}")
-            print(f"F1: {metrics['f1']:.4f}")
-            print(f"Threshold: {threshold:.4f}")
-            print(f"Predicted rate: {predicted_rate:.4f}")
-            print(f"Trial parameters: {param}")
+            # Calculate weighted score based on precision and recall targets
+            precision_score = metrics['precision'] / self.target_precision
+            recall_score = metrics['recall'] / self.target_recall
             
-
-            # Calculate normalized scores
-            precision_score_value = metrics['precision'] / self.target_precision
-            recall_score_value = metrics['recall'] / self.target_recall
+            weighted_score = (
+                precision_score * self.precision_weight + 
+                recall_score * (1 - self.precision_weight)
+            )
             
-            # Prioritize precision more heavily
-            precision_weight = 0.8
-            recall_weight = 0.2
-            weighted_score = (precision_score_value * precision_weight + 
-                            recall_score_value * recall_weight)
-            
-             # Add precision threshold penalty
-            if metrics['precision'] < 0.37:
-                weighted_score *= 0.6
-            if metrics['precision'] > 0.45:
-                weighted_score *= 1.3
+            # Apply penalties for not meeting minimum requirements
+            if metrics['precision'] < 0.35:
+                weighted_score *= 0.5
             if metrics['recall'] < 0.20:
-                weighted_score *= 0.6
-            if metrics['recall'] < 0.10:
-                weighted_score *= 0.2
+                weighted_score *= 0.5
                 
-            print(f"Final weighted score: {weighted_score:.4f}")
+            # Log metrics
+            self.logger.info(f"\nTrial {trial.number} Results:")
+            self.logger.info(f"Parameters: {param}")
+            self.logger.info(f"Precision: {metrics['precision']:.4f}")
+            self.logger.info(f"Recall: {metrics['recall']:.4f}")
+            self.logger.info(f"F1: {metrics['f1']:.4f}")
+            self.logger.info(f"Threshold: {threshold:.4f}")
+            self.logger.info(f"Weighted Score: {weighted_score:.4f}")
             
-            # Update best metrics if this trial is better
-            if (metrics['precision'] >= self.best_metrics['precision'] and 
-                metrics['recall'] >= self.best_metrics['recall']):
-                self.best_metrics = metrics
-            
-            # Set trial attributes for callback
+            # Store trial attributes
             trial.set_user_attr('threshold', threshold)
             trial.set_user_attr('precision', metrics['precision'])
             trial.set_user_attr('recall', metrics['recall'])
             trial.set_user_attr('f1', metrics['f1'])
-           
-            self.logger.info(f"Metrics: {metrics}")
-            self.logger.info(f"Precision: {metrics['precision']}")
-            self.logger.info(f"Recall: {metrics['recall']}")
-            self.logger.info(f"F1: {metrics['f1']}")
-            self.logger.info(f"Threshold: {threshold}")
             
             return weighted_score
+            
         except Exception as e:
-            self.logger.error(f"Error in objective function: {str(e)}")
-            # Set default values for trial attributes when there's an error
-            trial.set_user_attr('threshold', 0.5)
-            trial.set_user_attr('precision', 0.0)
-            trial.set_user_attr('recall', 0.0)
-            trial.set_user_attr('f1', 0.0)
-            return float('-inf')
+            self.logger.error(f"Error in trial {trial.number}: {str(e)}")
+            raise
 
     def _log_mlflow_metrics(self, metrics: Dict[str, float], prefix: str) -> None:
         """Log metrics to MLflow with proper prefix."""
@@ -233,23 +251,7 @@ class GlobalHypertuner:
         X_test: pd.DataFrame,
         y_test: pd.Series,
         n_trials: int = 100) -> Dict[str, Any]:
-        """Tune hyperparameters optimizing for validation metrics.
-        
-        Args:
-            X_train: Training features
-            y_train: Training labels
-            X_val: Validation features
-            y_val: Validation labels
-            X_test: Test features
-            y_test: Test labels
-            n_trials: Number of optimization trials
-            
-        Returns:
-            Dict containing best parameters and metrics
-            
-        Raises:
-            ValueError: If insufficient training samples
-        """
+        """Tune hyperparameters optimizing for validation metrics."""
         if len(X_train) < self.MIN_SAMPLES:
             raise ValueError(f"Insufficient samples: {len(X_train)} < {self.MIN_SAMPLES}")
         
@@ -257,7 +259,11 @@ class GlobalHypertuner:
         self.logger.info(f"Target metrics - Precision: {self.target_precision:.2f}, "
                         f"Recall: {self.target_recall:.2f}")
         
-        study = optuna.create_study(direction='maximize')
+        # Create study with specified sampler from hyperparam_spec
+        study = optuna.create_study(
+            direction='maximize',
+            sampler=self.hyperparam_spec['sampler'],
+        )
         
         def callback(study: optuna.study.Study, trial: optuna.trial.FrozenTrial):
             if study.best_trial == trial:

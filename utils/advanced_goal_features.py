@@ -150,15 +150,16 @@ class AdvancedGoalFeatureEngineer:
 
             # 13. Team Style Compatibility
             df['home_style_compatibility'] = (df['Home_possession_mean'] * 
-                df['Home_passes_mean']).div(1000).fillna(0)
+                df['Home_passes_mean']).div(100).fillna(0)
             df['away_style_compatibility'] = (df['away_possession_mean']  * 
-                df['Away_passes_mean']).div(1000).fillna(0)
+                df['Away_passes_mean']).div(100).fillna(0)
+
 
             # 14. Attendance Impact on Performance
             df['home_crowd_factor'] = ( df['home_win_rate'] * 
-                df['home_form_momentum']).div(10000).fillna(0)
+                df['home_form_momentum']).div(100).fillna(0)
             df['away_crowd_resistance'] = (df['away_win_rate'] * 
-                df['away_form_momentum']).div(10000).fillna(0)
+                df['away_form_momentum']).div(100).fillna(0)
 
             # 15. Defensive Organization
             df['home_defensive_organization'] = ( df['Home_saves_mean'] * 

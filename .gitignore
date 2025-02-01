@@ -132,3 +132,5 @@ model_global/soccer_draw_model_pycaret.pkl.pkl
 soccer_draw_model_pycaret.pkl
 logs.log
 .cursorrules_old
+models/saved/xgboost_api_20250201_1755.pkl
+models/saved/xgboost_api_20250201_1924.pkl

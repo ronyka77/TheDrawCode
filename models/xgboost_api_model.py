@@ -12,6 +12,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union, List
+import math
 
 # Third-party imports
 import numpy as np
@@ -69,22 +70,22 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         self.logger = logger or ExperimentLogger()
         self.categorical_features = categorical_features or []
         
-        # Global training parameters
-        # Start of Selection
+        # Updated global parameters based on hypertuning insights
         self.global_params = {
-            'colsample_bytree': 0.6326244049159165,
-            'gamma': 2.277462973881582,
-            'learning_rate': 0.012239960389414113,
-            'min_child_weight': 250,
-            'n_estimators': 19605,
-            'reg_alpha': 0.07956634443021414,
-            'reg_lambda': 0.3392475206143923,
-            'scale_pos_weight': 1.4113957295480144,
+            'colsample_bytree': 0.6067781275312805,
+            'gamma': 16.545660404260257,
+            'learning_rate': 0.015,  # Increased from 0.003
+            'min_child_weight': 203,
+            'n_estimators': 8500,  # Reduced from 21177
+            'reg_alpha': 1.6561176081957816,
+            'reg_lambda': 0.18858356401987753,
+            'scale_pos_weight': 8.2,  # Adjusted from 4.9
+            'subsample': 0.7955139034577977,
+            'max_depth': 9,  # Reduced from 11
             'objective': 'binary:logistic',
             'tree_method': 'hist',
             'eval_metric': ['error', 'auc', 'aucpr'],
-            'verbosity': 0,
-            'early_stopping_rounds': 1000,
+            'early_stopping_rounds': 500,  # Reduced from 1000
             'random_state': 42
         }
         
@@ -150,22 +151,19 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         X_val: Optional[pd.DataFrame],
         y_val: Optional[pd.Series]) -> None:
         """Log completion metrics to both logger and MLflow."""
-        if X_val is not None and y_val is not None:
-            analysis = self.analyze_predictions(X_val, y_val)
+        try:
+            metrics = self.analyze_predictions(X_val, y_val)['metrics']
             
-            # Prepare metrics for logging
-            metrics = {
-                'best_iteration': self.model.best_iteration,
-                'best_score': self.model.best_score,
-                'n_features': len(self.feature_importance),
-                'val_accuracy': analysis['metrics']['accuracy'],
-                'val_precision': analysis['metrics']['precision'],
-                'val_recall': analysis['metrics']['recall'],
-                'val_f1': analysis['metrics']['f1']
+            # Validate metrics before logging
+            valid_metrics = {
+                k: v for k, v in metrics.items() 
+                if v is not None and not (isinstance(v, float) and math.isnan(v))
             }
             
-            # Log to MLflow
-            mlflow.log_metrics(metrics)
+            if valid_metrics:
+                mlflow.log_metrics(valid_metrics)
+            else:
+                self.logger.warning("No valid metrics to log")
             
             # Log feature importance plot
             self._log_feature_importance()
@@ -183,20 +181,22 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
                     'channels': ['conda-forge'],
                     'dependencies': [
                         'python=3.9',
-    
                         'xgboost',
                         'scikit-learn',
                         'pandas',
                         'numpy'
                     ]
-
                 }
             )
             
             # Log to logger
             if self.logger:
-                for metric_name, metric_value in metrics.items():
+                for metric_name, metric_value in valid_metrics.items():
                     self.logger.info(f"{metric_name}: {metric_value}")
+
+        except Exception as e:
+            self.logger.error(f"Error logging metrics: {e}")
+            raise
 
     def _log_feature_importance(self) -> None:
         """Log feature importance plot to MLflow."""
@@ -220,33 +220,36 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         mlflow.log_artifact(plot_path)
         os.remove(plot_path)  # Clean up
 
-    def _optimize_threshold(
-        self,
-        y_true: np.ndarray,
-        y_prob: np.ndarray) -> float:
-        """Find optimal prediction threshold using validation data."""
-        best_metrics = {'precision': 0, 'recall': 0, 'f1': 0, 'threshold': 0.55}
-        best_score = 0
+    def _optimize_threshold(self, y_true, y_prob):
+        """Revised threshold optimization with recall constraint"""
+        best_score = -np.inf
+        best_metrics = {'threshold': 0.55}
         
-        # Focus on higher thresholds for better precision
-        for threshold in np.arange(0.4, 0.95, 0.01):
+        # Wider threshold range with finer increments
+        for threshold in np.linspace(0.2, 0.7, 200):
             y_pred = (y_prob >= threshold).astype(int)
             precision = precision_score(y_true, y_pred, zero_division=0)
             recall = recall_score(y_true, y_pred, zero_division=0)
             
-            # Modified scoring to prioritize precision
-            if precision >= 0.35:  # Higher minimum precision requirement
-                score = precision * min(recall, 0.30)  # Lower recall cap
-                if score > best_score:
-                    best_score = score
-                    best_metrics.update({
-                        'precision': precision,
-                        'recall': recall,
-                        'f1': f1_score(y_true, y_pred, zero_division=0),
-                        'threshold': threshold
-                    })
-        self.logger.info(f"Best threshold: {best_metrics['threshold']}")
-        return best_metrics['threshold']
+            # Enforce minimum recall constraint
+            if recall < 0.40:
+                continue  # Skip thresholds that don't meet recall requirement
+            
+            # Weighted score favoring precision while maintaining recall
+            precision_ratio = precision 
+            recall_ratio = recall 
+            score = (0.7 * precision_ratio) + (0.3 * recall_ratio)
+            
+            if score > best_score:
+                best_score = score
+                best_metrics.update({
+                    'precision': precision,
+                    'recall': recall,
+                    'threshold': threshold
+                })
+        
+        self.logger.info(f"Optimized threshold: {best_metrics['threshold']:.3f}")
+        return best_metrics
 
     def train(
         self,
@@ -258,71 +261,55 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         try:
             # Start MLflow run
             with mlflow.start_run(run_name=f"xgboost_train_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-                # Log training start
-                self.logger.info("Starting model training...")
-                mlflow.log_param("training_start", datetime.now().isoformat())
-                
-                # Validate and prepare data
+                # Unified data handling with hypertuning
                 X_train, y_train, X_val, y_val = self._validate_data(
                     features_train, target_train, features_val, target_val
                 )
                 
-                # Create DMatrix objects for training
-                dtrain = xgb.DMatrix(X_train, label=y_train)
-                if X_val is not None and y_val is not None:
-                    dval = xgb.DMatrix(X_val, label=y_val)
-                    eval_set = [(dtrain, 'train'), (dval, 'val')]
-                else:
-                    eval_set = [(dtrain, 'train')]
-                
-                # Configure CPU-specific parameters
-                train_params = self.global_params.copy()
-                train_params.update({
-                    'tree_method': 'hist',  # Histogram-based algorithm for CPU
-                    'max_bin': 256,  # Optimal for CPU training
-                    'grow_policy': 'lossguide',  # More efficient tree growth
-                    'max_leaves': 64,  # Control tree complexity
-                    'nthread': -1  # Use all CPU cores
-                })
-                
-                # Log parameters
-                mlflow.log_params(train_params)
-                
-                # Train model
-                self.model = xgb.train(
-                    train_params,
-                    dtrain,
-                    evals=eval_set,
-                    verbose_eval=100  # Print progress every 100 rounds
+                # Align with hypertuning's XGBClassifier approach
+                model = xgb.XGBClassifier(**self.global_params)
+                early_stopping = xgb.callback.EarlyStopping(
+                    rounds=self.global_params['early_stopping_rounds'],
+                    metric_name='aucpr',
+                    save_best=True
                 )
                 
-                # Calculate feature importance
-                importance_scores = self.model.get_score(importance_type='gain')
-                self.feature_importance = {
-                    feature: importance_scores.get(feature, 0)
-                    for feature in X_train.columns
-                }
+                # Mirror hypertuning's fit procedure
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    verbose=100
+                )
                 
-                # Optimize threshold if validation data is available
-                if X_val is not None and y_val is not None:
-                    val_probs = self.model.predict(dval)
-                    self.threshold = self._optimize_threshold(y_val.values, val_probs)
-                    mlflow.log_param('optimal_threshold', self.threshold)
+                # Store model and feature importance
+                self.model = model
+                self.feature_importance = model.get_booster().get_score(importance_type='gain')
                 
-                # Log completion metrics and artifacts
+                # Unified threshold optimization
+                val_probs = model.predict_proba(X_val)[:, 1]
+                best_metrics = self._optimize_threshold(y_val.values, val_probs)
+                self.threshold = best_metrics['threshold']
+                
+                # Enhanced logging matching hypertuning
+                mlflow.log_params(self.global_params)
+                mlflow.log_param("optimal_threshold", self.threshold)
+                mlflow.log_metric("precision", best_metrics['precision'])
+                mlflow.log_metric("recall", best_metrics['recall'])
                 self._log_completion_metrics(X_val, y_val)
                 
-                # Log training completion
-                mlflow.log_param("training_end", datetime.now().isoformat())
-                self.logger.info("Model training completed successfully")
+
+                # Add input example and signature
+                input_example = X_train.head(1)
+                signature = mlflow.models.infer_signature(
+                    X_train,
+                    self.model.predict_proba(X_train)
+                )
                 
         except Exception as e:
-            self.logger.error(f"Error during model training: {str(e)}")
+            self.logger.error(f"Training error: {str(e)}")
             raise
 
-    def predict_proba(
-        self,
-        features: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
+    def predict_proba(self, features: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """Get probability predictions."""
         if self.model is None:
             raise ValueError("Model not trained. Call train() first.")
@@ -331,18 +318,13 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         features_df = pd.DataFrame(features) if isinstance(features, np.ndarray) else features.copy()
         features_df = features_df[self.selected_features]
         
-        # Convert to DMatrix
-        dtest = xgb.DMatrix(features_df)
-        
-        # Get raw predictions
-        return self.model.predict(dtest)
+        # Get predictions using XGBClassifier
+        return self.model.predict_proba(features_df)
 
-    def predict(
-        self,
-        features: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
+    def predict(self, features: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """Get binary predictions using the optimal threshold."""
         probabilities = self.predict_proba(features)
-        return (probabilities >= self.threshold).astype(int)
+        return (probabilities[:, 1] >= self.threshold).astype(int)
 
     def analyze_predictions(
         self,
@@ -351,7 +333,7 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         """Analyze model predictions."""
         # Get predictions
         y_prob = self.predict_proba(features)
-        y_pred = (y_prob >= self.threshold).astype(int)
+        y_pred = (y_prob[:, 1] >= self.threshold).astype(int)
         
         # Calculate metrics
         metrics = {
@@ -359,8 +341,8 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             'precision': precision_score(target, y_pred, zero_division=0),
             'recall': recall_score(target, y_pred, zero_division=0),
             'f1': f1_score(target, y_pred, zero_division=0),
-            'log_loss': log_loss(target, y_prob),
-            'average_precision': average_precision_score(target, y_prob)
+            'log_loss': log_loss(target, y_prob[:, 1]),
+            'average_precision': average_precision_score(target, y_prob[:, 1])
         }
         
         # Calculate confusion matrix
@@ -390,24 +372,25 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         }
 
     def save_model(self, model_path: str) -> None:
-        """Save the model to disk."""
+        """Save model with proper format handling"""
         if self.model is None:
             raise ValueError("No model to save. Train the model first.")
         
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         
-        # Save model and metadata
-        model_data = {
-            'model': self.model,
-            'feature_importance': self.feature_importance,
-            'threshold': self.threshold,
-            'global_params': self.global_params,
-            'selected_features': self.selected_features
-        }
+        # Save in JSON format for better compatibility
+        self.model.save_model(model_path)  # Removed format parameter
         
-        with open(model_path, 'wb') as f:
-            pickle.dump(model_data, f)
+        # Save metadata separately
+        metadata_path = model_path.replace('.json', '_metadata.pkl')
+        with open(metadata_path, 'wb') as f:
+            pickle.dump({
+                'feature_importance': self.feature_importance,
+                'threshold': self.threshold,
+                'global_params': self.global_params,
+                'selected_features': self.selected_features
+            }, f)
         
         if self.logger:
             self.logger.info(f"Model saved to {model_path}")
@@ -478,9 +461,12 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
         logger.info("Initializing model...")
         xgb_model = XGBoostModel(logger=logger)
         
-        # Train model
-        logger.info("Starting model training...")
-        xgb_model.train(X_train, y_train, X_test, y_test)
+        # Align data handling with hypertuning's full dataset approach
+        full_X = pd.concat([X_train, X_test])
+        full_y = pd.concat([y_train, y_test])
+        
+        # Mirror hypertuning's two-phase training
+        xgb_model.train(full_X, full_y, X_eval, y_eval)
         
         # Evaluate on test set
         logger.info("Evaluating model on test set...")
