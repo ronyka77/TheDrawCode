@@ -62,8 +62,8 @@ function Start-FeatureImplementation {
         return
     }
     
-    # Create feature branch
-    $branchName = "feature/$featureId-$($featureName -replace ' ','-')"
+    # Create feature branch: only include feature ID (e.g., feature/PLAN-42)
+    $branchName = "feature/$featureId"
     Write-Host "Creating branch: $branchName" -ForegroundColor Cyan
     git checkout -b $branchName
     if ($LASTEXITCODE -ne 0) {
@@ -159,8 +159,8 @@ function Start-BugFix {
         return
     }
     
-    # Create bug fix branch
-    $branchName = "bugfix/$bugId-$($bugDesc -replace ' ','-')"
+    # Create bug fix branch: only include bug ID (e.g., bugfix/BUG-17)
+    $branchName = "bugfix/$bugId"
     Write-Host "Creating branch: $branchName" -ForegroundColor Cyan
     git checkout -b $branchName
     if ($LASTEXITCODE -ne 0) {

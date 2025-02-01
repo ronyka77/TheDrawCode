@@ -1024,7 +1024,7 @@ def create_evaluation_sets_draws_api():
     print(f"shape of data: {data.shape}")
     data['match_outcome'] = data['match_outcome'].astype(int)
     data['is_draw'] = (data['match_outcome'] == 2).astype(int)
-    print(data.head())
+    # print(data.head())
     # Ensure 'date_encoded' column exists
     if 'date_encoded' not in data.columns:
         # Define the reference date
@@ -1076,9 +1076,8 @@ def create_evaluation_sets_draws_api():
         except Exception as e:
             print(f"Error converting column {col}: {str(e)}")
             continue
-    print(f"Converted data: {X.shape}")
-    # Convert all numeric-like columns to numeric types, handling errors by
-    # coercing
+    print(f"Converted data: {data.shape}")
+    # Convert all numeric-like columns to numeric types, handling errors by coercing
     for col in data.columns:
         try:
             if col in data:  # Verify column exists
@@ -1502,9 +1501,10 @@ if __name__ == "__main__":
     # print("Prediction data updated successfully")
     # update_api_prediction_data()
     # print("Prediction data updated successfully")
-    fixtures = get_real_api_scores_from_excel(['1209958'])
+    fixtures = create_evaluation_sets_draws_api()
     print(fixtures)
     # df = get_real_api_scores_from_excel()
     # print(df.shape)
+
 
     # sync_mlflow()
