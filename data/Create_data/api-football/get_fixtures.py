@@ -47,6 +47,7 @@ class ApiFootball:
         self.db = self.client["api-football"]  # Database name
         self.fixtures_collection = self.db["fixtures"] # Collection name
         self.leagues_collection = self.db["leagues"] # Collection name
+        self.venues_collection = self.db["venues"] # Collection name
 
     def _get_request(self, endpoint: str, params: Dict = None) -> Dict:
         """
@@ -489,6 +490,124 @@ class ApiFootball:
         except Exception as e:
             self.logger.error(f"Error deleting fixtures: {e}")
 
+    def get_teams_missing_venues(self) -> List[int]:
+        """
+        Retrieves team IDs from fixtures collection that don't have corresponding venue data.
+        
+        Returns:
+            List of team IDs that need venue information
+        """
+        try:
+            # Get all unique team IDs from fixtures collection
+            team_ids = self.fixtures_collection.distinct("teams.home.id") + \
+                      self.fixtures_collection.distinct("teams.away.id")
+            team_ids = list(set(team_ids))
+            
+            # Get all team IDs that have venue data
+            teams_with_venues = self.venues_collection.distinct("team_id")
+            
+            # Find team IDs that don't have venue data
+            missing_teams = list(set(team_ids) - set(teams_with_venues))
+            
+            self.logger.info(f"Found {len(missing_teams)} teams missing venue data")
+            print(f"Found {len(missing_teams)} teams missing venue data")
+            
+            return missing_teams
+            
+        except Exception as e:
+            self.logger.error(f"Error finding teams missing venue data: {e}")
+            return []
+
+    def get_teams_for_leagues(self) -> None:
+        """
+        Retrieves teams for each league ID found in 'league_ids.json' and stores them in a JSON file.
+        """
+        league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
+        output_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'teams.json')
+        
+        try:
+            with open(league_ids_file_path, 'r') as f:
+                league_ids_data = json.load(f)
+            
+            all_teams = []
+            
+            for league_info in league_ids_data:
+                league_id = league_info['league_id']
+                self.logger.info(f"Getting teams for league ID: {league_id}")
+                
+                # Make API request to get teams
+                url = "https://v3.football.api-sports.io/teams"
+                params = {
+                    "league": league_id,
+                    "season": 2024
+                }
+                headers = {
+                    "x-rapidapi-key": self.api_key,
+                    "x-rapidapi-host": "v3.football.api-sports.io"
+                }
+                
+                response = requests.get(url, headers=headers, params=params)
+                
+                if response.status_code == 200:
+                    teams_data = response.json()
+                    if teams_data['results'] > 0:
+                        all_teams.extend(teams_data['response'])
+                        self.logger.info(f"Retrieved {len(teams_data['response'])} teams for league ID: {league_id}")
+                        
+                        # Insert/update venues in MongoDB
+                        for team in teams_data['response']:
+                            try:
+                                # Create document with team and venue data
+                                venue_doc = {
+                                    'team_id': team['team']['id'],
+                                    'team': {
+                                        'id': team['team']['id'],
+                                        'name': team['team']['name'],
+                                        'code': team['team']['code'],
+                                        'country': team['team']['country'],
+                                        'founded': team['team']['founded'],
+                                        'national': team['team']['national'],
+                                        'logo': team['team']['logo']
+                                    },
+                                    'venue': {
+                                        'id': team['venue']['id'],
+                                        'name': team['venue']['name'],
+                                        'address': team['venue']['address'],
+                                        'city': team['venue']['city'],
+                                        'capacity': team['venue']['capacity'],
+                                        'surface': team['venue']['surface'],
+                                        'image': team['venue']['image']
+                                    }
+                                }
+                                
+                                # Upsert into venues collection using team_id as unique key
+                                self.venues_collection.update_one(
+                                    {'team_id': team['team']['id']},
+                                    {'$set': venue_doc},
+                                    upsert=True
+                                )
+                                # self.logger.info(f"Updated venue data for team ID: {team['team']['id']}")
+                                
+                            except Exception as e:
+                                self.logger.error(f"Error updating venue data for team ID {team['team']['id']}: {e}")
+                                
+                    else:
+                        self.logger.warning(f"No teams found for league ID: {league_id}")
+                else:
+                    self.logger.error(f"Error getting teams for league ID {league_id}: {response.status_code}")
+                
+                # Respect API rate limits
+                time.sleep(5)
+            
+            # Save all teams to JSON file
+            with open(output_file_path, 'w') as f:
+                json.dump(all_teams, f, indent=4)
+            
+            self.logger.info(f"Saved {len(all_teams)} teams to {output_file_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error processing league IDs: {e}")
+
 def main():
     api_key = '9d97f6f9804b592c86be814e246a077d'
     if not api_key:
@@ -506,7 +625,9 @@ def main():
     
     api_football.delete_fixtures_not_in_leagues()
 
-  
+    api_football.get_teams_for_leagues()
+
+    api_football.get_teams_missing_venues()
 
 if __name__ == "__main__":
     main()

@@ -106,7 +106,7 @@ class ELOCalculator:
             matches['away_team_elo'] = 0.0
             elo_count = 0
             # Process matches chronologically
-            for index, row in matches.sort_values('Datum').iterrows():
+            for index, row in matches.sort_values('Date').iterrows():
                 # Check for season change
                 if row['season_encoded'] != self.current_season:
                     self.current_season = row['season_encoded']
@@ -213,7 +213,7 @@ class ELOCalculator:
             self.logger.info("Processing API prediction data...")
             api_prediction_data = pd.read_excel(self.api_prediction_data_path)
             api_prediction_data = convert_numeric_columns(api_prediction_data)
-            api_prediction_data = api_prediction_data.sort_values('Datum')
+            api_prediction_data = api_prediction_data.sort_values('Date')
             api_prediction_data = self.add_elo_scores(api_prediction_data)
             api_prediction_data.to_excel(self.api_prediction_export_path, index=False)
             self.logger.info("API prediction data processed and saved")
@@ -222,7 +222,7 @@ class ELOCalculator:
             self.logger.info("Processing API training data...")
             api_training_data = pd.read_excel(self.api_training_data_path)
             api_training_data = convert_numeric_columns(api_training_data)
-            api_training_data = api_training_data.sort_values('Datum')
+            api_training_data = api_training_data.sort_values('Date')
             api_training_data = self.add_elo_scores(api_training_data)
             api_training_data.to_excel(self.api_training_export_path, index=False)
             self.logger.info("API training data processed and saved")

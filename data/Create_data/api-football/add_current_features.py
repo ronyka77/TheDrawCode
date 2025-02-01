@@ -20,10 +20,12 @@ class MongoDBFeatures:
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]
         self.fixtures_collection = self.db["fixtures"]
+        self.venues_collection = self.db["venues"]
 
     def get_fixtures_with_home_stats(self) -> List[Dict]:
         """
         Retrieves all fixtures from the MongoDB fixtures collection where home.stats is not empty.
+
 
         Returns:
             List[Dict]: List of fixtures with home.stats.
@@ -719,10 +721,78 @@ class MongoDBFeatures:
         print(f"Future matches exported to Excel: {export_path}")
         return df
 
+    def export_venues(self) -> pd.DataFrame:
+        """
+        Exports venue data from MongoDB to an Excel file in the base folder.
+        Normalizes the nested team and venue structure before exporting.
+
+        Returns:
+            pd.DataFrame: DataFrame containing normalized venue data
+        """
+        try:
+            # Get all venues from MongoDB collection
+            venues = list(self.venues_collection.find({}))
+            
+            # Normalize the nested structure
+            normalized_data = []
+            for venue in venues:
+                # Extract team data
+                team_data = venue.get('team', {})
+                # Extract venue data
+                venue_data = venue.get('venue', {})
+                
+                # Create normalized record
+                normalized_record = {
+                    'team_id': team_data.get('id'),
+                    'team_name': team_data.get('name'),
+                    'team_code': team_data.get('code'),
+                    'team_country': team_data.get('country'),
+                    'team_founded': team_data.get('founded'),
+                    'team_national': team_data.get('national'),
+                    'team_logo': team_data.get('logo'),
+                    'venue_id': venue_data.get('id'),
+                    'venue_name': venue_data.get('name'),
+                    'venue_address': venue_data.get('address'),
+                    'venue_city': venue_data.get('city'),
+                    'venue_capacity': venue_data.get('capacity'),
+                    'venue_surface': venue_data.get('surface'),
+                    'venue_image': venue_data.get('image')
+                }
+                normalized_data.append(normalized_record)
+            
+            # Create DataFrame from normalized data
+            df = pd.DataFrame(normalized_data)
+            
+            # Handle missing values
+            for col in df.columns:
+                if df[col].isnull().any():
+                    print(f"Missing values found in column: {col}")
+                    if col.startswith('team_'):
+                        df[col].fillna('Unknown', inplace=True)
+                    elif col.startswith('venue_'):
+                        if col == 'venue_capacity':
+                            df[col].fillna(0, inplace=True)
+                        else:
+                            df[col].fillna('Unknown', inplace=True)
+            
+            # Export to Excel
+            export_path = 'data/Create_data/data_files/base/api_venues.xlsx'
+            df.to_excel(export_path, index=False)
+            print(f"Normalized venues data exported to Excel: {export_path}")
+            return df
+            
+        except Exception as e:
+            print(f"Error exporting venues data: {e}")
+            if self.logger:
+                self.logger.error(f"Error exporting venues data: {e}")
+            return pd.DataFrame()
+
+
 
 def main():
     mongodb_features = MongoDBFeatures()
     print("Getting fixtures with stats")
+
     fixtures_with_stats = mongodb_features.get_fixtures_with_home_stats()
     print("Normalizing fixtures data")
     fixtures_dataframe = mongodb_features.normalize_fixtures_data(fixtures_with_stats)
@@ -736,6 +806,11 @@ def main():
     print("Getting future matches")
     future_matches = mongodb_features.get_future_matches()
     print(f"Future matches shape: {future_matches.shape}")
+    
+    print("Exporting venues")
+    venues = mongodb_features.export_venues()
+    print(f"Venues shape: {venues.shape}")
 
 if __name__ == "__main__":
     main()
+
