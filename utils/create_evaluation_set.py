@@ -10,6 +10,27 @@ from pymongo import MongoClient
 import time
 from functools import wraps
 
+
+# Add project root to Python path
+try:
+    project_root = Path(__file__).parent.parent
+    if not project_root.exists():
+        # Handle network path by using raw string
+        project_root = Path(r"\\".join(str(project_root).split("\\")))
+    sys.path.append(str(project_root))
+    print(f"Project root create_evaluation_set: {project_root}")
+except Exception as e:
+    print(f"Error setting project root path: {str(e)}")
+    # Fallback to current directory if path resolution fails
+    sys.path.append(os.getcwd().parent)
+    print(f"Fallback to current directory: {os.getcwd().parent}")
+
+from utils.advanced_goal_features import AdvancedGoalFeatureEngineer
+from utils.mlflow_utils import MLFlowConfig, MLFlowManager
+# Initialize logger
+from utils.logger import ExperimentLogger
+logger = ExperimentLogger()
+
 # Error codes for standardized logging
 class DataProcessingError:
     # File operations
@@ -31,6 +52,7 @@ class DataProcessingError:
     MONGODB_CONNECTION_ERROR = "E301"
     MLFLOW_ERROR = "E302"
 
+
 # Retry decorator for file operations
 def retry_on_error(max_retries: int = 3, delay: float = 1.0):
     def decorator(func):
@@ -48,27 +70,6 @@ def retry_on_error(max_retries: int = 3, delay: float = 1.0):
             raise last_error
         return wrapper
     return decorator
-
-# Initialize logger
-from utils.logger import ExperimentLogger
-logger = ExperimentLogger()
-
-# Add project root to Python path
-try:
-    project_root = Path(__file__).parent.parent
-    if not project_root.exists():
-        # Handle network path by using raw string
-        project_root = Path(r"\\".join(str(project_root).split("\\")))
-    sys.path.append(str(project_root))
-    logger.info(f"Project root create_evaluation_set: {project_root}")
-except Exception as e:
-    logger.error(f"Error setting project root path: {str(e)}", error_code=DataProcessingError.FILE_PERMISSION_ERROR)
-    # Fallback to current directory if path resolution fails
-    sys.path.append(os.getcwd().parent)
-    logger.info(f"Fallback to current directory: {os.getcwd().parent}")
-
-from utils.advanced_goal_features import AdvancedGoalFeatureEngineer
-from utils.mlflow_utils import MLFlowConfig, MLFlowManager
 
 
 def convert_numeric_columns(
@@ -1057,12 +1058,12 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
 
 if __name__ == "__main__":
 
-    # update_api_training_data_for_draws()
-    # print("Training data updated successfully")
+    update_api_training_data_for_draws()
+    print("Training data updated successfully")
     # update_api_prediction_eval_data()
     # print("Prediction data updated successfully")
-    update_api_prediction_data()
-    print("Prediction data updated successfully")
+    # update_api_prediction_data()
+    # print("Prediction data updated successfully")
     # fixtures = create_evaluation_sets_draws_api()
     # print(fixtures)
     # df = get_real_api_scores_from_excel()
