@@ -82,4 +82,21 @@ except Exception as e:
 6. Handle both expected and unexpected errors
 
 ## Example Implementation
-See `import_training_data_draws_api()` in `utils/create_evaluation_set.py` for a complete example of error handling implementation. 
+See `import_feature_select_draws_api()` in `utils/feature_selection.py` for a complete example of error handling implementation.
+
+### Model Performance Errors
+```python
+class ModelPerformanceError:
+    RECALL_BELOW_THRESHOLD = "E301"
+    PRECISION_DEGRADATION = "E302"
+    UNSTABLE_PREDICTIONS = "E303"
+
+def handle_performance_error(error_code: str, metrics: Dict[str, float]):
+    """Handle model performance errors."""
+    if error_code == ModelPerformanceError.RECALL_BELOW_THRESHOLD:
+        logger.error(
+            f"Recall {metrics['recall']:.2f} below threshold 0.40",
+            error_code=error_code
+        )
+        # Trigger model retraining or threshold adjustment
+        adjust_model_threshold() 

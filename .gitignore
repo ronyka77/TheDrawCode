@@ -134,3 +134,16 @@ logs.log
 .cursorrules_old
 models/saved/xgboost_api_20250201_1755.pkl
 models/saved/xgboost_api_20250201_1924.pkl
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_prediction_final.dax
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_prediction_final.dax.evalAndLogTrace
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_prediction_final.dax.queryBuilder
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_prediction.dax
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_prediction.dax.queryBuilder
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_training_final.dax
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_training_final.dax.queryBuilder
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_training.dax
+data/Create_data/PowerBI_pbix/DAX_studio/api_football_training.dax.queryBuilder
+data/Create_data/PowerBI_pbix/DAX_studio/api_future_final.dax
+data/Create_data/PowerBI_pbix/DAX_studio/api_future_final.dax.queryBuilder
+data/Create_data/PowerBI_pbix/Old_files/api_prediction.pbit
+data/Create_data/PowerBI_pbix/Old_files/api_training.pbit

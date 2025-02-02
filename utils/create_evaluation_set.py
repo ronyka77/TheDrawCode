@@ -9,7 +9,7 @@ from pathlib import Path
 from pymongo import MongoClient
 import time
 from functools import wraps
-
+from datetime import datetime
 
 # Add project root to Python path
 try:
@@ -27,9 +27,10 @@ except Exception as e:
 
 from utils.advanced_goal_features import AdvancedGoalFeatureEngineer
 from utils.mlflow_utils import MLFlowConfig, MLFlowManager
+from utils.logger import ExperimentLogger  
+
 # Initialize logger
-from utils.logger import ExperimentLogger
-logger = ExperimentLogger()
+logger = ExperimentLogger(log_dir='logs/create_evaluation_set', experiment_name="create_evaluation_set")
 
 # Error codes for standardized logging
 class DataProcessingError:
@@ -67,7 +68,9 @@ def retry_on_error(max_retries: int = 3, delay: float = 1.0):
                     if attempt < max_retries - 1:
                         time.sleep(delay * (attempt + 1))
                     continue
-            raise last_error
+            if last_error:
+                logger.error(f"Failed to execute function after multiple retries: {last_error}")
+                raise last_error  # Re-raise the last exception after logging
         return wrapper
     return decorator
 
@@ -195,6 +198,60 @@ def convert_numeric_columns(
     
     return df
 
+def create_parquet_files(
+    data: pd.DataFrame,
+    output_path: str,
+    partition_cols: Optional[List[str]] = None
+) -> None:
+    """Create Parquet files from a DataFrame.
+
+    This function takes a Pandas DataFrame and saves it as Parquet files.
+    It supports partitioning by specified columns and handles error logging.
+
+    Args:
+        data: The DataFrame to be saved.
+        output_path: The base name for the Parquet files.
+        partition_cols: Optional list of columns to partition by.
+
+    Raises:
+        ValueError: If the DataFrame is empty or if partitioning fails.
+        Exception: For other errors during Parquet file creation.
+    """
+    if data.empty:
+        logger.error(
+            "Cannot create Parquet files from an empty DataFrame.",
+            error_code=DataProcessingError.EMPTY_DATASET
+        )
+        raise ValueError("DataFrame is empty")
+
+
+    logger.info(f"Creating Parquet files at: {output_path}")
+
+    try:
+        if partition_cols:
+            data.to_parquet(
+                output_path,
+                partition_cols=partition_cols,
+                engine="pyarrow",
+                index=False
+            )
+            logger.info(
+                f"Successfully created partitioned Parquet files: {partition_cols}"
+            )
+        else:
+            data.to_parquet(
+                output_path,
+                engine="pyarrow",
+                index=False
+            )
+            logger.info("Successfully created Parquet files without partitioning.")
+    except Exception as e:
+        logger.error(
+            f"Error creating Parquet files: {str(e)}",
+            error_code=DataProcessingError.FILE_CORRUPTED
+        )
+        raise
+
 
 # MLFLOW SETUP
 @retry_on_error(max_retries=3, delay=1.0)
@@ -317,6 +374,61 @@ def update_api_training_data_for_draws():
     except Exception as e:
         print(f"Error updating training data for draws: {str(e)}")
 
+def update_api_data_for_draws():
+    """
+    Update prediction data for draws by adding advanced goal features and saving to api_prediction_data_new.xlsx
+    """
+    try:
+        # Load existing training data
+        data_path = "data/prediction/api_prediction_data.xlsx"
+        data_path_new = "data/prediction/api_prediction_data_new.xlsx"
+        data = pd.read_excel(data_path)
+
+        # Initialize the feature engineer
+        feature_engineer = AdvancedGoalFeatureEngineer()
+
+        # Add advanced goal features
+        updated_data = feature_engineer.add_goal_features(data)
+        print(updated_data.shape)
+        
+        # Filter data for dates before 2024-11-01
+        api_training_data = updated_data[updated_data['Date'] < '2024-11-01']
+
+        # Filter data for dates after 2024-11-01 where match_outcome is not blank
+        api_prediction_eval = updated_data[
+            (updated_data['Date'] >= '2024-11-01') &
+            (updated_data['match_outcome'].notna())
+        ]
+
+        # Filter data for dates after 2024-11-01 where match_outcome is blank
+        api_prediction_data = updated_data[
+            (updated_data['Date'] >= '2025-01-15') &
+            (updated_data['match_outcome'].isna())
+        ]
+        
+        print(f"api_prediction_data.shape: {api_prediction_data.shape}")
+        print(f"api_prediction_eval.shape: {api_prediction_eval.shape}")
+        print(f"api_training_data.shape: {api_training_data.shape}")
+        # Concatenate the filtered dataframes
+        updated_data = pd.concat([api_prediction_eval, api_prediction_data], ignore_index=True)
+        
+        # Export df_before_2024_11_01 to data/api_training_final.xlsx
+        api_training_data.to_excel("data/api_training_final.xlsx", index=False, engine='xlsxwriter')
+        print(f"api_training_final.xlsx updated")
+        
+        # Export df_after_2024_11_01_not_blank to data/prediction/api_predictions_eval.xlsx
+        api_prediction_eval.to_excel("data/prediction/api_prediction_eval.xlsx", index=False, engine='xlsxwriter')
+        print(f"api_prediction_eval.xlsx updated")
+        
+        # Export df_after_2024_11_01_blank to data/prediction/api_predictions_data.xlsx
+        api_prediction_data.to_excel("data/prediction/api_predictions_data.xlsx", index=False, engine='xlsxwriter')
+        print(f"api_predictions_data.xlsx updated")
+
+        # Save updated data back to Excel
+        updated_data.to_excel(data_path_new, index=False)
+
+    except Exception as e:
+        print(f"Error updating training data for draws: {str(e)}")
 
 def update_api_prediction_data():
     """
@@ -417,60 +529,63 @@ def get_selected_api_columns_draws() -> List[str]:
         - Feature stability and reliability
     """
     selected_columns = [
-        "home_team_elo",
-        "home_crowd_factor",
-        "away_attack_strength_away_league_position_interaction",
-        "away_corners_mean",
-        "away_days_since_last_draw",
-        "away_encoded",
-        "away_expected_goals",
-        "Away_fouls_mean",
-        "away_founded_year",
-        "away_goal_difference_rollingaverage",
-        "Away_offsides_mean",
-        "away_poisson_xG",
-        "away_possession_mean",
-        "Away_saves_mean",
-        "away_saves_rollingaverage",
-        "away_team_elo",
+        "league_draw_rate_composite",
+        "Home_possession_mean",
         "date_encoded",
-        "defensive_stability",
-        "elo_similarity",
-        "form_similarity",
-        "form_weighted_xg_diff",
-        "h2h_avg_goals",
-        "historical_draw_tendency",
-        "home_attack_xg_power",
-        "home_corners_mean",
-        "home_defense_weakness",
-        "home_defensive_activity",
-        "home_draw_rate",
-        "Home_draws",
-        "home_form_momentum_away_attack_strength_interaction",
-        "home_fouls_rollingaverage",
-        "Home_offsides_mean",
-        "Home_saves_mean",
-        "Home_team_matches",
-        "home_win_rate",
-        "home_xg_momentum",
-        "home_yellow_cards_mean",
-        "league_home_draw_rate",
-        "mid_season_factor",
+        "home_yellow_cards_mean", 
         "possession_balance",
-        "referee_encoded",
-        "season_stage",
-        "seasonal_draw_pattern",
-        "strength_possession_interaction",
-        "venue_draw_rate",
-        "xg_momentum_similarity",
-        "away_crowd_resistance",
+        "home_saves_rollingaverage",
+        "home_team_elo",
         "away_defense_index",
-        "away_h2h_weighted",
-        "away_possession_impact",
-        "away_season_form",
+        "Home_saves_mean",
+        "Away_fouls_mean",
+        "seasonal_draw_pattern",
+        "away_shot_on_target_rollingaverage",
+        "defensive_stability",
+        "away_yellow_cards_rollingaverage",
+        "draw_xg_indicator",
+        "home_fouls_rollingaverage",
+        "Home_draws",
+        "Home_fouls_mean",
+        "elo_similarity_form_similarity",
+        "home_days_since_last_draw",
+        "venue_encoded",
+        "away_poisson_xG",
+        "home_draw_rate",
+        "home_passing_efficiency",
+        "home_red_cards_mean",
+        "away_corners_mean",
+        "Away_passes_mean",
         "home_defense_index",
-        "home_form_stability",
-        "home_offensive_sustainability"
+        "away_tactical_adaptability",
+        "away_team_elo",
+        "historical_draw_tendency",
+        "h2h_avg_goals",
+        "mid_season_factor",
+        "venue_capacity",
+        "referee_goals_per_game",
+        "away_yellow_cards_mean",
+        "home_founded_year",
+        "Away_offsides_mean",
+        "away_saves_rollingaverage",
+        "draw_probability_score",
+        "away_defense_weakness",
+        "away_days_since_last_draw",
+        "Home_offsides_mean",
+        "combined_draw_rate",
+        "home_corners_mean",
+        "Home_shot_on_target_mean",
+        "xg_equilibrium",
+        "away_corners_rollingaverage",
+        "away_founded_year",
+        "home_corners_rollingaverage",
+        "away_encoded",
+        "form_weighted_xg_diff",
+        "Away_saves_mean",
+        "draw_propensity_score",
+        "venue_draw_rate",
+        "home_yellow_cards_rollingaverage",
+        "away_fouls_rollingaverage"
     ]
     return selected_columns
 
@@ -499,76 +614,83 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
     logger.info(f"Loading training data from: {data_path}")
     
     try:
-        # Load data with retry mechanism
-        data = pd.read_excel(data_path)
-        if data.empty:
-            logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
-            raise ValueError("Dataset is empty")
-            
-        logger.info(f"Successfully loaded data with shape: {data.shape}")
-
-        # Create target variable
-        data['is_draw'] = (data['match_outcome'] == 2).astype(int)
-        logger.info(f"Created target variable. Draw rate: {data['is_draw'].mean():.2%}")
-
-        # Get selected columns
-        selected_columns = get_selected_api_columns_draws()
-        missing_columns = [col for col in selected_columns if col not in data.columns]
-        if missing_columns:
-            logger.error(
-                f"Missing required columns: {missing_columns}",
-                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
-            )
-            raise ValueError(f"Missing required columns: {missing_columns}")
-
-        # Replace inf and nan values
-        data = data.replace([np.inf, -np.inf], np.nan)
-        logger.info("Replaced infinite values with NaN")
-
-        # Convert numeric columns
-        logger.info("Starting numeric conversion")
-        data = convert_numeric_columns(
-            data=data,
-            columns=data.columns.tolist(),
-            drop_errors=False,
-            fill_value=0.0,
-            verbose=True
-        )
-
-        # Define and convert integer columns
-        int_columns = [
-            'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
-            'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
-        ]
         
-        # Convert integer columns
-        for col in int_columns:
-            if col in data.columns:
-                try:
-                    data[col] = data[col].astype('int64')
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to convert {col} to integer: {str(e)}",
-                        error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
-                    )
+        parquet_path = "data/api_training_final.parquet"
+        if os.path.exists(parquet_path):
+            data = pd.read_parquet(parquet_path)
+            logger.info(f"Loaded data from Parquet: {parquet_path}")
+        else:
+            # Load data with retry mechanism
+            data = pd.read_excel(data_path)
+            if data.empty:
+                logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
+                raise ValueError("Dataset is empty")
+           
+            logger.info(f"Successfully loaded data with shape: {data.shape}")
 
-        # Verify numeric conversion
-        object_columns = []
-        for col in selected_columns:
-            if data[col].dtype == 'object':
-                object_columns.append(col)
-                logger.warning(
-                    f"Column {col} remains as object type after conversion",
+            # Create target variable
+            data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+            logger.info(f"Created target variable. Draw rate: {data['is_draw'].mean():.2%}")
+
+            # Get selected columns
+            selected_columns = get_selected_api_columns_draws()
+            missing_columns = [col for col in selected_columns if col not in data.columns]
+            if missing_columns:
+                logger.error(
+                    f"Missing required columns: {missing_columns}",
+                    error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+                )
+                raise ValueError(f"Missing required columns: {missing_columns}")
+
+            # Replace inf and nan values
+            data = data.replace([np.inf, -np.inf], np.nan)
+            logger.info("Replaced infinite values with NaN")
+
+            # Convert numeric columns
+            logger.info("Starting numeric conversion")
+            data = convert_numeric_columns(
+                data=data,
+                columns=data.columns.tolist(),
+                drop_errors=False,
+                fill_value=0.0,
+                verbose=True
+            )
+
+            # Define and convert integer columns
+            int_columns = [
+                'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
+                'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
+            ]
+            
+            # Convert integer columns
+            for col in int_columns:
+                if col in data.columns:
+                    try:
+                        data[col] = data[col].astype('int64')
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to convert {col} to integer: {str(e)}",
+                            error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
+                        )
+
+            # Verify numeric conversion
+            object_columns = []
+            for col in selected_columns:
+                if data[col].dtype == 'object':
+                    object_columns.append(col)
+                    logger.warning(
+                        f"Column {col} remains as object type after conversion",
+                        error_code=DataProcessingError.INVALID_DATA_TYPE
+                    )
+            
+            if object_columns:
+                logger.error(
+                    f"Found {len(object_columns)} non-numeric columns: {object_columns}",
                     error_code=DataProcessingError.INVALID_DATA_TYPE
                 )
+                raise ValueError(f"Non-numeric columns found: {object_columns}")
+            create_parquet_files(data, "data/api_training_final.parquet", partition_cols=["league_id"])
         
-        if object_columns:
-            logger.error(
-                f"Found {len(object_columns)} non-numeric columns: {object_columns}",
-                error_code=DataProcessingError.INVALID_DATA_TYPE
-            )
-            raise ValueError(f"Non-numeric columns found: {object_columns}")
-
         # Split into train and test sets
         logger.info("Splitting data into train and test sets")
         train_data, test_data = train_test_split(
@@ -637,7 +759,11 @@ def import_feature_select_draws_api():
         'date',
         'referee_draw_rate', 
         'referee_draws', 
-        'referee_match_count'
+        'referee_match_count',
+        'referee_foul_rate',
+        'referee_match_count',
+        'referee_encoded',
+        'ref_goal_tendency'
     ]
     data = data.drop(columns=columns_to_drop, errors='ignore')
 
@@ -694,12 +820,16 @@ def import_feature_select_draws_api():
 
 
 @retry_on_error(max_retries=3, delay=1.0)
-def create_evaluation_sets_draws_api():
+def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
     """Load data from an Excel file and create evaluation sets for training.
 
     This function loads match data from the API prediction evaluation file and creates
     evaluation sets for draw prediction training. It handles data cleaning, type conversion,
     and feature selection.
+
+    Args:
+        use_selected_columns (bool): If True, restricts data to selected columns. 
+            If False, uses all available columns. Default is True.
 
     Returns:
         Tuple[pd.DataFrame, pd.Series]: A tuple containing:
@@ -731,15 +861,20 @@ def create_evaluation_sets_draws_api():
         data = data.replace([np.inf, -np.inf], np.nan)
         logger.info("Replaced infinite values with NaN")
 
-        # Get selected columns
-        selected_columns = get_selected_api_columns_draws()
-        missing_columns = [col for col in selected_columns if col not in data.columns]
-        if missing_columns:
-            logger.error(
-                f"Missing required columns: {missing_columns}",
-                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
-            )
-            raise ValueError(f"Missing required columns: {missing_columns}")
+        # Get selected columns if needed
+        if use_selected_columns:
+            selected_columns = get_selected_api_columns_draws()
+            missing_columns = [col for col in selected_columns if col not in data.columns]
+            if missing_columns:
+                logger.error(
+                    f"Missing required columns: {missing_columns}",
+                    error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+                )
+                raise ValueError(f"Missing required columns: {missing_columns}")
+        else:
+            # Use all columns except the target and date columns
+            selected_columns = [col for col in data.columns if col not in ['match_outcome', 'is_draw', 'Date']]
+            logger.info("Using all available columns for evaluation set")
 
         # Process match outcome and create target variable
         try:
@@ -870,7 +1005,7 @@ def create_prediction_set_api() -> pd.DataFrame:
         logger.info(f"Successfully loaded data with shape: {data.shape}")
 
         # Get selected columns
-        selected_columns = get_selected_api_columns_draws()
+        selected_columns = ['fixture_id', 'Home', 'Away', 'Date'] + get_selected_api_columns_draws()
         missing_columns = [col for col in selected_columns if col not in data.columns]
         if missing_columns:
             logger.error(
@@ -892,6 +1027,16 @@ def create_prediction_set_api() -> pd.DataFrame:
                 )
                 raise ValueError("Could not create date_encoded column")
 
+        
+        data_copy = data.copy()
+        # Drop Date, Home, and Away columns from original data
+        if 'Date' in data.columns:
+            data = data.drop(columns=['Date'])
+        if 'Home' in data.columns:
+            data = data.drop(columns=['Home'])
+        if 'Away' in data.columns:
+            data = data.drop(columns=['Away'])
+        logger.info("Dropped Date, Home, and Away columns from data")
         # Convert numeric columns
         logger.info("Starting numeric conversion")
         data = convert_numeric_columns(
@@ -903,26 +1048,14 @@ def create_prediction_set_api() -> pd.DataFrame:
         )
         logger.info(f"Data shape after numeric conversion: {data.shape}")
 
+        # Add Date column back from original copy
+        if 'Date' not in data.columns and 'Date' in data_copy.columns:
+            data['Date'] = data_copy['Date']
+            data['Home'] = data_copy['Home']
+            data['Away'] = data_copy['Away']
+            logger.info("Restored Date, Home, and Away columns from original data")
         # Select only the required columns
         X = data[selected_columns]
-
-        # Verify numeric conversion
-        object_columns = []
-        for col in selected_columns:
-            if X[col].dtype == 'object':
-                object_columns.append(col)
-                logger.warning(
-                    f"Column {col} remains as object type after conversion",
-                    error_code=DataProcessingError.INVALID_DATA_TYPE
-                )
-        
-        if object_columns:
-            logger.error(
-                f"Found {len(object_columns)} non-numeric columns: {object_columns}",
-                error_code=DataProcessingError.INVALID_DATA_TYPE
-            )
-            raise ValueError(f"Non-numeric columns found: {object_columns}")
-
         # Final validation
         logger.info(f"Final feature set shape: {X.shape}")
         logger.info("Feature set ready for prediction")
@@ -1055,19 +1188,101 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
         )
         raise
 
+def get_selected_columns_from_mlflow_run(run_id: str) -> List[str]:
+    """Retrieve selected feature columns from a specific MLflow run.
+
+    This function queries MLflow to get the list of selected features that were
+    used in a particular model training run. The features are extracted from
+    the model signature in the MLmodel artifact file.
+
+    Args:
+        run_id (str): The MLflow run ID to query
+
+    Returns:
+        List[str]: List of selected feature column names
+
+    Raises:
+        ValueError: If the run ID is invalid or features cannot be retrieved
+        FileNotFoundError: If the MLmodel artifact is missing
+        Exception: For any other errors during retrieval
+
+    Example:
+        >>> columns = get_selected_columns_from_mlflow_run("1234567890abcdef")
+        >>> print(f"Retrieved {len(columns)} features from MLflow run")
+    """
+    try:
+        # Initialize MLflow client
+        manager = MLFlowManager()
+        # Get artifact URI using MLFlowManager
+        artifact_uri = manager.get_run_artifact_uri(run_id)
+        
+        print(f"Artifact URI: {artifact_uri}")
+        # Construct the path to MLmodel file, checking for nested model directories
+        artifact_path = Path(artifact_uri)
+        
+        # Find the model directory by checking for MLmodel file in subdirectories
+        model_dir = None
+        for item in artifact_path.iterdir():
+            if item.is_dir() and (item / "MLmodel").exists():
+                model_dir = item
+                break
+                
+        # If no model directory found, use the root artifact path
+        mlmodel_path = (model_dir / "MLmodel") if model_dir else (artifact_path / "MLmodel")
+        
+        # Read and parse the MLmodel file
+        with open(mlmodel_path, "r") as f:
+            mlmodel_content = f.read()
+            
+        # Extract the signature section
+        signature_start = mlmodel_content.find("signature:")
+        if signature_start == -1:
+            raise ValueError("No signature found in MLmodel file")
+            
+        # Extract the input schema
+        input_schema_start = mlmodel_content.find("inputs:", signature_start)
+        if input_schema_start == -1:
+            raise ValueError("No input schema found in signature")
+            
+        # Parse the feature names
+        features = []
+        for line in mlmodel_content[input_schema_start:].splitlines():
+            if "name:" in line:
+                feature_name = line.split("name:")[1].strip().strip('"')
+                features.append(feature_name)
+            elif "}" in line:  # End of input schema
+                break
+                
+        if not features:
+            raise ValueError("No features found in input schema")
+            
+        return features
+        
+    except mlflow.exceptions.MlflowException as e:
+        raise ValueError(f"Invalid MLflow run ID {run_id}: {str(e)}")
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"MLmodel artifact not found in run {run_id}"
+        )
+    except Exception as e:
+        raise Exception(
+            f"Error retrieving features from MLflow run {run_id}: {str(e)}"
+        )
+
 
 if __name__ == "__main__":
 
-    update_api_training_data_for_draws()
-    print("Training data updated successfully")
-    # update_api_prediction_eval_data()
-    # print("Prediction data updated successfully")
-    # update_api_prediction_data()
-    # print("Prediction data updated successfully")
-    # fixtures = create_evaluation_sets_draws_api()
-    # print(fixtures)
-    # df = get_real_api_scores_from_excel()
-    # print(df.shape)
+    # update_api_training_data_for_draws()
+    # print("Training data updated successfully")
 
+    update_api_data_for_draws()
+    print("Prediction data updated successfully")
 
-    # sync_mlflow()
+    # try:
+    #     run_id = "bc2a97417edb42d48967315de091d12d"
+    #     selected_features = get_selected_columns_from_mlflow_run(run_id)
+    #     print(f"Selected features for run {run_id}:")
+    #     for feature in selected_features:
+    #         print(f"- {feature}")
+    # except Exception as e:
+    #     print(f"Error retrieving features: {str(e)}")

@@ -107,6 +107,48 @@ monitor.track_metrics()
 monitor.generate_report()
 ```
 
+### Model Performance Monitoring
+
+#### Precision-Recall Tracking
+```python
+def track_model_metrics(predictions: np.ndarray, actuals: np.ndarray):
+    """Track model performance metrics."""
+    metrics = {
+        'precision': precision_score(actuals, predictions),
+        'recall': recall_score(actuals, predictions),
+        'f1': f1_score(actuals, predictions),
+        'recall_threshold_met': recall_score(actuals, predictions) >= 0.40
+    }
+    
+    # Log metrics
+    logger.info("Model performance metrics:", extra=metrics)
+    
+    # Alert if recall drops below threshold
+    if not metrics['recall_threshold_met']:
+        alerts.send_alert(
+            "Model Recall Below Threshold",
+            f"Current recall: {metrics['recall']:.2f}"
+        )
+    
+    return metrics
+```
+
+#### Visualization
+```python
+def plot_precision_recall_trend():
+    """Plot precision-recall trends over time."""
+    metrics_df = load_metrics_history()
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(metrics_df['timestamp'], metrics_df['precision'], label='Precision')
+    plt.plot(metrics_df['timestamp'], metrics_df['recall'], label='Recall')
+    plt.axhline(y=0.40, color='r', linestyle='--', label='Recall Threshold')
+    plt.legend()
+    plt.title('Precision-Recall Trends')
+    
+    return plt.gcf()
+```
+
 ## Recovery Procedures
 
 ### Automated Recovery

@@ -139,6 +139,23 @@ def validate_predictions(predictions: np.ndarray) -> bool:
     return True
 ```
 
+### 3. Model Performance Validation
+```python
+def validate_model_performance(predictions: np.ndarray, actuals: np.ndarray) -> bool:
+    """Validate model performance meets precision-recall requirements."""
+    recall = recall_score(actuals, predictions)
+    if recall < 0.40:
+        logger.error(
+            "Model recall below threshold: {:.2f} < 0.40",
+            error_code="E303"
+        )
+        return False
+        
+    precision = precision_score(actuals, predictions)
+    logger.info(f"Model metrics - Precision: {precision:.2f}, Recall: {recall:.2f}")
+    return True
+```
+
 ## Validation Rules
 
 ### 1. Data Completeness

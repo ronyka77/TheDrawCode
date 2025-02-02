@@ -10,6 +10,7 @@
 - [Best Practices](#best-practices)
 - [Troubleshooting](#troubleshooting)
 - [Additional Resources](#additional-resources)
+- [Precision-Recall Optimization Tracking](#precision-recall-optimization-tracking)
 
 ## Overview
 This guide outlines how MLflow is used in the Soccer Prediction Project for experiment tracking, model management, and deployment. Our setup is optimized for CPU-only environments and focuses on reproducibility.
@@ -298,6 +299,46 @@ def log_mlflow_event(event_type: str, details: Dict):
 
 ### Project Management
 - [Changelog](../CHANGELOG.md) - Version history and updates
+
+## Precision-Recall Optimization Tracking
+
+### Feature Selection Metrics
+```python
+# Feature selection metrics structure
+{
+    'n_initial_features': int,
+    'n_final_features': int,
+    'feature_reduction_percent': float,
+    'standard_precision': float,
+    'standard_recall': float,
+    'precision_focused_precision': float,
+    'precision_focused_recall': float
+}
+```
+
+### Threshold Optimization Metrics
+```python
+# Threshold optimization metrics
+{
+    'best_threshold': float,
+    'best_precision': float,
+    'best_recall': float,
+    'best_f1': float,
+    'pruned_trials_count': int
+}
+```
+
+### Artifacts
+- `feature_importance.csv`: Feature importance analysis
+- `standard_features.txt`: Initially selected features
+- `precision_focused_features.txt`: Final feature set
+- `parameter_importance.html`: Parameter impact visualization
+
+### Best Practices
+1. Monitor recall threshold compliance
+2. Track pruned trials ratio
+3. Analyze precision-recall trade-offs
+4. Review parameter importance regularly
 
 ---
 [🔝 Back to Top](#mlflow-guide) 

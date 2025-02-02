@@ -12,6 +12,7 @@ The feature selection process in the Soccer Prediction Project uses XGBoost's im
 - [Best Practices](#best-practices)
 - [Windows 11 Considerations](#windows-11-considerations)
 - [Troubleshooting](#troubleshooting)
+- [Precision-Focused Feature Selection](#precision-focused-feature-selection)
 
 ## Core Components
 
@@ -247,4 +248,39 @@ The system automatically logs:
 Access MLflow UI to view:
 ```bash
 mlflow ui --backend-store-uri file:///path/to/mlruns
-``` 
+```
+
+## Precision-Focused Feature Selection
+
+### Two-Stage Process
+1. Standard Feature Selection
+   - Uses composite scoring (gain, weight, cover)
+   - Correlation-based redundancy reduction
+   - Bootstrap stability analysis
+
+2. Precision Impact Analysis
+   - Measures feature impact on precision
+   - Maintains minimum recall threshold
+   - Optimizes precision-recall trade-off
+
+### Configuration
+```python
+# Standard selection
+standard_selector = EnhancedFeatureSelector(
+    correlation_threshold=0.85,
+    target_features=(60, 100)
+)
+
+# Precision focus
+precision_selector = PrecisionFocusedFeatureSelector(
+    min_recall=0.20,
+    target_precision=0.50
+)
+```
+
+### Metrics and Evaluation
+- Feature importance scores
+- Precision impact analysis
+- Correlation analysis
+- Performance comparison
+- Stability metrics 

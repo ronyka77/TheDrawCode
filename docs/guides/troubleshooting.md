@@ -211,6 +211,54 @@ def safe_predict(model, X: pd.DataFrame) -> np.ndarray:
         return np.zeros(len(X))  # Safe fallback
 ```
 
+### Precision-Recall Optimization Issues
+
+#### Low Recall Problem
+```python
+# Error: Model not meeting recall threshold
+def diagnose_recall_issues(model, X_val, y_val):
+    """Diagnose low recall issues."""
+    predictions = model.predict_proba(X_val)[:, 1]
+    
+    # Test different thresholds
+    thresholds = np.arange(0.3, 0.7, 0.05)
+    results = []
+    
+    for threshold in thresholds:
+        preds = (predictions >= threshold).astype(int)
+        recall = recall_score(y_val, preds)
+        precision = precision_score(y_val, preds)
+        results.append({
+            'threshold': threshold,
+            'recall': recall,
+            'precision': precision
+        })
+    
+    return pd.DataFrame(results)
+```
+
+#### Precision Optimization
+```python
+# Error: Low precision with acceptable recall
+def optimize_precision(model, X_val, y_val):
+    """Find optimal threshold for precision while maintaining recall."""
+    probas = model.predict_proba(X_val)[:, 1]
+    best_threshold = 0.5
+    best_precision = 0
+    
+    for threshold in np.arange(0.3, 0.7, 0.01):
+        preds = (probas >= threshold).astype(int)
+        recall = recall_score(y_val, preds)
+        
+        if recall >= 0.40:
+            precision = precision_score(y_val, preds)
+            if precision > best_precision:
+                best_precision = precision
+                best_threshold = threshold
+    
+    return best_threshold
+```
+
 ## Debugging Tools
 
 ### 1. Logging Configuration

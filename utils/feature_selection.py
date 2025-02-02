@@ -16,12 +16,13 @@ import xgboost as xgb
 from itertools import product
 import mlflow
 from pathlib import Path
-import logging
-import matplotlib.pyplot as plt
-import seaborn as sns
 from datetime import datetime
 import os
 import sys
+from sklearn.metrics import precision_score, recall_score
+from imblearn.over_sampling import SMOTE
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.base import BaseEstimator
 
 # Add project root to Python path
 try:
@@ -38,11 +39,12 @@ except Exception as e:
 from utils.logger import ExperimentLogger
 from utils.create_evaluation_set import (
     import_feature_select_draws_api,
+    create_evaluation_sets_draws_api,
     setup_mlflow_tracking,
     DataProcessingError
 )
 
-class EnhancedFeatureSelector:
+class EnhancedFeatureSelector(BaseEstimator):
     """Enhanced feature selection with composite scoring and validation."""
     
     def __init__(
@@ -51,7 +53,8 @@ class EnhancedFeatureSelector:
         correlation_threshold: float = 0.90,
         target_features: Tuple[int, int] = (50, 80),
         random_state: int = 42,
-        experiment_name: str = "feature_selection_optimization"
+        experiment_name: str = "feature_selection_optimization",
+        logger: ExperimentLogger = None
     ):
         """Initialize feature selector.
         
@@ -62,6 +65,7 @@ class EnhancedFeatureSelector:
             random_state: Random state for reproducibility
             experiment_name: Name for MLflow experiment
         """
+        super(EnhancedFeatureSelector, self).__init__()
         self.n_bootstrap = n_bootstrap
         self.correlation_threshold = correlation_threshold
         self.target_features = target_features
@@ -73,16 +77,18 @@ class EnhancedFeatureSelector:
         self.selected_features = []
         self.correlation_groups = []
         
-        # Set up logging and MLflow
-        self.logger = ExperimentLogger(
-            experiment_name=experiment_name,
-            log_dir="logs/feature_selection"
-        )
+        # Initialize logger
+        self.logger = logger or ExperimentLogger('feature_selection')
         
         # MLflow experiment setup
         self.experiment_name = experiment_name
         self.mlruns_dir = setup_mlflow_tracking(experiment_name)
         mlflow.set_experiment(self.experiment_name)
+        
+    @property
+    def _tags(self):
+        # Manuális sklearn tags beállítás
+        return {'allow_nan': True, 'requires_y': True}
         
     def optimize_composite_weights(
         self,
@@ -587,10 +593,358 @@ class EnhancedFeatureSelector:
             self.logger.error(f"Error in feature selection process: {str(e)}")
             raise
 
+class PrecisionFocusedFeatureSelector(BaseEstimator):
+    """Enhanced feature selector with class imbalance handling and calibration."""
+    
+    def __init__(self,
+                 min_recall: float = 0.20,
+                 target_precision: float = 0.50,
+                 logger: ExperimentLogger = None,
+                 handle_imbalance: bool = True,
+                 calibrate_probas: bool = True):
+        """Initialize with imbalance handling options.
+        
+        Args:
+            min_recall: Minimum required recall
+            target_precision: Target precision to achieve
+            logger: Logger instance
+            handle_imbalance: Whether to use SMOTE for imbalance
+            calibrate_probas: Whether to calibrate probabilities
+        """
+        super(PrecisionFocusedFeatureSelector, self).__init__()
+        self.min_recall = min_recall
+        self.target_precision = target_precision
+        self.logger = logger or ExperimentLogger('precision_focused_feature_selector')
+        self.handle_imbalance = handle_imbalance
+        self.calibrate_probas = calibrate_probas
+        self.selected_features = []
+        self.feature_scores = {}
+        self.created_interactions = set()  # Track created interactions
+        
+    @property
+    def _tags(self):
+        # Manuális sklearn tags beállítás
+        return {
+            'allow_nan': True,
+            'requires_y': True,
+            'non_deterministic': False,
+            'requires_fit': True,
+            'preserves_dtype': [np.float64],
+            'skip_validation': True
+        }
+        
+    def _handle_class_imbalance(self, X: pd.DataFrame, y: pd.Series) -> Tuple[pd.DataFrame, pd.Series]:
+        """Apply SMOTE to handle class imbalance."""
+        try:
+            if not self.handle_imbalance:
+                return X, y
+                
+            self.logger.info("Applying SMOTE for class imbalance")
+            smote = SMOTE(random_state=42)
+            X_resampled, y_resampled = smote.fit_resample(X, y)
+            
+            self.logger.info(f"Original class distribution: {pd.Series(y).value_counts(normalize=True)}")
+            self.logger.info(f"Resampled class distribution: {pd.Series(y_resampled).value_counts(normalize=True)}")
+            
+            return pd.DataFrame(X_resampled, columns=X.columns), pd.Series(y_resampled)
+            
+        except Exception as e:
+            self.logger.error(f"Error in class imbalance handling: {str(e)}")
+            return X, y
+            
+    def _calibrate_model(self, model: xgb.XGBClassifier, X: pd.DataFrame, y: pd.Series) -> xgb.XGBClassifier:
+        """Calibrate model probabilities using Platt scaling."""
+        try:
+            if not self.calibrate_probas:
+                return model
+                
+            self.logger.info("Calibrating model probabilities")
+            calibrated_model = CalibratedClassifierCV(
+                model,
+                cv=5,
+                method='sigmoid'  # Platt scaling
+            )
+            calibrated_model.fit(X, y)
+            
+            return calibrated_model
+            
+        except Exception as e:
+            self.logger.error(f"Error in model calibration: {str(e)}")
+            return model
+            
+    def analyze_feature_importance(self,
+                                 model: xgb.XGBClassifier,
+                                 feature_names: List[str],
+                                 X_val: pd.DataFrame,
+                                 y_val: pd.Series) -> pd.DataFrame:
+        """Analyze feature importance with enhanced precision focus."""
+        try:
+            self.logger.info("Handling class imbalance")
+            X_balanced, y_balanced = self._handle_class_imbalance(X_val, y_val)
+            
+            self.logger.info("Calibrating model if enabled")
+            calibrated_model = self._calibrate_model(model, X_balanced, y_balanced)
+            
+            self.logger.info("Getting base importance scores")
+            importance_base = model.feature_importances_
+            
+            self.logger.info("Calculating precision impact scores with balanced data")
+            precision_impact = self._calculate_precision_impact(
+                calibrated_model, X_balanced, y_balanced, feature_names
+            )
+            
+            # self.logger.info("Calculating interaction importance")
+            # interaction_importance = self._calculate_interaction_importance(
+            #     calibrated_model, X_balanced, y_balanced, feature_names
+            # )
+            
+            self.logger.info("Combining scores with updated weights")
+            combined_scores = (
+                0.5 * precision_impact +  # Increased weight for precision impact
+                0.3 * importance_base   # Base importance
+                # 0.2 * interaction_importance  # New interaction component
+            )
+            
+            self.logger.info("Creating and sorting importance DataFrame")
+            importance_df = pd.DataFrame({
+                'feature': feature_names,
+                'importance': importance_base,
+                'precision_impact': precision_impact,
+                # 'interaction_importance': interaction_importance,
+                'combined_score': combined_scores
+            }).sort_values('combined_score', ascending=False)
+            
+            return importance_df
+            
+        except Exception as e:
+            self.logger.error(f"Error in feature importance analysis: {str(e)}")
+            raise
+            
+    def _calculate_interaction_importance(self,
+                                        model: xgb.XGBClassifier,
+                                        X: pd.DataFrame,
+                                        y: pd.Series,
+                                        feature_names: List[str]) -> np.ndarray:
+        """Calculate feature interaction importance."""
+        try:
+            interaction_scores = np.zeros(len(feature_names))
+            
+            
+            for i, feature1 in enumerate(feature_names):
+                for feature2 in feature_names[i+1:]:
+                    # Create interaction feature
+                    interaction_name = f'{feature1}_{feature2}'
+                    X_interaction = X.copy()
+                    X_interaction[interaction_name] = X[feature1] * X[feature2]
+                    self.created_interactions.add(interaction_name)
+                    
+                    # Get predictions with interaction
+                    base_score = model.score(X, y)
+                    interaction_score = model.score(X_interaction, y)
+                    
+                    # Add interaction impact to both features
+                    impact = interaction_score - base_score
+                    if impact > 0:
+                        interaction_scores[i] += impact
+                        interaction_scores[feature_names.index(feature2)] += impact
+                        
+            # Log created interactions
+            self.logger.info(f"Created {len(self.created_interactions)} interaction features")
+            self.logger.debug(f"Interaction features: {sorted(self.created_interactions)}")
+            
+            return interaction_scores / interaction_scores.sum()
+        
+        except Exception as e:
+            self.logger.error(f"Error in interaction importance calculation: {str(e)}")
+            raise
+
+
+    def _calculate_precision_impact(
+        self,
+        model: xgb.XGBClassifier,
+        X: pd.DataFrame,
+        y: pd.Series,
+        feature_names: List[str]
+    ) -> np.ndarray:
+        """Calculate the precision impact of each feature by removing it and measuring the change.
+        
+        Args:
+            model: Trained XGBoost model
+            X: Feature DataFrame
+            y: Target series
+            feature_names: List of feature names to evaluate
+            
+        Returns:
+            Array of precision impact scores for each feature
+        """
+        precision_impact = np.zeros(len(feature_names))
+        
+        # Get baseline precision
+        baseline_precision = precision_score(y, model.predict(X))
+        
+        for i, feature in enumerate(feature_names):
+            try:
+                # Create copy of X without the current feature
+                X_reduced = X.drop(columns=[feature])
+                
+                # Retrain model on reduced feature set
+                reduced_model = xgb.XGBClassifier(
+                    tree_method='hist',
+                    device='cpu',
+                    random_state=42
+                )
+                reduced_model.fit(X_reduced, y)
+                
+                # Calculate precision with reduced feature set
+                reduced_precision = precision_score(y, reduced_model.predict(X_reduced))
+                
+                # Calculate precision impact
+                precision_impact[i] = baseline_precision - reduced_precision
+                
+            except Exception as e:
+                self.logger.error(f"Error calculating precision impact for feature {feature}: {str(e)}")
+                precision_impact[i] = 0  # Default to 0 impact if error occurs
+                
+        # Normalize scores to sum to 1
+        if precision_impact.sum() > 0:
+            precision_impact = precision_impact / precision_impact.sum()
+            
+        return precision_impact
+
+    def select_features(self,
+                       importance_df: pd.DataFrame,
+                       X_val: pd.DataFrame,
+                       correlation_threshold: float = 0.85) -> List[str]:
+        """Select optimal feature set with enhanced precision focus."""
+        try:
+            # Először ellenőrizzük az adatok minőségét
+            self._validate_data_quality(X_val)
+            
+            # Candidate features validálása
+            candidate_features = importance_df.sort_values(
+                'combined_score', ascending=False
+            )['feature'].tolist()
+            
+            valid_features = self._get_valid_features(X_val, candidate_features)
+            
+            if not valid_features:
+                raise ValueError("No valid features found after validation")
+            
+            selected = []
+            feature_groups = []
+            
+            self.logger.info(f"Starting feature selection with {len(valid_features)} valid features")
+            
+            for feature in valid_features:
+                try:
+                    if len(selected) == 0:
+                        selected.append(feature)
+                        feature_groups.append([feature])
+                        continue
+                        
+                    # Biztonságos korrelációszámítás
+                    correlations = self._calculate_safe_correlations(X_val, selected, feature)
+                    
+                    # Feature csoportosítás
+                    self._group_feature(feature, correlations, selected, feature_groups, correlation_threshold)
+                    
+                except Exception as e:
+                    self.logger.error(f"Error processing feature {feature}: {str(e)}")
+                    continue
+            
+            final_features = self._select_best_features(feature_groups, importance_df)
+            
+            self.selected_features = final_features
+            self.logger.info(f"Selected {len(final_features)} features")
+            
+            return final_features
+            
+        except Exception as e:
+            self.logger.error(f"Error in feature selection: {str(e)}")
+            raise
+
+    def _validate_data_quality(self, X: pd.DataFrame) -> None:
+        """Validate data quality and handle problematic values."""
+        # Ellenőrizzük a NaN értékeket
+        nan_cols = X.isna().sum()
+        if nan_cols.any():
+            self.logger.warning(f"Columns with NaN values: {nan_cols[nan_cols > 0]}")
+            
+        # Ellenőrizzük a konstans oszlopokat
+        constant_cols = X.std() == 0
+        if constant_cols.any():
+            self.logger.warning(f"Constant columns detected: {X.columns[constant_cols].tolist()}")
+            
+        # Ellenőrizzük a végtelen értékeket
+        inf_cols = np.isinf(X).sum()
+        if inf_cols.any():
+            self.logger.warning(f"Columns with infinite values: {inf_cols[inf_cols > 0]}")
+
+    def _calculate_safe_correlations(self, X: pd.DataFrame, selected: List[str], feature: str) -> pd.Series:
+        """Calculate correlations safely handling numerical issues."""
+        try:
+            # Kezeljük a NaN és végtelen értékeket
+            X_clean = X.copy()
+            X_clean = X_clean.replace([np.inf, -np.inf], np.nan)
+            
+            # Töltsük ki a hiányzó értékeket az oszlop mediánjával
+            for col in [feature] + selected:
+                if X_clean[col].isna().any():
+                    median_val = X_clean[col].median()
+                    X_clean[col].fillna(median_val, inplace=True)
+            
+            # Számítsuk ki a korrelációkat
+            correlations = abs(X_clean[selected].corrwith(X_clean[feature]))
+            
+            # Ellenőrizzük az eredményeket
+            if correlations.isna().any():
+                self.logger.warning(f"NaN correlations found for feature {feature}")
+                correlations = correlations.fillna(0)
+                
+            return correlations
+            
+        except Exception as e:
+            self.logger.error(f"Error in correlation calculation: {str(e)}")
+            return pd.Series(0, index=selected)
+
+    def _group_feature(self, 
+                      feature: str, 
+                      correlations: pd.Series, 
+                      selected: List[str], 
+                      feature_groups: List[List[str]], 
+                      correlation_threshold: float) -> None:
+        """Group features based on correlations."""
+        group_found = False
+        for group in feature_groups:
+            if any(correlations[f] >= correlation_threshold for f in group):
+                group.append(feature)
+                group_found = True
+                break
+                
+        if not group_found:
+            selected.append(feature)
+            feature_groups.append([feature])
+
+    def _select_best_features(self, 
+                             feature_groups: List[List[str]], 
+                             importance_df: pd.DataFrame) -> List[str]:
+        """Select best features from each group."""
+        final_features = []
+        for group in feature_groups:
+            try:
+                best_feature = max(group, key=lambda x: importance_df.loc[
+                    importance_df['feature'] == x, 'combined_score'
+                ].iloc[0])
+                final_features.append(best_feature)
+            except Exception as e:
+                self.logger.error(f"Error selecting best feature from group {group}: {str(e)}")
+                continue
+        return final_features
+
 def run_feature_selection(
     experiment_name: str = "feature_selection_optimization"
 ) -> List[str]:
-    """Run the complete feature selection process.
+    """Run the complete feature selection process with precision focus.
     
     Args:
         experiment_name: Name for MLflow experiment
@@ -598,117 +952,193 @@ def run_feature_selection(
     Returns:
         List of selected feature names
     """
-    # Set up logging and MLflow
     logger = ExperimentLogger(
         experiment_name=experiment_name,
         log_dir="logs/feature_selection"
     )
-    mlruns_dir = setup_mlflow_tracking(experiment_name)
     
-    # Start single MLflow run for the entire process
-    with mlflow.start_run(run_name=f"feature_selection_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-        try:
-            # Load data using feature selection import
-            logger.info("Loading and preparing data")
-            X_train, y_train, X_test, y_test = import_feature_select_draws_api()
-            logger.info(f"Loaded training data with shape: {X_train.shape}")
-            logger.info(f"Loaded test data with shape: {X_test.shape}")
-            
-            # Ensure target column is 'is_draw' (rename if necessary)
-            if 'draw' in X_train.columns and 'is_draw' not in X_train.columns:
-                X_train['is_draw'] = X_train['draw']
-                X_test['is_draw'] = X_test['draw']
-            
-            # Update non-numeric columns list (exclude target column)
-            non_numeric_cols = [
-                'Referee', 'venue_name', 'Home', 'Away', 'away_win', 'Date',
-                'referee_draw_rate', 'referee_draws', 'referee_match_count'
-            ]
-            
-            # Drop non-numeric columns
-            X_train = X_train.drop(columns=non_numeric_cols, errors='ignore')
-            X_test = X_test.drop(columns=non_numeric_cols, errors='ignore')
-            logger.info("Dropped non-numeric columns")
-            
-            # Convert integer columns to float to handle potential missing values
-            numeric_cols = X_train.select_dtypes(include=['int64']).columns
-            X_train[numeric_cols] = X_train[numeric_cols].astype('float64')
-            X_test[numeric_cols] = X_test[numeric_cols].astype('float64')
-            
-            # Initialize feature selector
-            selector = EnhancedFeatureSelector(
-                n_bootstrap=10,
-                correlation_threshold=0.90,
-                target_features=(50, 80),
-                experiment_name=experiment_name
-            )
-            
-            # Initialize model for feature selection with eval_metric in constructor
+    try:
+        # Load data
+        logger.info("Loading and preparing data")
+        X_train, y_train, X_test, y_test = import_feature_select_draws_api()
+        X_val, y_val = create_evaluation_sets_draws_api(use_selected_columns=False)
+        X_train, X_val, X_test = align_columns(logger, X_train, X_val, X_test)
+        logger.info(f"Loaded data shapes - Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
+        
+        # Initialize both feature selectors
+        standard_selector = EnhancedFeatureSelector(
+            n_bootstrap=10,
+            correlation_threshold=0.85,
+            target_features=(60, 100),
+            experiment_name=experiment_name,
+            logger=logger
+        )
+        
+        precision_selector = PrecisionFocusedFeatureSelector(
+            min_recall=0.20,
+            target_precision=0.50,
+            logger=logger
+        )
+        
+        # Initialize base model for feature selection
+        base_model = xgb.XGBClassifier(
+            tree_method='hist',
+            device='cpu',
+            random_state=42,
+            eval_metric=['auc', 'aucpr']
+        )
+        
+        with mlflow.start_run(run_name=f"precision_focused_feature_selection_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+            # First, get standard feature importance
+            logger.info("Running standard feature selection")
+            standard_features = standard_selector.select_features(X_train, y_train, base_model)
+            logger.info(f"Standard features: {standard_features}")
+            # Train model on selected features
             model = xgb.XGBClassifier(
                 tree_method='hist',
                 device='cpu',
-                random_state=42,
-                eval_metric=['auc', 'aucpr']  # Move eval_metric here
+                random_state=42
+            )
+            model.fit(
+                X_train[standard_features],
+                y_train,
+                eval_set=[(X_val[standard_features], y_val)],
+                verbose=False
             )
             
-            # Run feature selection
-            logger.info("Starting feature selection process")
-            selected_features = selector.select_features(X_train, y_train, model)
+            # Now analyze precision impact
+            logger.info("Analyzing precision impact of features")
+            importance_df = precision_selector.analyze_feature_importance(
+                model,
+                standard_features,
+                X_val[standard_features],
+                y_val
+            )
             
-            # Save results
+            # Select final feature set
+            logger.info("Selecting final feature set with precision focus")
+            final_features = precision_selector.select_features(
+                importance_df,
+                X_val,
+                correlation_threshold=0.85
+            )
+            
+            # Log results
+            mlflow.log_metrics({
+                'n_initial_features': len(standard_features),
+                'n_final_features': len(final_features),
+                'feature_reduction_percent': (1 - len(final_features)/len(standard_features)) * 100
+            })
+            
+            # Save feature lists
             results_dir = Path("results/feature_selection")
             results_dir.mkdir(parents=True, exist_ok=True)
             
-            # Save selected features
-            features_path = results_dir / "selected_features.txt"
-            with open(features_path, "w") as f:
-                for feature in selected_features:
+            # Save both feature sets
+            with open(results_dir / "standard_features.txt", "w") as f:
+                for feature in standard_features:
                     f.write(f"{feature}\n")
-            logger.info(f"Saved selected features to {features_path}")
-            mlflow.log_artifact(str(features_path))
+                    
+            with open(results_dir / "precision_focused_features.txt", "w") as f:
+                for feature in final_features:
+                    f.write(f"{feature}\n")
+                    
+            # Evaluate feature sets
+            logger.info("Evaluating feature sets")
             
-            # Log metrics
+            def evaluate_feature_set(features):
+                model = xgb.XGBClassifier(
+                    tree_method='hist',
+                    device='cpu',
+                    random_state=42
+                )
+                model.fit(
+                    X_train[features],
+                    y_train,
+                    eval_set=[(X_val[features], y_val)],
+                    verbose=False
+                )
+                
+                # Get predictions
+                val_probs = model.predict_proba(X_val[features])[:, 1]
+                val_preds = (val_probs >= 0.5).astype(int)
+                
+                return {
+                    'precision': precision_score(y_val, val_preds),
+                    'recall': recall_score(y_val, val_preds)
+                }
+            
+            # Compare metrics
+            standard_metrics = evaluate_feature_set(standard_features)
+            precision_metrics = evaluate_feature_set(final_features)
+            
             mlflow.log_metrics({
-                'n_selected_features': len(selected_features),
-                'train_shape': X_train.shape[0],
-                'test_shape': X_test.shape[0]
+                'standard_precision': standard_metrics['precision'],
+                'standard_recall': standard_metrics['recall'],
+                'precision_focused_precision': precision_metrics['precision'],
+                'precision_focused_recall': precision_metrics['recall']
             })
             
-            # Log parameters
-            mlflow.log_params({
-                'n_bootstrap': selector.n_bootstrap,
-                'correlation_threshold': selector.correlation_threshold,
-                'target_features_min': selector.target_features[0],
-                'target_features_max': selector.target_features[1],
-                'random_state': selector.random_state
-            })
+            logger.info("\nFeature Selection Results:")
+            logger.info(f"Standard Features: {len(standard_features)}")
+            logger.info(f"Precision-Focused Features: {len(final_features)}")
+            logger.info("\nMetrics Comparison:")
+            logger.info(f"Standard - Precision: {standard_metrics['precision']:.4f}, Recall: {standard_metrics['recall']:.4f}")
+            logger.info(f"Precision-Focused - Precision: {precision_metrics['precision']:.4f}, Recall: {precision_metrics['recall']:.4f}")
             
-            # Create input example and signature
-            input_example = X_train[selected_features].head(1)
-            signature = mlflow.models.infer_signature(
-                X_train[selected_features],
-                y_train
-            )
+            return final_features
             
-            # Log model configuration
-            mlflow.log_dict(
-                {
-                    'selected_features': selected_features,
-                    'feature_importance': selector.feature_scores,
-                    'stability_scores': selector.stability_scores
-                },
-                'model_config.json'
-            )
-            
-            logger.info(f"Selected {len(selected_features)} features")
-            logger.info("Feature selection completed successfully")
-            
-            return selected_features
-            
-        except Exception as e:
-            error_code = getattr(e, 'error_code', DataProcessingError.FILE_CORRUPTED)
-            logger.error(f"Error in feature selection process (code {error_code}): {str(e)}")
-            raise
+    except Exception as e:
+        logger.error(f"Error in feature selection process: {str(e)}")
+        raise
+
+def align_columns(logger: ExperimentLogger, train_df: pd.DataFrame, test_df: pd.DataFrame, eval_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aligns the columns of the evaluation set with the training set by dropping
+    columns that are missing in either DataFrame.
+    
+    Args:
+        logger: ExperimentLogger instances
+        train_df: Training DataFrame
+        test_df: Test DataFrame
+        eval_df: Evaluation DataFrame
+        
+    Returns:
+        pd.DataFrame: Evaluation DataFrame with aligned columns
+    """
+    # Get common columns between all three DataFrames
+    common_columns = set(train_df.columns).intersection(set(eval_df.columns)).intersection(set(test_df.columns))
+    
+    # Drop columns that are missing in either DataFrame
+    # Preserve the original column order from the training set
+    ordered_columns = [col for col in common_columns]
+    logger.info(f"Aligned columns: {ordered_columns}")
+    train_df = train_df[ordered_columns]
+    test_df = test_df[ordered_columns]
+    eval_df = eval_df[ordered_columns]
+    
+    return train_df, test_df, eval_df
+
+def verify_interactions(train_df, test_df, eval_df, feature_names):
+    """Verify that all necessary interaction features exist in all DataFrames."""
+    expected_interactions = {
+        f'{feature1}_{feature2}'
+        for i, feature1 in enumerate(feature_names)
+        for feature2 in feature_names[i+1:]
+    }
+    
+    missing_in_train = expected_interactions - set(train_df.columns)
+    missing_in_test = expected_interactions - set(test_df.columns)
+    missing_in_eval = expected_interactions - set(eval_df.columns)
+    
+    if missing_in_train:
+        print(f"Missing interactions in train: {missing_in_train}")
+    if missing_in_test:
+        print(f"Missing interactions in test: {missing_in_test}")
+    if missing_in_eval:
+        print(f"Missing interactions in eval: {missing_in_eval}")
+        
+    return not (missing_in_train or missing_in_test or missing_in_eval)
 
 if __name__ == "__main__":
     try:

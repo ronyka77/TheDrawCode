@@ -33,7 +33,7 @@ class MLFlowConfig:
     """MLflow configuration management"""
     
     def __init__(self):
-        project_root = Path(__file__).resolve().parent.parent
+    
         self.shared_path = "B:/mlflow/mlruns"
         self.local_path = project_root / "mlruns"
         self.local_path_uri = str(self.local_path).replace('\\', '/')
@@ -125,8 +125,6 @@ class MLFlowManager:
         except Exception as e:
             self.logger.error(f"Error syncing with shared storage: {e}")
             
-
-
     def backup_to_shared(self) -> None:
         """Backup local MLflow data to shared storage based on run IDs"""
         try:
@@ -375,6 +373,83 @@ class MLFlowManager:
         except Exception as e:
             self.logger.error(f"Error in normalize_all_meta_yaml_paths: {e}")
             raise
+
+    def get_run_artifact_uri(self, run_id: str) -> str:
+        """Get the artifact URI for a specific MLflow run.
+        
+        Args:
+            run_id: The MLflow run ID to locate
+            
+        Returns:
+            String containing the artifact URI
+            
+        Raises:
+            FileNotFoundError: If the run directory cannot be found
+            ValueError: If the run ID is invalid
+        """
+        # Validate run ID format
+        if not run_id or not isinstance(run_id, str) or len(run_id) != 32:
+            raise ValueError(f"Invalid run ID format: {run_id}")
+
+        # Construct the expected path pattern
+        mlruns_path = Path(self.mlruns_dir).resolve()
+        
+        # First try direct path construction using tracking URI
+        tracking_uri = self.config.config.get("tracking_uri", "")
+        if tracking_uri and Path(tracking_uri).exists():
+            mlruns_path = Path(tracking_uri).resolve()
+            self.logger.debug(f"Using tracking URI path: {mlruns_path}")
+        
+        # Search for the run directory
+        try:
+            # First try direct path construction (most efficient)
+            for experiment_dir in mlruns_path.iterdir():
+                if experiment_dir.is_dir():
+                    # Skip .trash and non-experiment directories
+                    if experiment_dir.name == '.trash' or not experiment_dir.name.isdigit():
+                        continue
+                        
+                    # Search within experiment directory
+                    potential_paths = [
+                        p for p in experiment_dir.glob(f"**/{run_id}")
+                        if p.is_dir()
+                    ]
+                    
+                    if potential_paths:
+                        run_path = potential_paths[0]
+                        self.logger.info(f"Found run directory at: {run_path}")
+                        return str(run_path / "artifacts")
+
+            # If direct search fails, try global recursive search with more inclusive pattern
+            all_potential_paths = [
+                p for p in mlruns_path.glob(f"**/{run_id}*")  # Add wildcard to catch variations
+                if p.is_dir() and 
+                '.trash' not in str(p) and
+                any(parent.name.isdigit() for parent in p.parents) and
+                run_id in str(p)  # Ensure run_id is actually in the path
+            ]
+            self.logger.debug(f"Global search found {len(all_potential_paths)} potential paths")
+            self.logger.debug(f"Searching in mlruns path: {mlruns_path}")
+            self.logger.debug(f"All potential paths: {all_potential_paths}")
+            if all_potential_paths:
+                run_path = all_potential_paths[0]
+                self.logger.info(f"Found run directory via global search: {run_path}")
+                return str(run_path / "artifacts")
+            
+            # Check trash as last resort
+            trash_paths = list(mlruns_path.glob(f".trash/**/{run_id}"))
+            if trash_paths:
+                self.logger.warning(f"Run {run_id} found only in trash: {trash_paths[0]}")
+            
+            # Debug info before raising error
+            self.logger.debug(f"Searched in mlruns path: {mlruns_path}")
+            self.logger.debug(f"Available experiment directories: {[d.name for d in mlruns_path.iterdir() if d.is_dir()]}")
+            
+            raise FileNotFoundError(f"Run directory not found for ID: {run_id}")
+            
+        except Exception as e:
+            self.logger.error(f"Error locating run directory: {str(e)}")
+            raise FileNotFoundError(f"Failed to locate run directory for ID {run_id}: {str(e)}")
 
 def create_experiment_run(experiment_name: str, experiment_id: str):
     """Decorator for creating MLflow runs"""

@@ -25,6 +25,10 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 import mlflow
+# Add warning filter imports
+import warnings
+from mlflow.models.signature import infer_signature
+from mlflow.exceptions import MlflowException
 
 # Add project root to Python path
 try:
@@ -51,6 +55,11 @@ from utils.create_evaluation_set import (
     setup_mlflow_tracking
 )
 
+# Configure warnings
+warnings.filterwarnings('ignore', category=UserWarning, 
+                       module='xgboost.core', 
+                       message='.*Saving model in the UBJSON format as default.*')
+
 experiment_name = "xgboost_api_model"
 
 # Configure XGBoost for CPU-only training
@@ -67,25 +76,28 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         logger: Optional[ExperimentLogger] = None,
         categorical_features: Optional[List[str]] = None) -> None:
         """Initialize XGBoost model."""
-        self.logger = logger or ExperimentLogger()
+        self.logger = logger or ExperimentLogger('xgboost_api_model', f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}")
         self.categorical_features = categorical_features or []
         
         # Updated global parameters based on hypertuning insights
         self.global_params = {
-            'colsample_bytree': 0.6067781275312805,
-            'gamma': 16.545660404260257,
-            'learning_rate': 0.015,  # Increased from 0.003
-            'min_child_weight': 203,
-            'n_estimators': 8500,  # Reduced from 21177
-            'reg_alpha': 1.6561176081957816,
-            'reg_lambda': 0.18858356401987753,
-            'scale_pos_weight': 8.2,  # Adjusted from 4.9
-            'subsample': 0.7955139034577977,
-            'max_depth': 9,  # Reduced from 11
+            'colsample_bytree': 0.6409174599956351,
+            'gamma': 0.2676290839423665,
+            'learning_rate': 0.009151532259030907,
+            'min_child_weight': 37,
+            'n_estimators': 18894,
+            'reg_alpha': 0.005219271743220553,
+            'reg_lambda': 6.748113987759202,
+            'scale_pos_weight': 2.576545456335361,
+            'subsample': 0.6968250585680511,
+            'max_depth': 3,
             'objective': 'binary:logistic',
             'tree_method': 'hist',
+            'device': 'cpu',
             'eval_metric': ['error', 'auc', 'aucpr'],
-            'early_stopping_rounds': 500,  # Reduced from 1000
+            'early_stopping_rounds': 500,
+            'verbosity': 0,
+            'nthread': -1,
             'random_state': 42
         }
         
@@ -93,7 +105,7 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         self.model = None
         self.feature_importance = {}
         self.selected_features = get_selected_api_columns_draws()
-        self.threshold = 0.55  # Default threshold for predictions
+        self.threshold = 0.50  # Default threshold for predictions
 
     def _validate_data(
         self,
@@ -170,9 +182,9 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             }
             
             # Log each valid metric
-            if self.logger:
-                for metric_name, metric_value in valid_metrics.items():
-                    self.logger.info(f"{metric_name}: {metric_value}")
+            # if self.logger:
+            #     for metric_name, metric_value in valid_metrics.items():
+            #         self.logger.info(f"{metric_name}: {metric_value}")
             
             return valid_metrics
 
@@ -181,35 +193,62 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             raise
         
     def _optimize_threshold(self, y_true, y_prob):
-        """Revised threshold optimization with recall constraint"""
-        best_score = -np.inf
-        best_metrics = {'threshold': 0.55}
+        """Find optimal prediction threshold prioritizing precision while maintaining recall.
         
-        # Wider threshold range with finer increments
-        for threshold in np.linspace(0.2, 0.7, 200):
-            y_pred = (y_prob >= threshold).astype(int)
-            precision = precision_score(y_true, y_pred, zero_division=0)
-            recall = recall_score(y_true, y_pred, zero_division=0)
+        Args:
+            y_true: True target values
+            y_prob: Predicted probabilities
             
-            # Enforce minimum recall constraint
-            if recall < 0.40:
-                continue  # Skip thresholds that don't meet recall requirement
+        Returns:
+            Dictionary of optimal threshold and metrics
+        """
+        try:
+            best_metrics = {'precision': 0, 'recall': 0, 'f1': 0, 'threshold': 0.5}
+            best_score = 0
             
-            # Weighted score favoring precision while maintaining recall
-            precision_ratio = precision 
-            recall_ratio = recall 
-            score = (0.7 * precision_ratio) + (0.3 * recall_ratio)
+            # Focus on higher thresholds for better precision, starting from 0.5
+            for threshold in np.arange(0.5, 0.65, 0.01):
+                preds = (y_prob >= threshold).astype(int)
+                
+                # Calculate metrics
+                recall = recall_score(y_true, preds, zero_division=0)
+                
+                # Only consider thresholds that meet minimum recall
+                if recall >= 0.20:
+                    true_positives = ((preds == 1) & (y_true == 1)).sum()
+                    false_positives = ((preds == 1) & (y_true == 0)).sum()
+                    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+                    f1 = f1_score(y_true, preds, zero_division=0)
+                    
+                    # Modified scoring to prioritize precision
+                    score = precision * min(1.0, (recall - 0.20) / 0.20)
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_metrics.update({
+                            'precision': precision,
+                            'recall': recall,
+                            'f1': f1,
+                            'threshold': threshold
+                        })
+                        
+                        # Log improvement
+                        self.logger.info(
+                            f"New best threshold {threshold:.3f}: "
+                            f"Precision={precision:.4f}, Recall={recall:.4f}"
+                        )
             
-            if score > best_score:
-                best_score = score
-                best_metrics.update({
-                    'precision': precision,
-                    'recall': recall,
-                    'threshold': threshold
-                })
-        
-        self.logger.info(f"Optimized threshold: {best_metrics['threshold']:.3f}")
-        return best_metrics
+            if best_metrics['recall'] < 0.20:
+                self.logger.warning(
+                    f"Could not find threshold meeting recall requirement. "
+                    f"Best recall: {best_metrics['recall']:.4f}"
+                )
+            
+            return best_metrics
+            
+        except Exception as e:
+            self.logger.error(f"Error in threshold optimization: {str(e)}")
+            raise
 
     def train(
         self,
@@ -228,7 +267,6 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             model = xgb.XGBClassifier(**self.global_params)
             early_stopping = xgb.callback.EarlyStopping(
                 rounds=self.global_params['early_stopping_rounds'],
-                metric_name='aucpr',
                 save_best=True
             )
             
@@ -277,22 +315,34 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         # Get predictions
         y_prob = self.predict_proba(features)
         y_pred = (y_prob[:, 1] >= self.threshold).astype(int)
+        # Calculate confusion matrix
+        true_positives = ((target == 1) & (y_pred == 1)).sum()
+        false_positives = ((target == 0) & (y_pred == 1)).sum()
+        true_negatives = ((target == 0) & (y_pred == 0)).sum()
+        false_negatives = ((target == 1) & (y_pred == 0)).sum()
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+        f1 = f1_score(target, y_pred, zero_division=0)
         
         # Calculate metrics
         metrics = {
             'accuracy': np.mean(y_pred == target),
-            'precision': precision_score(target, y_pred, zero_division=0),
-            'recall': recall_score(target, y_pred, zero_division=0),
-            'f1': f1_score(target, y_pred, zero_division=0),
+            'precision': precision,
+            'recall': recall,
+            'f1': f1,
             'log_loss': log_loss(target, y_prob[:, 1]),
-            'average_precision': average_precision_score(target, y_prob[:, 1])
+            'average_precision': average_precision_score(target, y_prob[:, 1]),
+            'draw_rate': float(target.mean()),
+            'predicted_rate': float(y_pred.mean()),
+            'n_samples': len(target),
+            'n_draws': int(target.sum()),
+            'n_predicted': int(y_pred.sum()),
+            'n_correct': int(np.logical_and(target, y_pred).sum()),
+            'n_incorrect': int(np.logical_not(np.logical_and(target, y_pred)).sum())
         }
         
-        # Calculate confusion matrix
-        true_positives = np.sum((target == 1) & (y_pred == 1))
-        false_positives = np.sum((target == 0) & (y_pred == 1))
-        true_negatives = np.sum((target == 0) & (y_pred == 0))
-        false_negatives = np.sum((target == 1) & (y_pred == 0))
+        
         
         confusion = {
             'true_positives': int(true_positives),
@@ -319,24 +369,32 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         if self.model is None:
             raise ValueError("No model to save. Train the model first.")
         
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        
-        # Save in JSON format for better compatibility
-        self.model.save_model(model_path)  # Removed format parameter
-        
-        # Save metadata separately
-        metadata_path = model_path.replace('.json', '_metadata.pkl')
-        with open(metadata_path, 'wb') as f:
-            pickle.dump({
-                'feature_importance': self.feature_importance,
-                'threshold': self.threshold,
-                'global_params': self.global_params,
-                'selected_features': self.selected_features
-            }, f)
-        
-        if self.logger:
-            self.logger.info(f"Model saved to {model_path}")
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            
+            # Save model in XGBoost binary format
+            model_json_path = model_path.replace('.pkl', '.xgb')
+            self.model.save_model(model_json_path)
+            
+            # Save metadata separately
+            metadata_path = model_path.replace('.pkl', '_metadata.pkl')
+            with open(metadata_path, 'wb') as f:
+                pickle.dump({
+                    'feature_importance': self.feature_importance,
+                    'threshold': self.threshold,
+                    'global_params': self.global_params,
+                    'selected_features': self.selected_features
+                }, f)
+            
+            if self.logger:
+                self.logger.info(f"Model saved to {model_json_path}")
+                self.logger.info(f"Metadata saved to {metadata_path}")
+                
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error saving model: {str(e)}")
+            raise
 
     def load_model(self, model_path: str) -> None:
         """Load a saved model."""
@@ -376,91 +434,120 @@ def log_feature_importance(feature_importance):
     with open(f"{project_root}/feature_importance/feature_importance.json", 'w', encoding='utf-8') as f:
         json.dump(feature_importance, f, indent=2)
 
-def convert_int_columns(df):
+def convert_int_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Convert integer columns to float64 for MLflow compatibility."""
-    for col in df.select_dtypes(include=['int']).columns:
-        df[col] = df[col].astype('float64')
-    return df
+    try:
+        # Convert all integer columns to float64
+        for col in df.select_dtypes(include=['int']).columns:
+            df[col] = df[col].astype('float64')
+        return df
+    except Exception as e:
+        raise ValueError(f"Error converting integer columns: {str(e)}")
 
 def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
     """Train the global XGBoost model."""
     try:
         # Initialize logger
-        logger = ExperimentLogger(experiment_name=experiment_name)
+        logger = ExperimentLogger(log_dir='logs/xgboost_api_model', experiment_name=experiment_name)
         logger.info("Starting global model training...")
         
         # Load and prepare data
         logger.info("Loading training data...")
         X_train, y_train, X_test, y_test = import_training_data_draws_api()
         
+        # Convert integer columns to float64 before MLflow logging
+        X_train = convert_int_columns(X_train)
+        X_test = convert_int_columns(X_test)
+        
         # Create evaluation set
         logger.info("Creating evaluation set...")
         X_eval, y_eval = create_evaluation_sets_draws_api()
+        X_eval = convert_int_columns(X_eval)
         
         # Initialize model
         logger.info("Initializing model...")
         xgb_model = XGBoostModel(logger=logger)
         
-        # Align data handling with hypertuning's full dataset approach
-        full_X = pd.concat([X_train, X_test])
-        full_y = pd.concat([y_train, y_test])
-        
         # Start MLflow run with experiment tracking
-        with mlflow.start_run(experiment_id=mlflow.get_experiment_by_name(experiment_name).experiment_id):
-            logger.info(f"Started MLflow run for experiment: {experiment_name}")
+        with mlflow.start_run(experiment_id=mlflow.get_experiment_by_name(experiment_name).experiment_id,
+                            run_name=f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+            try:
+                # Log global parameters to MLflow
+                mlflow.log_params(xgb_model.global_params)
+                logger.info("Logged global parameters to MLflow", extra={"params": xgb_model.global_params})
+                
+                # Log additional training metadata
+                mlflow.log_metric("train_samples", len(X_train))
+                mlflow.log_metric("test_samples", len(X_test))
+                mlflow.log_metric("eval_samples", len(X_eval))
+                logger.info("Logged dataset sizes to MLflow", 
+                          extra={"train_samples": len(X_train), 
+                                 "test_samples": len(X_test), 
+                                 "eval_samples": len(X_eval)})
+
+                # Set MLflow tags for model configuration
+                mlflow.set_tags({
+                    "model_type": "xgboost",
+                    "training_mode": "global",
+                    "cpu_only": True,
+                    "tree_method": "hist"
+                })
+                logger.info("Set MLflow tags for model configuration")
+                
+                # Train model
+                xgb_model.train(X_train, y_train, X_test, y_test)
+                
+                # Get and log validation metrics
+                try:
+                    val_metrics = xgb_model.validate_completion_metrics(X_eval, y_eval)
+                    if val_metrics:
+                        # Log each metric to MLflow
+                        for metric_name, metric_value in val_metrics.items():
+                            mlflow.log_metric(metric_name, metric_value)
+                        logger.info("Logged validation metrics to MLflow", 
+                                  extra={"metrics": val_metrics})
+                    else:
+                        logger.warning("No valid metrics returned from validation")
+                except Exception as e:
+                    logger.error(f"Error logging validation metrics: {str(e)}")
+                    raise
+                
+                # Create MLflow signature with float64 types
+                input_example = X_train.head(1)
+                try:
+                    signature = infer_signature(X_train, xgb_model.predict(X_train))
+                except MlflowException as e:
+                    logger.warning(f"Could not infer MLflow signature: {str(e)}")
+                    signature = None
+                
+                # Save model with explicit format
+                model_path = os.path.join(
+                    project_root, 
+                    "models", 
+                    "saved", 
+                    f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+                )
+                xgb_model.save_model(model_path)
+                
+                # Log model to MLflow with signature
+                if signature:
+                    mlflow.xgboost.log_model(
+                        xgb_model.model,
+                        artifact_path="xgboost_api_model",
+                        input_example=input_example,
+                        registered_model_name=f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}",
+                        signature=signature
+                    )
+                else:
+                    logger.warning("MLflow signature could not be inferred")
+                
+                logger.info("Global model training completed successfully")
+                logger.info(f"MLflow run ID: {mlflow.active_run().info.run_id}")
+                
+            except Exception as e:
+                logger.error(f"Error in MLflow logging: {str(e)}")
+                raise
             
-            # Log data shapes and statistics
-            logger.info(f"Full training data shape: {full_X.shape}")
-            logger.info(f"Evaluation data shape: {X_eval.shape}")
-            logger.info(f"Training draw rate: {full_y.mean():.2%}")
-            logger.info(f"Evaluation draw rate: {y_eval.mean():.2%}")
-            
-            # Log initial parameters
-            mlflow.log_params(xgb_model.global_params)
-            mlflow.log_param("training_samples", full_X.shape[0])
-            mlflow.log_param("evaluation_samples", X_eval.shape[0])
-        
-            # Mirror hypertuning's two-phase training
-            xgb_model.train(full_X, full_y, X_eval, y_eval)
-            
-            # Get and log metrics
-            test_metrics = xgb_model.validate_completion_metrics(X_test, y_test)
-            eval_metrics = xgb_model.validate_completion_metrics(X_eval, y_eval)
-            
-            # Save model
-            model_path = os.path.join(project_root, "models", "saved", f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl")
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            xgb_model.save_model(model_path)
-            
-    
-            # Log model with signature
-            signature = mlflow.models.infer_signature(
-                X_train,
-                xgb_model.predict(X_train)
-            )
-            mlflow.xgboost.log_model(
-                xgb_model.model,
-                artifact_path="xgboost_api_model",
-                registered_model_name=f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                signature=signature
-            )
-        
-            # Log parameters and metrics
-            mlflow.log_metrics(test_metrics)
-            mlflow.log_metrics(eval_metrics)
-        
-            # Log feature importance as artifact
-            feature_importance_path = os.path.join(project_root, "feature_importance")
-            mlflow.log_artifacts(feature_importance_path)
-            
-            # Log model path
-            mlflow.log_artifact(model_path)
-            
-            logger.info("Global model training completed successfully")
-            mlflow.end_run()
-        
-        
-        
     except Exception as e:
         logger.error(f"Error in global model training: {str(e)}")
         raise

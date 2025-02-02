@@ -108,6 +108,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simple guides
 - Architecture overview
 
+## [2.1.1] - 2024-02-01
+
+### Added
+- Precision optimization with recall threshold
+  - New objective function implementation
+  - Enhanced MLflow metrics tracking
+  - Visualization improvements
+  - Automated trial pruning
+- Comprehensive test suite for precision-recall optimization
+  - Recall threshold enforcement tests
+  - Precision optimization validation
+  - Trial pruning verification
+
+### Updated
+- Model training documentation
+  - Added precision-recall optimization section
+  - Updated MLflow integration guide
+  - Enhanced visualization documentation
+- Hyperparameter tuning guide
+  - New parameter ranges for precision optimization
+  - Trial pruning documentation
+  - Metrics tracking examples
+
+## [2.1.2] - 2024-02-02
+
+### Added
+- Precision-focused feature selection
+  - New `PrecisionFocusedFeatureSelector` class
+  - Precision impact analysis for features
+  - Two-stage feature selection process
+- Enhanced threshold optimization
+  - Precision-focused scoring function
+  - Dynamic threshold adjustment
+  - Recall constraint enforcement (20%)
+
+### Updated
+- Feature selection process
+  - Combined standard and precision-focused approaches
+  - Added feature impact analysis
+  - Enhanced metrics tracking and visualization
+- Hyperparameter tuning
+  - Modified objective function for precision focus
+  - Updated parameter ranges
+  - Added trial pruning for low recall
+- Documentation
+  - Added precision improvement documentation
+  - Updated feature selection guides
+  - Enhanced MLflow metrics documentation
+
+### Technical Changes
+- Reduced recall threshold from 40% to 20%
+- Expanded feature selection range to 60-100 features
+- Modified correlation threshold to 0.85
+- Added precision impact scoring (70% precision, 30% base importance)
+
 [2.1.0]: https://github.com/username/soccer-prediction/compare/docs-v2.0.0...docs-v2.1.0
 [2.0.0]: https://github.com/username/soccer-prediction/compare/docs-v1.0.0...docs-v2.0.0
 [1.0.0]: https://github.com/username/soccer-prediction/releases/tag/docs-v1.0.0 

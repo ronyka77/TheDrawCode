@@ -2,6 +2,53 @@
 
 [← Back to Documentation Home](../README.md)
 
+## Updates for Precision Improvement (v2.1)
+
+### Precision-Recall Optimization
+The model training pipeline now includes enhanced precision optimization while maintaining a minimum recall threshold:
+
+```python
+# Example of new objective function configuration
+def objective(trial):
+    """Optimize precision while maintaining 40% recall threshold."""
+    # Model configuration
+    params = {
+        'tree_method': 'hist',  # CPU optimization
+        'device': 'cpu',
+        'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.1, 30.0)
+        # ... other parameters
+    }
+    
+    # Evaluation with recall constraint
+    if recall >= 0.40:
+        return precision  # Optimize precision when recall threshold is met
+    else:
+        raise optuna.exceptions.TrialPruned()
+```
+
+### Key Features
+- **Recall Threshold**: Maintains minimum 40% recall
+- **Precision Focus**: Optimizes precision after meeting recall requirement
+- **Trial Pruning**: Automatically prunes trials not meeting recall threshold
+- **Enhanced Metrics Tracking**: Detailed MLflow logging of precision-recall trade-offs
+
+### MLflow Integration
+```python
+# Example of enhanced metrics logging
+with mlflow.start_run(run_name="precision_optimization"):
+    mlflow.log_params({
+        "target_recall": 0.40,
+        "optimization_metric": "precision",
+        "recall_constraint": ">=0.40"
+    })
+```
+
+### Visualization & Monitoring
+- Parameter importance plots
+- Optimization history tracking
+- Parallel coordinate visualization
+- Trial pruning statistics
+
 ## Table of Contents
 - [Overview](#overview)
 - [Architecture Components](#architecture-components)
@@ -285,6 +332,44 @@ def check_model_stability(model, X, y, cv=5):
 
 ### Project Management
 - [Changelog](../CHANGELOG.md) - Version history and updates
+
+## Feature Selection
+
+### Precision-Focused Selection
+The feature selection process now uses a two-stage approach:
+
+1. Standard Selection:
+```python
+standard_selector = EnhancedFeatureSelector(
+    n_bootstrap=10,
+    correlation_threshold=0.85,
+    target_features=(60, 100)
+)
+```
+
+2. Precision Impact Analysis:
+```python
+precision_selector = PrecisionFocusedFeatureSelector(
+    min_recall=0.20,
+    target_precision=0.50
+)
+```
+
+### Feature Impact Scoring
+Features are now scored using a composite metric:
+- 70% precision impact
+- 30% base importance
+
+```python
+combined_scores = 0.7 * precision_impact + 0.3 * importance_base
+```
+
+### Evaluation Process
+Each feature set is evaluated for:
+- Precision at 20% recall
+- Overall model performance
+- Feature stability
+- Correlation analysis
 
 ---
 [🔝 Back to Top](#model-training-architecture) 

@@ -323,7 +323,7 @@ class PoissonXGCalculator:
             # merged_path = './data_files/PowerBI/merged_data_prediction.csv'
             api_prediction_path = './data_files/PowerBI/api_data_prediction.xlsx'
             api_training_path = './data_files/PowerBI/api_data_training.xlsx'
-            api_future_path = './data_files/PowerBI/api_football_future.csv'
+            api_future_path = './data_files/PowerBI/api_football_future.xlsx'
             
             # training_data = pd.read_csv(training_path)
             # training_data_new = pd.read_csv(training_path_new)
@@ -347,9 +347,11 @@ class PoissonXGCalculator:
             ).replace([np.inf, -np.inf], np.nan)
             
             self.logger.info(f"Loading future data from {api_future_path}")
-            api_future_data = pd.read_csv(api_future_path, 
-                                        na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
-                                        ).replace([np.inf, -np.inf], np.nan)
+            api_future_data = pd.read_excel(
+                api_future_path,
+                engine='openpyxl',
+                na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
+            ).replace([np.inf, -np.inf], np.nan)
             
             api_training_data = api_training_data.rename(columns={
                 'home_possession_mean': 'Home_possession_mean',

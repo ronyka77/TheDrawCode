@@ -81,8 +81,7 @@ class ExperimentLogger:
     def __init__(
         self,
         experiment_name: Optional[str] = None,
-        log_dir: Optional[str] = None
-    ) -> None:
+        log_dir: Optional[str] = None) -> None:
         """Initialize logger.
         
         Args:
@@ -210,6 +209,7 @@ class ExperimentLogger:
     def info(
         self,
         msg: str,
+        error_code: Optional[str] = None,
         extra: Optional[Dict[str, Any]] = None
     ) -> None:
         """Log an info message.
@@ -218,33 +218,37 @@ class ExperimentLogger:
             msg: Message to log
             extra: Optional extra fields for structured logging
         """
-        self._log('INFO', msg, extra)
+        self._log('INFO', msg, {**(extra or {}), 'error_code': error_code})
     
     def warning(
         self,
         msg: str,
+        error_code: Optional[str] = None,
         extra: Optional[Dict[str, Any]] = None
     ) -> None:
         """Log a warning message.
         
         Args:
             msg: Message to log
+            error_code: Optional error code
             extra: Optional extra fields for structured logging
         """
-        self._log('WARNING', msg, extra)
+        self._log('WARNING', msg, {**(extra or {}), 'error_code': error_code})
     
     def error(
         self,
         msg: str,
+        error_code: Optional[str] = None,
         extra: Optional[Dict[str, Any]] = None
     ) -> None:
         """Log an error message.
         
         Args:
             msg: Message to log
+            error_code: Optional error code
             extra: Optional extra fields for structured logging
         """
-        self._log('ERROR', msg, extra)
+        self._log('ERROR', msg, {**(extra or {}), 'error_code': error_code})
     
     def debug(
         self,

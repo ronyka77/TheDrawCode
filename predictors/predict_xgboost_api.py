@@ -13,7 +13,7 @@ from pymongo import MongoClient
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.create_evaluation_set import get_selected_api_columns_draws, get_real_api_scores_from_excel, setup_mlflow_tracking
+from utils.create_evaluation_set import get_selected_api_columns_draws, get_real_api_scores_from_excel, setup_mlflow_tracking, create_prediction_set_api
 
 
 mlruns_dir = setup_mlflow_tracking("xgboost_draw_model")
@@ -30,16 +30,7 @@ class DrawPredictor:
         self.model = mlflow.xgboost.load_model(model_uri)
         self.required_columns = get_selected_api_columns_draws()
         # Load the threshold from the model if available
-        self.threshold = getattr(self.model, 'threshold', 0.55)
-    
-    # @staticmethod
-    # def _load_required_columns() -> list:
-    #     """Load required columns from serving payload."""
-    #     serving_payload = json.loads("""{
-    #       "dataframe_split": {
-    #         "columns": """ + json.dumps(selected_columns) + """ }
-    #     }""")  # Your full serving payload here
-    #     return serving_payload["dataframe_split"]["columns"]
+        self.threshold = 0.50
     
     def _validate_input(self, df: pd.DataFrame) -> None:
         """Validate input dataframe has all required columns."""
@@ -61,11 +52,12 @@ class DrawPredictor:
         results = {
             'predictions': predictions.tolist(),
             'draw_probabilities': probas[:, 1].tolist(),
-            'threshold_used': self.model.confidence_threshold if hasattr(self.model, 'confidence_threshold') else 0.5,
+            'threshold_used': self.threshold,
             'num_predictions': len(predictions),
             'positive_predictions': int(predictions.sum()),
             'prediction_rate': float(predictions.mean())
         }
+        print(f"results: {results['prediction_rate']}")
         return results
     
     def predict_single_match(self, row: pd.Series) -> Dict[str, Any]:
@@ -109,7 +101,7 @@ def _preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
-def make_prediction(prediction_data, model_uri, selected_columns) -> pd.DataFrame:
+def make_prediction(prediction_data, model_uri, selected_columns, real_scores_df) -> pd.DataFrame:
     """Make predictions and return results with probabilities."""
     try:
         # Initialize default values
@@ -131,60 +123,50 @@ def make_prediction(prediction_data, model_uri, selected_columns) -> pd.DataFram
         prediction_df['fixture_id'] = prediction_df['fixture_id'].astype(int)
         # Get real scores and merge - this is where the error occurs
         if 'fixture_id' in prediction_df.columns:
-            valid_fixture_ids = prediction_df['fixture_id'].dropna().astype('Int64').tolist()
-            real_scores = get_real_api_scores_from_excel(valid_fixture_ids)
-            print(f"\nReal Scores Analysis:")
-            print(f"Total matches with real scores: {len(real_scores)}")
-           
-            
-            if real_scores:  # Only proceed if we have real scores
-                # Add real results to output
-                real_scores_df = pd.DataFrame.from_dict(real_scores, orient='index')
-                real_scores_df.reset_index(inplace=True)
-                real_scores_df.rename(columns={'index': 'fixture_id'}, inplace=True)
-                print(real_scores_df.head())
-                # Calculate is_draw column based on match_outcome
-                real_scores_df['match_outcome'] = real_scores_df['match_outcome'].astype(int)
-                real_scores_df['is_draw'] = (real_scores_df['match_outcome'] == 2).astype(int)
-                real_scores_df['fixture_id'] = real_scores_df['fixture_id'].astype(int)
-                real_scores_df['is_draw'] = real_scores_df['is_draw'].astype(int)
+            # valid_fixture_ids = prediction_df['fixture_id'].dropna().astype('Int64').tolist()   
+            if not real_scores_df.empty:  # Only proceed if we have real scores  
+                # Ensure is_draw column exists and is properly formatted
+                if 'is_draw' not in real_scores_df.columns:
+                    if 'match_outcome' in real_scores_df.columns:
+                        # Create is_draw from match_outcome if available
+                        real_scores_df['is_draw'] = (real_scores_df['match_outcome'] == 2).astype(int)
+                    else:
+                        print("Warning: No match outcome data available in real scores")
+                        real_scores_df['is_draw'] = None
                 
-                # Debug real scores data
-                print("Real scores columns:", real_scores_df.columns.tolist())
-                print(real_scores_df.head())
+                # Merge with validation data
+                matches_with_results = prediction_df.merge(
+                    real_scores_df, 
+                    on='fixture_id', 
+                    how='left'
+                )
                 
-                # Merge with validation
-                if 'is_draw' in real_scores_df.columns:
-                    matches_with_results = prediction_df.merge(
-                        real_scores_df, 
-                        on='fixture_id', 
-                        how='left'
-                    )
-                    matches_with_results['is_draw'] = (matches_with_results['is_draw'] == 1).astype(int)
-                else:
-                    print("Warning: No match_outcome column in real scores data")
-                    matches_with_results = prediction_df.copy()
-                    matches_with_results['is_draw'] = None
+                # Ensure is_draw is properly typed
+                if 'is_draw' in matches_with_results.columns:
+                    matches_with_results['is_draw'] = matches_with_results['is_draw'].fillna(-1).astype(int)
                 
-                if len(matches_with_results) > 0:
-                    # Only calculate metrics if we have match outcomes
-                    if 'is_draw' in matches_with_results.columns:
-                        true_positives = ((matches_with_results['draw_predicted'] == 1) & 
-                                        (matches_with_results['is_draw'] == 1)).sum()
-                        false_positives = ((matches_with_results['draw_predicted'] == 1) & 
-                                        (matches_with_results['is_draw'] == 0)).sum()
-                        true_negatives = ((matches_with_results['draw_predicted'] == 0) & 
-                                        (matches_with_results['is_draw'] == 0)).sum()
-                        false_negatives = ((matches_with_results['draw_predicted'] == 0) & 
-                                        (matches_with_results['is_draw'] == 1)).sum()
+                if len(matches_with_results) > 0 and 'is_draw' in matches_with_results.columns:
+                    # Filter out rows without valid is_draw values
+                    valid_matches = matches_with_results[matches_with_results['is_draw'] != -1]
+                    
+                    if len(valid_matches) > 0:
+                        # Calculate metrics using valid matches
+                        true_positives = ((valid_matches['draw_predicted'] == 1) & 
+                                        (valid_matches['is_draw'] == 1)).sum()
+                        false_positives = ((valid_matches['draw_predicted'] == 1) & 
+                                        (valid_matches['is_draw'] == 0)).sum()
+                        true_negatives = ((valid_matches['draw_predicted'] == 0) & 
+                                        (valid_matches['is_draw'] == 0)).sum()
+                        false_negatives = ((valid_matches['draw_predicted'] == 0) & 
+                                        (valid_matches['is_draw'] == 1)).sum()
                         
                         print(f"\nDetailed Metrics:")
                         print(f"True Positives: {true_positives}")
                         print(f"False Positives: {false_positives}")
                         print(f"True Negatives: {true_negatives}")
                         print(f"False Negatives: {false_negatives}")
-                        print(f"Actual Draws: {matches_with_results['is_draw'].sum()}")
-                        print(f"Predicted Draws: {matches_with_results['draw_predicted'].sum()}")
+                        print(f"Actual Draws: {valid_matches['is_draw'].sum()}")
+                        print(f"Predicted Draws: {valid_matches['draw_predicted'].sum()}")
                         
                         # Calculate metrics
                         accuracy = (true_positives + true_negatives) / len(matches_with_results)
@@ -205,7 +187,7 @@ def make_prediction(prediction_data, model_uri, selected_columns) -> pd.DataFram
                 print("Warning: No real scores data available")
                 matches_with_results = prediction_df.copy()
         
-        return prediction_df, precision, draws_recall
+        return matches_with_results, precision, draws_recall
         
     except Exception as e:
         print(f"Error during prediction: {str(e)}")
@@ -220,44 +202,38 @@ def main():
     
     # Model URIs to evaluate
     model_uris = [
-        # '748f41c0dd1549b2902059943ceb138b',
-        # '089521ea475843e8a0ca5bce95e16917',
-        # '78bb6d9f63464c7795d37057b9a6b6da',
-        # '37541534fb6146f9bb7dddd45f475dc9',
-        # '2213b64028e64040a7f6cb43954c59bf',
-        # '0384e6ebda00434788ead3c3bb7710fc',
-        # '89cfa2d46f894f1ea2ff6e3addf31b6c',
-        # '7cadcde8111f47739846a2d13b685756',
-        # 'bfe4f50485d1423d9de264ccea3f5c48',
-        # 'c8ad0c45ebd6492ea59ede02ef324880',
-        # 'b14c7b37ff05400481664a1b6f06b162',
-        # 'aec24ab6270b4b8da897797f1e81ebb8',
-        # '4752b87834224d2aa22c7c3e24309c75',
-        # '336cdc8718654dc782a8a7e51f96914a',
-        'fd79ef1d871c47de81ed7e50de08cdb3'
+        'bc2a97417edb44048967315de091d12d',
+        '7f6225cabadd4c4d8e3e14f98f213a1a',
+        'faab80862654473fa9ab57e1bec9263e',
+        '2b74a32592ae4f259ab08671a9b5d8f9',
+        'b14a4a2251124829868811ca1b95bce4',
+        'b442a479c5b64464b7b57535826a1d2c'
     ]
-    
-    # Load and preprocess prediction data
-    data_path = Path("./data/prediction/api_prediction_data_new.xlsx")
-    prediction_df = pd.read_excel(data_path)
-    prediction_data = _preprocess_data(prediction_df)
+
+    # Get preprocessed prediction data using standardized function
+    prediction_df = create_prediction_set_api()
+    prediction_data = prediction_df.copy()
     print(f"Loaded {len(prediction_data)} matches for prediction")
     
+    real_scores_df = get_real_api_scores_from_excel(prediction_data['fixture_id'].tolist())
+    print(f"real_scores_df: {len(real_scores_df)}")
+    
+    # Get selected columns using standardized function
     selected_columns = get_selected_api_columns_draws()
-    print(f"len(selected_columns): {len(selected_columns)}")
+    print(f"Number of selected columns: {len(selected_columns)}")
     
     # Evaluate each model
     for uri in model_uris:
         try:
-            uri_full = f"runs:/{uri}/model_global"
-            predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full, selected_columns)
+            uri_full = f"runs:/{uri}/xgboost_api_model"
+            predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full, selected_columns, real_scores_df)
             
             # Add validation check
             if not isinstance(predicted_df, pd.DataFrame) or predicted_df.empty:
                 print(f"Skipping invalid predictions from model {uri}")
                 continue
                 
-            if precision > best_precision and draws_recall > 0.2:
+            if precision > best_precision and draws_recall > 0.1:
                 best_precision = precision
                 best_model_uri = uri
                 best_predictions = predicted_df.copy()
