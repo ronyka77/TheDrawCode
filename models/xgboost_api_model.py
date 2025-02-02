@@ -146,80 +146,40 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         
         return x_train_df, y_train_s, x_val_df, y_val_s
 
-    def _log_completion_metrics(
+    def validate_completion_metrics(
         self,
         X_val: Optional[pd.DataFrame],
-        y_val: Optional[pd.Series]) -> None:
-        """Log completion metrics to both logger and MLflow."""
+        y_val: Optional[pd.Series]) -> Dict[str, float]:
+        """Log and return completion metrics.
+        
+        Args:
+            X_val: Validation features
+            y_val: Validation targets
+            
+        Returns:
+            Dictionary of valid metrics
+        """
         try:
+            # Get metrics from prediction analysis
             metrics = self.analyze_predictions(X_val, y_val)['metrics']
             
-            # Validate metrics before logging
+            # Filter out invalid metrics (None or NaN)
             valid_metrics = {
                 k: v for k, v in metrics.items() 
                 if v is not None and not (isinstance(v, float) and math.isnan(v))
             }
             
-            if valid_metrics:
-                mlflow.log_metrics(valid_metrics)
-            else:
-                self.logger.warning("No valid metrics to log")
-            
-            # Log feature importance plot
-            self._log_feature_importance()
-            
-            # Log model parameters
-            mlflow.log_params(self.global_params)
-            
-            # Log model
-            mlflow.xgboost.log_model(
-                xgb_model=self.model,
-                artifact_path="model",
-                registered_model_name=f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                conda_env={
-                    'name': 'soccerprediction_env',
-                    'channels': ['conda-forge'],
-                    'dependencies': [
-                        'python=3.9',
-                        'xgboost',
-                        'scikit-learn',
-                        'pandas',
-                        'numpy'
-                    ]
-                }
-            )
-            
-            # Log to logger
+            # Log each valid metric
             if self.logger:
                 for metric_name, metric_value in valid_metrics.items():
                     self.logger.info(f"{metric_name}: {metric_value}")
+            
+            return valid_metrics
 
         except Exception as e:
             self.logger.error(f"Error logging metrics: {e}")
             raise
-
-    def _log_feature_importance(self) -> None:
-        """Log feature importance plot to MLflow."""
-        import matplotlib.pyplot as plt
         
-        # Create feature importance plot
-        plt.figure(figsize=(10, 6))
-        sorted_idx = np.argsort(list(self.feature_importance.values()))
-        pos = np.arange(sorted_idx.shape[0]) + .5
-        plt.barh(pos, np.array(list(self.feature_importance.values()))[sorted_idx])
-        plt.yticks(pos, np.array(list(self.feature_importance.keys()))[sorted_idx])
-        plt.xlabel('Feature Importance Score')
-        plt.title('Feature Importance')
-        
-        # Save plot
-        plot_path = "feature_importance.png"
-        plt.savefig(plot_path, bbox_inches='tight', dpi=300)
-        plt.close()
-        
-        # Log to MLflow
-        mlflow.log_artifact(plot_path)
-        os.remove(plot_path)  # Clean up
-
     def _optimize_threshold(self, y_true, y_prob):
         """Revised threshold optimization with recall constraint"""
         best_score = -np.inf
@@ -259,52 +219,35 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         target_val: Optional[Union[pd.Series, np.ndarray]] = None) -> None:
         """Train the XGBoost model."""
         try:
-            # Start MLflow run
-            with mlflow.start_run(run_name=f"xgboost_train_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-                # Unified data handling with hypertuning
-                X_train, y_train, X_val, y_val = self._validate_data(
-                    features_train, target_train, features_val, target_val
-                )
-                
-                # Align with hypertuning's XGBClassifier approach
-                model = xgb.XGBClassifier(**self.global_params)
-                early_stopping = xgb.callback.EarlyStopping(
-                    rounds=self.global_params['early_stopping_rounds'],
-                    metric_name='aucpr',
-                    save_best=True
-                )
-                
-                # Mirror hypertuning's fit procedure
-                model.fit(
-                    X_train, y_train,
-                    eval_set=[(X_val, y_val)],
-                    verbose=100
-                )
-                
-                # Store model and feature importance
-                self.model = model
-                self.feature_importance = model.get_booster().get_score(importance_type='gain')
-                
-                # Unified threshold optimization
-                val_probs = model.predict_proba(X_val)[:, 1]
-                best_metrics = self._optimize_threshold(y_val.values, val_probs)
-                self.threshold = best_metrics['threshold']
-                
-                # Enhanced logging matching hypertuning
-                mlflow.log_params(self.global_params)
-                mlflow.log_param("optimal_threshold", self.threshold)
-                mlflow.log_metric("precision", best_metrics['precision'])
-                mlflow.log_metric("recall", best_metrics['recall'])
-                self._log_completion_metrics(X_val, y_val)
-                
-
-                # Add input example and signature
-                input_example = X_train.head(1)
-                signature = mlflow.models.infer_signature(
-                    X_train,
-                    self.model.predict_proba(X_train)
-                )
-                
+            # Unified data handling with hypertuning
+            X_train, y_train, X_val, y_val = self._validate_data(
+                features_train, target_train, features_val, target_val
+            )
+            
+            # Align with hypertuning's XGBClassifier approach
+            model = xgb.XGBClassifier(**self.global_params)
+            early_stopping = xgb.callback.EarlyStopping(
+                rounds=self.global_params['early_stopping_rounds'],
+                metric_name='aucpr',
+                save_best=True
+            )
+            
+            # Mirror hypertuning's fit procedure
+            model.fit(
+                X_train, y_train,
+                eval_set=[(X_val, y_val)],
+                verbose=100
+            )
+            
+            # Store model and feature importance
+            self.model = model
+            self.feature_importance = model.get_booster().get_score(importance_type='gain')
+            
+            # Unified threshold optimization
+            val_probs = model.predict_proba(X_val)[:, 1]
+            best_metrics = self._optimize_threshold(y_val.values, val_probs)
+            self.threshold = best_metrics['threshold']
+            
         except Exception as e:
             self.logger.error(f"Training error: {str(e)}")
             raise
@@ -442,9 +385,6 @@ def convert_int_columns(df):
 def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
     """Train the global XGBoost model."""
     try:
-        # Initialize MLflow
-        mlruns_dir = setup_mlflow_tracking(experiment_name)
-        
         # Initialize logger
         logger = ExperimentLogger(experiment_name=experiment_name)
         logger.info("Starting global model training...")
@@ -465,52 +405,61 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
         full_X = pd.concat([X_train, X_test])
         full_y = pd.concat([y_train, y_test])
         
-        # Mirror hypertuning's two-phase training
-        xgb_model.train(full_X, full_y, X_eval, y_eval)
+        # Start MLflow run with experiment tracking
+        with mlflow.start_run(experiment_id=mlflow.get_experiment_by_name(experiment_name).experiment_id):
+            logger.info(f"Started MLflow run for experiment: {experiment_name}")
+            
+            # Log data shapes and statistics
+            logger.info(f"Full training data shape: {full_X.shape}")
+            logger.info(f"Evaluation data shape: {X_eval.shape}")
+            logger.info(f"Training draw rate: {full_y.mean():.2%}")
+            logger.info(f"Evaluation draw rate: {y_eval.mean():.2%}")
+            
+            # Log initial parameters
+            mlflow.log_params(xgb_model.global_params)
+            mlflow.log_param("training_samples", full_X.shape[0])
+            mlflow.log_param("evaluation_samples", X_eval.shape[0])
         
-        # Evaluate on test set
-        logger.info("Evaluating model on test set...")
-        test_analysis = xgb_model.analyze_predictions(X_test, y_test)
+            # Mirror hypertuning's two-phase training
+            xgb_model.train(full_X, full_y, X_eval, y_eval)
+            
+            # Get and log metrics
+            test_metrics = xgb_model.validate_completion_metrics(X_test, y_test)
+            eval_metrics = xgb_model.validate_completion_metrics(X_eval, y_eval)
+            
+            # Save model
+            model_path = os.path.join(project_root, "models", "saved", f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl")
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            xgb_model.save_model(model_path)
+            
+    
+            # Log model with signature
+            signature = mlflow.models.infer_signature(
+                X_train,
+                xgb_model.predict(X_train)
+            )
+            mlflow.xgboost.log_model(
+                xgb_model.model,
+                artifact_path="xgboost_api_model",
+                registered_model_name=f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}",
+                signature=signature
+            )
         
-        # Evaluate on evaluation set
-        logger.info("Evaluating model on evaluation set...")
-        eval_analysis = xgb_model.analyze_predictions(X_eval, y_eval)
+            # Log parameters and metrics
+            mlflow.log_metrics(test_metrics)
+            mlflow.log_metrics(eval_metrics)
         
-        # Save model
-        model_path = os.path.join(project_root, "models", "saved", f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl")
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        xgb_model.save_model(model_path)
+            # Log feature importance as artifact
+            feature_importance_path = os.path.join(project_root, "feature_importance")
+            mlflow.log_artifacts(feature_importance_path)
+            
+            # Log model path
+            mlflow.log_artifact(model_path)
+            
+            logger.info("Global model training completed successfully")
+            mlflow.end_run()
         
-        # Create input example for model signature
-        input_example = X_train.head(1)
         
-        # Create model signature
-        signature = mlflow.models.infer_signature(
-            X_train,
-            xgb_model.predict(X_train)
-        )
-        
-        # Log the model to MLflow
-        mlflow.xgboost.log_model(
-            xgb_model=xgb_model.model,
-            artifact_path="model",
-            registered_model_name=f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}",
-            conda_env={
-                'name': 'soccerprediction_env',
-                'channels': ['conda-forge'],
-                'dependencies': [
-                    'python=3.9',
-                    'xgboost',
-                    'scikit-learn',
-                    'pandas',
-                    'numpy'
-                ]
-            },
-            signature=signature,
-            input_example=input_example
-        )
-        
-        logger.info("Global model training completed successfully")
         
     except Exception as e:
         logger.error(f"Error in global model training: {str(e)}")

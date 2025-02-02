@@ -131,9 +131,12 @@ class EnhancedFeatureSelector:
                     X, y, model, {'gain': gain, 'weight': weight, 'cover': cover}
                 )
                 
+                # Convert scores to DataFrame for proper indexing
+                scores_df = pd.DataFrame.from_dict(importance_scores, orient='index', columns=['score'])
+                
                 # Select top features based on scores
                 top_features = self._select_top_features(
-                    importance_scores,
+                    scores_df['score'].to_dict(),  # Convert back to dict with proper indexing
                     X,
                     min_features=self.target_features[0]
                 )
@@ -163,12 +166,16 @@ class EnhancedFeatureSelector:
                 self.logger.error(f"Error evaluating weights {(gain, weight, cover)}: {str(e)}")
                 continue
                 
+        # Handle case where no valid weights are found
+        if best_weights is None:
+            self.logger.warning("No valid weights found, using defaults")
+            best_weights = {'gain': 0.5, 'weight': 0.3, 'cover': 0.2}
+            
         # Log optimization results
         self.logger.info(f"Best weights found: {best_weights}")
         self.logger.info(f"Best cross-validation score: {best_score:.4f}")
         
         return best_weights
-        
     def _calculate_composite_scores(
         self,
         X: pd.DataFrame,
@@ -187,8 +194,7 @@ class EnhancedFeatureSelector:
         Returns:
             Dictionary of composite scores for each feature
         """
-        # Fit model to get feature importance
-        model.fit(X, y, eval_metric=['auc', 'aucpr'])
+        model.fit(X, y)
         
         # Get importance scores for each metric
         importance_metrics = {
@@ -203,15 +209,18 @@ class EnhancedFeatureSelector:
         for metric, scores in importance_metrics.items():
             # Convert to DataFrame for normalization
             score_df = pd.DataFrame.from_dict(scores, orient='index', columns=[metric])
-            normalized_metrics[metric] = scaler.fit_transform(score_df)
-            
+            normalized_metrics[metric] = pd.DataFrame(
+                scaler.fit_transform(score_df),
+                index=score_df.index
+            )
+        
         # Calculate composite scores
         composite_scores = {}
         for feature in X.columns:
             score = 0
             for metric, weight in weights.items():
                 if feature in importance_metrics[metric]:
-                    score += weight * normalized_metrics[metric][feature]
+                    score += weight * normalized_metrics[metric].loc[feature].values[0]
             composite_scores[feature] = score
             
         return composite_scores
@@ -265,9 +274,15 @@ class EnhancedFeatureSelector:
             Mean cross-validation score
         """
         try:
+            # Create a fresh model instance for cross-validation
+            cv_model = xgb.XGBClassifier(
+                **{k: v for k, v in model.get_params().items() 
+                   if k != 'eval_metric'}  # Remove eval_metric for CV
+            )
+            
             # Perform cross-validation
             scores = cross_val_score(
-                model,
+                cv_model,
                 X,
                 y,
                 cv=cv,
@@ -354,6 +369,7 @@ class EnhancedFeatureSelector:
                 y_boot = y.iloc[indices]
                 
                 # Calculate feature importance for this bootstrap
+                # Note: eval_metric removed from fit() calls in _calculate_composite_scores
                 importance_scores = self._calculate_composite_scores(
                     X_boot,
                     y_boot,
@@ -598,14 +614,26 @@ def run_feature_selection(
             logger.info(f"Loaded training data with shape: {X_train.shape}")
             logger.info(f"Loaded test data with shape: {X_test.shape}")
             
-            # Drop non-numeric columns
+            # Ensure target column is 'is_draw' (rename if necessary)
+            if 'draw' in X_train.columns and 'is_draw' not in X_train.columns:
+                X_train['is_draw'] = X_train['draw']
+                X_test['is_draw'] = X_test['draw']
+            
+            # Update non-numeric columns list (exclude target column)
             non_numeric_cols = [
-                'Referee', 'draw', 'venue_name', 'Home', 'Away', 'away_win', 'Date',
+                'Referee', 'venue_name', 'Home', 'Away', 'away_win', 'Date',
                 'referee_draw_rate', 'referee_draws', 'referee_match_count'
             ]
+            
+            # Drop non-numeric columns
             X_train = X_train.drop(columns=non_numeric_cols, errors='ignore')
             X_test = X_test.drop(columns=non_numeric_cols, errors='ignore')
             logger.info("Dropped non-numeric columns")
+            
+            # Convert integer columns to float to handle potential missing values
+            numeric_cols = X_train.select_dtypes(include=['int64']).columns
+            X_train[numeric_cols] = X_train[numeric_cols].astype('float64')
+            X_test[numeric_cols] = X_test[numeric_cols].astype('float64')
             
             # Initialize feature selector
             selector = EnhancedFeatureSelector(
@@ -615,11 +643,12 @@ def run_feature_selection(
                 experiment_name=experiment_name
             )
             
-            # Initialize model for feature selection
+            # Initialize model for feature selection with eval_metric in constructor
             model = xgb.XGBClassifier(
                 tree_method='hist',
                 device='cpu',
-                random_state=42
+                random_state=42,
+                eval_metric=['auc', 'aucpr']  # Move eval_metric here
             )
             
             # Run feature selection
