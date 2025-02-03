@@ -43,13 +43,13 @@ from utils.create_evaluation_set import create_evaluation_sets_draws_api, get_se
 HYPERPARAM_SPEC = {
     'tree_method': 'hist',
     'device': 'cpu',
-    'sampler': optuna.samplers.TPESampler(
-        consider_prior=True,
-        prior_weight=1.0,
-        n_startup_trials=10,
-        n_ei_candidates=24,
-        seed=42
-    ),
+    # 'sampler': optuna.samplers.TPESampler(
+    #     consider_prior=True,
+    #     prior_weight=1.0,
+    #     n_startup_trials=10,
+    #     n_ei_candidates=24,
+    #     seed=42
+    # ),
     'ranges': {
         'learning_rate': (0.0001, 0.1, 'log'),
         'min_child_weight': (10, 500),
@@ -59,10 +59,19 @@ HYPERPARAM_SPEC = {
         'scale_pos_weight': (0.1, 20.0),
         'reg_alpha': (0.01, 20.0, 'log'),
         'reg_lambda': (0.01, 30.0, 'log'),
-        'n_estimators': (3000, 30000),
+        'n_estimators': (10000, 30000),
         'max_depth': (3, 12)  # Added max_depth parameter
     }
 }
+HYPERPARAM_SPEC['sampler'] = optuna.samplers.TPESampler(
+    consider_prior=True,
+    prior_weight=1.5,              # Növelt előző tapasztalat súlya
+    n_startup_trials=50,           # Hosszabb véletlen keresés
+    n_ei_candidates=100,            # Több alternatíva értékelése
+    seed=42,
+    constant_liar=True,            # Jobb parallelizáció támogatás
+    multivariate=True              # Paraméter korrelációk figyelembe vétele
+)
 
 selected_columns = get_selected_api_columns_draws()
 experiment_name = "global_xgboost_hypertuning"
@@ -192,35 +201,45 @@ class GlobalHypertuner:
                  target_test: pd.Series) -> float:
         """Optuna objective function optimizing for precision while maintaining minimum recall."""
         try:
-            # Initialize parameters with CPU-specific settings
+            # Javított értékelő függvény
+            def precision_eval(y_pred, y_true):
+                y_pred_labels = np.round(y_pred).astype(int)
+                return 'precision', precision_score(y_true, y_pred_labels)
+            
+            # Paraméterek frissítése
             param = {
                 'objective': 'binary:logistic',
                 'tree_method': self.hyperparam_spec['tree_method'],
                 'device': self.hyperparam_spec['device'],
-                'early_stopping_rounds': 500,
-                'eval_metric': ['error', 'auc', 'aucpr'],
+                'eval_metric': ['error','auc','aucpr'],
                 'verbosity': 0,
                 'nthread': -1
             }
             
+            # Célváltozó konverzió
+            target_train = target_train.astype(int)
+            target_test = target_test.astype(int)
+            target_val = target_val.astype(int)
+            
             # Expand hyperparameter ranges for better precision optimization
             param.update({
-                'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.01, log=True),
-                'min_child_weight': trial.suggest_int('min_child_weight', 1, 500),
-                'gamma': trial.suggest_float('gamma', 1e-2, 50, log=True),
+                'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.1, log=True),
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 100, 1000),
+                'min_child_weight': trial.suggest_int('min_child_weight', 10, 200),
+                'gamma': trial.suggest_float('gamma', 1e-2, 10, log=True),
                 'subsample': trial.suggest_float('subsample', 0.3, 1.0),
                 'colsample_bytree': trial.suggest_float('colsample_bytree', 0.2, 1.0),
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 4.0),
-                'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 10, log=True),
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.15, 4.0),
+                'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 2, log=True),
                 'reg_lambda': trial.suggest_float('reg_lambda', 1e-4, 10, log=True),
-                'max_depth': trial.suggest_int('max_depth', 3, 12),
+                'max_depth': trial.suggest_int('max_depth', 3, 8),
                 'n_estimators': trial.suggest_int('n_estimators', 1000, 30000)
             })
-
+            
             # Create and train model
             model = xgb.XGBClassifier(**param)
             model.fit(
-                features_train, 
+                features_train,
                 target_train,
                 eval_set=[(features_test, target_test)],
                 verbose=False
@@ -458,7 +477,7 @@ def tune_global_model():
             
             # Tune model
             best_params = hypertuner.tune_model(
-                X_train, y_train, X_val, y_val, X_test, y_test, n_trials=300
+                X_train, y_train, X_val, y_val, X_test, y_test, n_trials=600
             )
             
             # Log best parameters

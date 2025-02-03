@@ -147,3 +147,33 @@ data/Create_data/PowerBI_pbix/DAX_studio/api_future_final.dax
 data/Create_data/PowerBI_pbix/DAX_studio/api_future_final.dax.queryBuilder
 data/Create_data/PowerBI_pbix/Old_files/api_prediction.pbit
 data/Create_data/PowerBI_pbix/Old_files/api_training.pbit
+data/Create_data/PowerBI_pbix/api_prediction/.pbixproj.json
+data/Create_data/PowerBI_pbix/api_prediction/DiagramLayout.json
+data/Create_data/PowerBI_pbix/api_prediction/ReportMetadata.json
+data/Create_data/PowerBI_pbix/api_prediction/ReportSettings.json
+data/Create_data/PowerBI_pbix/api_prediction/Version.txt
+data/Create_data/PowerBI_pbix/api_prediction/Model/database.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Model/model.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Model/relationships.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Model/cultures/hu-HU.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Model/tables/DateTableTemplate_c75e1011-596b-4128-bcf9-82e142755fdc.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Model/tables/LocalDateTable_2185e58f-d1a4-4301-9b65-9ff135397fc8.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Model/tables/LocalDateTable_d54bdc34-7e5f-4239-a48e-11a8743d41c6.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Model/tables/Model_data.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Model/tables/Venues.tmdl
+data/Create_data/PowerBI_pbix/api_prediction/Report/config.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/report.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/config.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/filters.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/section.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/00000_tableEx (3cdc4)/config.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/00000_tableEx (3cdc4)/dataTransforms.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/00000_tableEx (3cdc4)/filters.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/00000_tableEx (3cdc4)/query.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/00000_tableEx (3cdc4)/visualContainer.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/01000_card (3a1db)/config.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/01000_card (3a1db)/dataTransforms.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/01000_card (3a1db)/filters.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/01000_card (3a1db)/query.json
+data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/01000_card (3a1db)/visualContainer.json
+data/Create_data/PowerBI_pbix/api_prediction/StaticResources/SharedResources/BaseThemes/CY24SU10.json

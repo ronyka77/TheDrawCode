@@ -90,7 +90,7 @@ class EnsembleModel:
     This model trains an ensemble classifier and logs training details and metrics
     using the standardized ExperimentLogger and MLflow.
     """
-    def __init__(self, base_models=None, weights=None):
+    def __init__(self, voting_method="soft", base_models=None, weights=None, calibrate=True, calibration_method="isotonic"):
         """
         Initialize the EnsembleModel.
 
@@ -98,26 +98,36 @@ class EnsembleModel:
             base_models (list): List of tuples (name, model).
                 Defaults to LogisticRegression and RandomForestClassifier.
             weights (list): Optional weights for each base model.
+            voting_method (str): Voting method: "soft" or "hard".
+            calibrate (bool): If True, each base model will be calibrated using CalibratedClassifierCV.
+            calibration_method (str): Calibration method: "isotonic" or "sigmoid" (default "isotonic").
         """
         
-        if base_models is None:
-            # Default base models
-            base_models = [
-                ("lr", LogisticRegression(random_state=42)),
-                ("rf", RandomForestClassifier(random_state=42))
-            ]
-        self.base_models = base_models
+        
         # Ensure self.weights is set with a default value if not provided
         self.weights = weights if weights is not None else [1.0] * len(self.base_models)
-        self.model = VotingClassifier(
-            estimators=self.base_models,
-            voting='soft',
-            weights=self.weights,
-            n_jobs=-1
-        )
+        
         self.logger = ExperimentLogger(
             experiment_name="soccer_prediction",
             log_dir="logs/soccer_prediction"
+        )
+        self.calibrate = calibrate
+        self.calibration_method = calibration_method   
+        self.voting_method = voting_method
+        if base_models is None:
+            # Use the base models from the build_base_models function
+            xgb_model, cat_model, lgbm_model = build_base_models(calibrate=self.calibrate, calibration_method=self.calibration_method)
+            base_models = [
+                ("xgb", xgb_model),
+                ("cat", cat_model),
+                ("lgbm", lgbm_model)
+            ]
+        self.base_models = base_models
+        self.model = VotingClassifier(
+            estimators=self.base_models,
+            voting=self.voting_method,
+            weights=self.weights,
+            n_jobs=-1
         )
     
     def train(self, X_train: pd.DataFrame, y_train: pd.Series, X_val: pd.DataFrame, y_val: pd.Series):
@@ -134,58 +144,54 @@ class EnsembleModel:
             self: Trained model instance.
         """
         # Start logging for training run
-        # self.logger.start_run(run_name="ensemble_training")
         
         # Log parameters for reproducibility
         params = {
             "model": "VotingClassifier",
-            "voting": "soft",
+            "voting": self.voting_method,
             "weights": self.weights,
-            "base_models": [name for name, _ in self.model.estimators_]
+            "base_models": [name for name, _ in self.base_models]
         }
         self.logger.log_params(params)
+       
+        # Log parameters to MLflow
+        mlflow.log_params(params)
+        y_train = y_train.astype(int)
         
-        # Set MLflow experiment and start run
-        with mlflow.start_run(run_name="ensemble_training") as run:
-            # Log parameters to MLflow
-            mlflow.log_params(params)
-            
-            # Train the ensemble model
-            self.model.fit(X_train, y_train)
-            
-            # Evaluate on validation set
-            predictions = self.model.predict(X_val)
-            accuracy = accuracy_score(y_val, predictions)
-            precision = precision_score(y_val, predictions, zero_division=0)
-            recall = recall_score(y_val, predictions, zero_division=0)
-            f1 = f1_score(y_val, predictions, zero_division=0)
-            
-            metrics = {
-                "accuracy": accuracy,
-                "precision": precision,
-                "recall": recall,
-                "f1_score": f1
-            }
-            
-            # Log metrics via ExperimentLogger and MLflow
-            self.logger.log_metrics(metrics)
-            for metric_name, metric_value in metrics.items():
-                mlflow.log_metric(metric_name, metric_value)
-            
-            # Prepare model signature for MLflow logging using an input example
-            input_example = X_train.head(1)
-            signature = infer_signature(input_example, self.model.predict(input_example))
-            
-            # Register and log the model with MLflow
-            registered_model_name = f"ensemble_{datetime.now().strftime('%Y%m%d_%H%M')}"
-            mlflow.sklearn.log_model(
-                model=self.model,
-                artifact_path="ensemble_model",
-                registered_model_name=registered_model_name,
-                signature=signature
-            )
+        # Train the ensemble model
+        self.model.fit(X_train, y_train)
         
-        mlflow.end_run()
+        # Evaluate on validation set
+        predictions = self.model.predict(X_val)
+        accuracy = accuracy_score(y_val, predictions)
+        precision = precision_score(y_val, predictions, zero_division=0)
+        recall = recall_score(y_val, predictions, zero_division=0)
+        f1 = f1_score(y_val, predictions, zero_division=0)
+        
+        metrics = {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1
+        }
+        
+        # Log metrics via ExperimentLogger and MLflow
+        self.logger.log_metrics(metrics)
+        for metric_name, metric_value in metrics.items():
+            mlflow.log_metric(metric_name, metric_value)
+        
+        # Prepare model signature for MLflow logging using an input example
+        input_example = X_train.head(1)
+        signature = infer_signature(input_example, self.model.predict(input_example))
+        
+        # Register and log the model with MLflow
+        registered_model_name = f"ensemble_{datetime.now().strftime('%Y%m%d_%H%M')}"
+        mlflow.sklearn.log_model(
+            model=self.model,
+            artifact_path="ensemble_model",
+            registered_model_name=registered_model_name,
+            signature=signature
+        )
         
         return self
     
@@ -225,23 +231,25 @@ if __name__ == "__main__":
     
     
     # Generate synthetic binary classification data
-    X_train, X_test, y_train, y_test = import_training_data_draws_api()
+    X_train, y_train, X_test, y_test = import_training_data_draws_api()
     X_val, y_val = create_evaluation_sets_draws_api()
     
     # Initialize ensemble model using soft voting strategy with custom weights
     ensemble_model = EnsembleModel(
-        ensemble_type="voting",
+        voting_method="soft",
         weights=[1.2, 1.0, 1.3],
         calibrate=True,  # Enable probability calibration
         calibration_method="isotonic"
     )
-    
-    # Fit the ensemble model
-    ensemble_model.train(X_train, y_train, X_test, y_test)
-    
-    # Make predictions and evaluate
-    predictions = ensemble_model.predict(pd.DataFrame(X_val))
-    proba = ensemble_model.predict_proba(pd.DataFrame(X_val))
-    
-    print("Classification Report:")
-    print(classification_report(y_val, predictions)) 
+     # Set MLflow experiment and start run
+    with mlflow.start_run(run_name="ensemble_training") as run:
+        # Fit the ensemble model
+        ensemble_model.train(X_train, y_train, X_test, y_test)
+        
+        # Make predictions and evaluate
+        predictions = ensemble_model.predict(pd.DataFrame(X_val))
+        proba = ensemble_model.predict_proba(pd.DataFrame(X_val))
+        
+        print("Classification Report:")
+        print(classification_report(y_val, predictions)) 
+        mlflow.end_run()

@@ -612,6 +612,8 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
     """
     data_path = "data/api_training_final.xlsx"
     logger.info(f"Loading training data from: {data_path}")
+    # Get selected columns
+    selected_columns = get_selected_api_columns_draws()
     
     try:
         
@@ -632,8 +634,7 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
             data['is_draw'] = (data['match_outcome'] == 2).astype(int)
             logger.info(f"Created target variable. Draw rate: {data['is_draw'].mean():.2%}")
 
-            # Get selected columns
-            selected_columns = get_selected_api_columns_draws()
+            
             missing_columns = [col for col in selected_columns if col not in data.columns]
             if missing_columns:
                 logger.error(
@@ -689,7 +690,7 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
                     error_code=DataProcessingError.INVALID_DATA_TYPE
                 )
                 raise ValueError(f"Non-numeric columns found: {object_columns}")
-            create_parquet_files(data, "data/api_training_final.parquet", partition_cols=["league_id"])
+            create_parquet_files(data, "data/api_training_final.parquet")
         
         # Split into train and test sets
         logger.info("Splitting data into train and test sets")
