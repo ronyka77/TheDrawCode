@@ -251,6 +251,73 @@ def create_parquet_files(
         )
         raise
 
+def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union[dict, list]:
+    """Import selected features for XGBoost, CatBoost, and LightGBM models from JSON file.
+
+    This function loads the pre-selected features for each model type from the
+    selected_features_ensemble.json file. The features were selected based on
+    composite importance scores from feature selection analysis.
+
+    Args:
+        model_type (Optional[str]): Specific model type to return features for.
+            Options: 'xgb', 'cat', 'lgbm'. If None, returns all features.
+
+    Returns:
+        Union[dict, list]: If model_type is None, returns dictionary containing selected features 
+            for each model type with keys:
+            - 'xgb': List of features for XGBoost
+            - 'cat': List of features for CatBoost
+            - 'lgbm': List of features for LightGBM
+        If model_type is specified, returns list of features for that model type.
+
+    Raises:
+        FileNotFoundError: If the JSON file cannot be found
+        JSONDecodeError: If the JSON file is malformed
+        ValueError: If invalid model_type is provided
+        Exception: For other errors during file loading
+    """
+    try:
+        # Define path to JSON file
+        json_path = project_root / "utils" / "selected_features_ensemble.json"
+        
+        # Load and parse JSON file
+        with open(json_path, 'r') as f:
+            features = json.load(f)
+            
+        # Validate loaded data structure
+        if not all(key in features for key in ['xgb', 'cat', 'lgbm']):
+            raise ValueError("JSON file missing required model keys")
+            
+        # Return specific model type if requested
+        if model_type is not None:
+            if model_type not in ['xgb', 'cat', 'lgbm']:
+                raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm'")
+            logger.info(f"Returning selected features for model type: {model_type}")
+            return features[model_type]
+            
+        logger.info("Successfully loaded selected features from JSON file")
+        logger.info(f"Selected features: {features}")
+        return features
+        
+    except FileNotFoundError as e:
+        logger.error(
+            f"Selected features JSON file not found: {str(e)}",
+            error_code=DataProcessingError.FILE_NOT_FOUND
+        )
+        raise
+    except json.JSONDecodeError as e:
+        logger.error(
+            f"Invalid JSON format in features file: {str(e)}",
+            error_code=DataProcessingError.FILE_CORRUPTED
+        )
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error loading selected features: {str(e)}",
+            error_code=DataProcessingError.FILE_CORRUPTED
+        )
+        raise
+
 # MLFLOW SETUP
 @retry_on_error(max_retries=3, delay=1.0)
 def setup_mlflow_tracking(experiment_name: str) -> str:
@@ -1074,73 +1141,6 @@ def create_prediction_set_api() -> pd.DataFrame:
 
 
 # ENSEMBLE FUNCTIONS
-def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union[dict, list]:
-    """Import selected features for XGBoost, CatBoost, and LightGBM models from JSON file.
-
-    This function loads the pre-selected features for each model type from the
-    selected_features_ensemble.json file. The features were selected based on
-    composite importance scores from feature selection analysis.
-
-    Args:
-        model_type (Optional[str]): Specific model type to return features for.
-            Options: 'xgb', 'cat', 'lgbm'. If None, returns all features.
-
-    Returns:
-        Union[dict, list]: If model_type is None, returns dictionary containing selected features 
-            for each model type with keys:
-            - 'xgb': List of features for XGBoost
-            - 'cat': List of features for CatBoost
-            - 'lgbm': List of features for LightGBM
-        If model_type is specified, returns list of features for that model type.
-
-    Raises:
-        FileNotFoundError: If the JSON file cannot be found
-        JSONDecodeError: If the JSON file is malformed
-        ValueError: If invalid model_type is provided
-        Exception: For other errors during file loading
-    """
-    try:
-        # Define path to JSON file
-        json_path = project_root / "utils" / "selected_features_ensemble.json"
-        
-        # Load and parse JSON file
-        with open(json_path, 'r') as f:
-            features = json.load(f)
-            
-        # Validate loaded data structure
-        if not all(key in features for key in ['xgb', 'cat', 'lgbm']):
-            raise ValueError("JSON file missing required model keys")
-            
-        # Return specific model type if requested
-        if model_type is not None:
-            if model_type not in ['xgb', 'cat', 'lgbm']:
-                raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm'")
-            logger.info(f"Returning selected features for model type: {model_type}")
-            return features[model_type]
-            
-        logger.info(f"Successfully loaded all selected features from JSON file")
-        # logger.info(f"Selected features: {features}")
-        return features
-        
-    except FileNotFoundError as e:
-        logger.error(
-            f"Selected features JSON file not found: {str(e)}",
-            error_code=DataProcessingError.FILE_NOT_FOUND
-        )
-        raise
-    except json.JSONDecodeError as e:
-        logger.error(
-            f"Invalid JSON format in features file: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
-        )
-        raise
-    except Exception as e:
-        logger.error(
-            f"Error loading selected features: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
-        )
-        raise
-
 def create_ensemble_evaluation_set() -> pd.DataFrame:
     """Create evaluation set for ensemble training with selected features and evaluation columns.
 

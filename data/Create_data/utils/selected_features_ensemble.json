@@ -1,0 +1,28 @@
+{
+    "xgb": [
+        "venue_draw_rate", "home_draw_rate", "Home_draws", "away_poisson_xG", 
+        "xg_equilibrium", "home_corners_rollingaverage", "draw_propensity_score", 
+        "Home_shot_on_target_mean", "away_days_since_last_draw", "draw_probability_score", 
+        "form_weighted_xg_diff", "date_encoded", "away_fouls_rollingaverage", 
+        "defensive_stability", "away_corners_mean", "Home_fouls_mean", 
+        "combined_draw_rate", "away_defense_index", "away_shot_on_target_rollingaverage", 
+        "home_passing_efficiency"
+    ],
+    "cat": [
+        "venue_draw_rate", "away_days_since_last_draw", "historical_draw_tendency", 
+        "form_weighted_xg_diff", "home_fouls_rollingaverage", "venue_encoded", 
+        "possession_balance", "away_team_elo", "draw_propensity_score", "home_team_elo", 
+        "defensive_stability", "away_yellow_cards_mean", "league_draw_rate_composite", 
+        "away_defense_index", "home_passing_efficiency", "elo_similarity_form_similarity", 
+        "Home_saves_mean", "away_encoded", "seasonal_draw_pattern", "Away_passes_mean"
+    ],
+    "lgbm": [
+        "venue_draw_rate", "away_poisson_xG", "Away_saves_mean", "away_fouls_rollingaverage", 
+        "home_corners_rollingaverage", "home_draw_rate", "Away_passes_mean", 
+        "draw_propensity_score", "form_weighted_xg_diff", "date_encoded", 
+        "Away_offsides_mean", "home_yellow_cards_rollingaverage", "referee_goals_per_game", 
+        "away_team_elo", "league_draw_rate_composite", "home_corners_mean", 
+        "away_shot_on_target_rollingaverage", "away_corners_rollingaverage", 
+        "possession_balance", "Home_saves_mean"
+    ]
+}

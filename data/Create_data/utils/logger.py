@@ -41,7 +41,10 @@ class StructuredLogger:
     """Handles structured logging configuration."""
     
     @staticmethod
-    def get_logger(name: str, log_format: Optional[str] = None) -> structlog.BoundLogger:
+    def get_logger(
+        name: str,
+        log_format: Optional[str] = None
+    ) -> structlog.BoundLogger:
         """Get structured logger instance.
         
         Args:

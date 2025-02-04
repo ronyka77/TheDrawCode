@@ -29,11 +29,16 @@ from lightgbm import LGBMClassifier
 from datetime import datetime
 import mlflow
 import mlflow.sklearn
+import mlflow.xgboost
+import mlflow.catboost
+import mlflow.lightgbm
 from mlflow.models.signature import infer_signature
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from pathlib import Path
 import os
 import sys
+from imblearn.over_sampling import ADASYN
+
 
 # Add project root to Python path
 try:
@@ -51,7 +56,7 @@ except Exception as e:
     
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
-from utils.create_evaluation_set import import_training_data_draws_api, create_evaluation_sets_draws_api, setup_mlflow_tracking
+from utils.create_evaluation_set import import_training_data_ensemble, create_ensemble_evaluation_set, setup_mlflow_tracking, import_selected_features_ensemble
 from utils.logger import ExperimentLogger
 
 logger = ExperimentLogger(
@@ -60,23 +65,48 @@ logger = ExperimentLogger(
 )
 mlruns_dir = setup_mlflow_tracking('stacked_ensemble_model')
 
+def load_pretrained_model(run_id: str, model_type: str = "xgboost"):
+    """Load the pretrained model from MLflow using run ID and model type.
+
+    Supported model types: 'xgboost', 'catboost', and 'lightgbm'.
+    """
+    try:
+        
+        if model_type.lower() == "xgboost":
+            model_uri = f"runs:/{run_id}/xgboost_api_model"
+            return mlflow.xgboost.load_model(model_uri)
+        elif model_type.lower() == "catboost":
+            model_uri = f"runs:/{run_id}/catboost_model"
+            return mlflow.catboost.load_model(model_uri)
+        elif model_type.lower() == "lightgbm":
+            model_uri = f"runs:/{run_id}/lightgbm_model"
+            return mlflow.lightgbm.load_model(model_uri)
+        else:
+            logger.error(f"Unsupported model type: {model_type}")
+            raise ValueError(f"Unsupported model type: {model_type}")
+    except Exception as e:
+        logger.error(f"Failed to load {model_type} model from MLflow run {run_id}: {str(e)}")
+        raise
+
 def build_base_models(calibrate: bool = False, calibration_method: str = "isotonic"):
     """
-    Build and return the three base models (XGBoost, CatBoost, LightGBM).
-    Optionally wraps each model in CalibratedClassifierCV.
+    Build ensemble base models using the pretrained XGBoost and new CatBoost and LightGBM models.
     """
-    # Create XGBoost model with CPU-optimized parameters
-    xgb_model = XGBClassifier(tree_method='hist', use_label_encoder=False, eval_metric='logloss')
+    pretrained_xgb_run_id = "2b74a32592ae4f259ab08671a9b5d8f9"
+    pretrained_cat_run_id = "c9c2698cb03343f08436a84f9d98eb01"
+    pretrained_lgbm_run_id = "511a71e11137404fb7d8b5b304874c5b"
+    # Load pretrained XGBoost model
+    xgb_model = load_pretrained_model(pretrained_xgb_run_id, model_type="xgboost")
     
-    # Create CatBoost model with silent mode
-    cat_model = CatBoostClassifier(verbose=0)
+    # Create new CatBoost model (with tuned hyperparameters if available)
+    cat_model = load_pretrained_model(pretrained_cat_run_id, model_type="catboost")
     
-    # Create LightGBM model.
-    # For instance, if using focal loss, parameters like 'alpha' and 'gamma' could be set.
-    lgbm_model = LGBMClassifier()
+    # Create new LightGBM model (with tuned hyperparameters if available)
+    lgbm_model = load_pretrained_model(pretrained_lgbm_run_id, model_type="lightgbm")
     
+    # Optional calibration for all models
     if calibrate:
-        logger.info("Calibrating base models with %s method", calibration_method)
+        # Use the same calibration for consistency; note pretrained_xgb_model might already be calibrated
         xgb_model = CalibratedClassifierCV(xgb_model, method=calibration_method, cv=3)
         cat_model = CalibratedClassifierCV(cat_model, method=calibration_method, cv=3)
         lgbm_model = CalibratedClassifierCV(lgbm_model, method=calibration_method, cv=3)
@@ -85,162 +115,116 @@ def build_base_models(calibrate: bool = False, calibration_method: str = "isoton
 
 class EnsembleModel:
     """
-    Ensemble Model using VotingClassifier for draw predictions.
-    
-    This model trains an ensemble classifier and logs training details and metrics
-    using the standardized ExperimentLogger and MLflow.
+    Modified EnsembleModel that respects individual model feature requirements
     """
-    def __init__(self, voting_method="soft", base_models=None, weights=None, calibrate=True, calibration_method="isotonic"):
+    def __init__(self, voting_method="soft", weights=None, calibrate=False, calibration_method="isotonic"):
         """
         Initialize the EnsembleModel.
-
-        Args:
-            base_models (list): List of tuples (name, model).
-                Defaults to LogisticRegression and RandomForestClassifier.
-            weights (list): Optional weights for each base model.
-            voting_method (str): Voting method: "soft" or "hard".
-            calibrate (bool): If True, each base model will be calibrated using CalibratedClassifierCV.
-            calibration_method (str): Calibration method: "isotonic" or "sigmoid" (default "isotonic").
         """
+        self.calibrate = calibrate
+        self.calibration_method = calibration_method   
+        self.voting_method = voting_method
+
+
+        # Build base models
+        xgb_model, cat_model, lgbm_model = build_base_models(calibrate=self.calibrate, calibration_method=self.calibration_method)
+        self.base_models = [
+            ("xgb", xgb_model),
+            ("cat", cat_model),
+            ("lgbm", lgbm_model)
+        ]
         
-        
-        # Ensure self.weights is set with a default value if not provided
+        # Setup custom weights if provided; default to equal weighting
         self.weights = weights if weights is not None else [1.0] * len(self.base_models)
-        
         self.logger = ExperimentLogger(
             experiment_name="soccer_prediction",
             log_dir="logs/soccer_prediction"
         )
-        self.calibrate = calibrate
-        self.calibration_method = calibration_method   
-        self.voting_method = voting_method
-        if base_models is None:
-            # Use the base models from the build_base_models function
-            xgb_model, cat_model, lgbm_model = build_base_models(calibrate=self.calibrate, calibration_method=self.calibration_method)
-            base_models = [
-                ("xgb", xgb_model),
-                ("cat", cat_model),
-                ("lgbm", lgbm_model)
-            ]
-        self.base_models = base_models
-        self.model = VotingClassifier(
-            estimators=self.base_models,
-            voting=self.voting_method,
-            weights=self.weights,
-            n_jobs=-1
-        )
-    
-    def train(self, X_train: pd.DataFrame, y_train: pd.Series, X_val: pd.DataFrame, y_val: pd.Series):
-        """
-        Train the ensemble model, log parameters, metrics, and register model with MLflow.
 
-        Args:
-            X_train (pd.DataFrame): Training features.
-            y_train (pd.Series): Training labels.
-            X_val (pd.DataFrame): Validation features.
-            y_val (pd.Series): Validation labels.
-        
-        Returns:
-            self: Trained model instance.
-        """
-        # Start logging for training run
-        
-        # Log parameters for reproducibility
-        params = {
-            "model": "VotingClassifier",
-            "voting": self.voting_method,
-            "weights": self.weights,
-            "base_models": [name for name, _ in self.base_models]
+        # Store feature sets for each model
+        self.feature_sets = {
+            'xgb': xgb_features,
+            'cat': cat_features,
+            'lgbm': lgbm_features
         }
-        self.logger.log_params(params)
-       
-        # Log parameters to MLflow
-        mlflow.log_params(params)
-        y_train = y_train.astype(int)
-        
-        # Train the ensemble model
-        self.model.fit(X_train, y_train)
-        
-        # Evaluate on validation set
-        predictions = self.model.predict(X_val)
-        accuracy = accuracy_score(y_val, predictions)
-        precision = precision_score(y_val, predictions, zero_division=0)
-        recall = recall_score(y_val, predictions, zero_division=0)
-        f1 = f1_score(y_val, predictions, zero_division=0)
-        
-        metrics = {
-            "accuracy": accuracy,
-            "precision": precision,
-            "recall": recall,
-            "f1_score": f1
-        }
-        
-        # Log metrics via ExperimentLogger and MLflow
-        self.logger.log_metrics(metrics)
-        for metric_name, metric_value in metrics.items():
-            mlflow.log_metric(metric_name, metric_value)
-        
-        # Prepare model signature for MLflow logging using an input example
-        input_example = X_train.head(1)
-        signature = infer_signature(input_example, self.model.predict(input_example))
-        
-        # Register and log the model with MLflow
-        registered_model_name = f"ensemble_{datetime.now().strftime('%Y%m%d_%H%M')}"
-        mlflow.sklearn.log_model(
-            model=self.model,
-            artifact_path="ensemble_model",
-            registered_model_name=registered_model_name,
-            signature=signature
-        )
-        
-        return self
-    
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """
-        Predict class labels for the given input data.
-        
-        Parameters:
-        -----------
-        X : pd.DataFrame
-            Input feature data.
+
+    def train(self, X_train, y_train, X_val, y_val):
+        """Modified training that respects individual model features"""
+        # Validate feature consistency
+        self._validate_features(X_train)
+
+        # Train each model on its specific features
+        for name, model in self.base_models:
+            model_features = self.feature_sets[name]
+            X_train_subset = X_train[model_features]
+            X_test_subset = X_test[model_features]
             
-        Returns:
-        --------
-        np.ndarray:
-            Predicted class labels.
-        """
-        return self.model.predict(X)
-    
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """
-        Predict class probabilities for the given input data.
-        
-        Parameters:
-        -----------
-        X : pd.DataFrame
-            Input feature data.
+            # Check if model needs training (only for new models)
+            if not hasattr(model, 'fit_'):
+                model.fit(X_train_subset, y_train, eval_set=[(X_test_subset, y_test)])
+                
+            # Log model-specific features
+            self.logger.log_params({
+                f"{name}_features": str(model_features),
+                f"{name}_feature_count": len(model_features)
+            })
+
+    def predict(self, X):
+        """Aggregate predictions using model-specific features"""
+        predictions = []
+        for (name, model), weight in zip(self.base_models, self.weights):
+            model_features = self.feature_sets[name]
+            X_subset = X[model_features]
+            preds = model.predict_proba(X_subset)[:, 1]  # Get positive class probabilities
+            predictions.append(preds * weight)
             
-        Returns:
-        --------
-        np.ndarray:
-            Predicted class probability estimates.
-        """
-        return self.model.predict_proba(X)
+        # Average weighted probabilities
+        avg_probs = np.mean(predictions, axis=0)
+        return (avg_probs > 0.5).astype(int)  # Apply threshold
     
+    def predict_proba(self, X):
+        """Aggregate predictions using model-specific features"""
+        predictions = []
+        for (name, model), weight in zip(self.base_models, self.weights):
+            model_features = self.feature_sets[name]
+            X_subset = X[model_features]
+            preds = model.predict_proba(X_subset)[:, 1]  # Get positive class probabilities
+            predictions.append(preds * weight)
+        return np.mean(predictions, axis=0)
+    
+    def _validate_features(self, X):
+        """Ensure all required features are present"""
+        all_required = set()
+        for features in self.feature_sets.values():
+            all_required.update(features)
+            
+        missing = set(all_required) - set(X.columns)
+        if missing:
+            raise ValueError(f"Missing features in input data: {missing}")
+
 if __name__ == "__main__":
-    
-    
-    # Generate synthetic binary classification data
-    X_train, y_train, X_test, y_test = import_training_data_draws_api()
-    X_val, y_val = create_evaluation_sets_draws_api()
-    
-    # Initialize ensemble model using soft voting strategy with custom weights
+    # Load data using your existing utility functions
+    selected_features = import_selected_features_ensemble()
+    xgb_features = selected_features['xgb']
+    cat_features = selected_features['cat']
+    lgbm_features = selected_features['lgbm']
+    all_features = list(
+        set(xgb_features + cat_features + lgbm_features)
+    )
+    X_train, y_train, X_test, y_test = import_training_data_ensemble()
+    X_val, y_val = create_ensemble_evaluation_set()
+    X_train = X_train[all_features]
+    X_test = X_test[all_features]
+    X_val = X_val[all_features]
+
+    # Initialize ensemble model 
     ensemble_model = EnsembleModel(
         voting_method="soft",
-        weights=[1.2, 1.0, 1.3],
-        calibrate=True,  # Enable probability calibration
+        weights=[1.0, 1.0, 1.0],  # Consider weighting XGBoost higher if it performs well
+        calibrate=False,
         calibration_method="isotonic"
     )
+
      # Set MLflow experiment and start run
     with mlflow.start_run(run_name="ensemble_training") as run:
         # Fit the ensemble model

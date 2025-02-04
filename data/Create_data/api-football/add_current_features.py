@@ -265,7 +265,7 @@ class MongoDBFeatures:
             
             print("Start adding rolling averages...")
             fixtures_dataframe = self.add_rolling_averages(fixtures_dataframe)
-            
+            fixtures_dataframe = fixtures_dataframe.rename(columns={'date': 'Date'})
             print("Features added")
             return fixtures_dataframe
         except Exception as e:
@@ -637,7 +637,7 @@ class MongoDBFeatures:
             print(f"Error calculating rolling values(probably column not in rolling_colums list): {e}")
             return 0
 
-    def get_future_matches(self):
+    def get_future_matches(self, training_data: pd.DataFrame):
         """
         Retrieves all future fixtures from the MongoDB fixtures collection where score.fulltime.home is blank
         and returns them as a pandas DataFrame with specific columns.
@@ -714,6 +714,27 @@ class MongoDBFeatures:
             'league_id', 'league_name', 'league_round', 'league_season',
             'referee', 'venue_id', 'venue_name'
         ]
+        df = df.rename(columns={'date': 'Date'})
+        # Load training data to merge with future fixtures
+        try:
+            training_df = pd.read_excel('data/Create_data/data_files/base/api_training_data.xlsx')
+            
+            # Get common columns between training data and future fixtures
+            common_cols = list(set(df.columns).intersection(set(training_df.columns)))
+            
+            # Merge data on common columns while preserving df's structure
+            df = pd.merge(
+                df,
+                training_df[common_cols],
+                on=common_cols,
+                how='left'
+            )
+            
+            # Ensure we only keep the original columns from df
+            df = df[columns]
+            
+        except Exception as e:
+            print(f"Error merging training data: {e}")
         
         print(f"Found {len(df)} future fixtures without scores.")
         export_path = 'data/Create_data/data_files/base/api_future_matches.xlsx'
@@ -804,7 +825,7 @@ def main():
     print("Data exported to Excel")
     
     print("Getting future matches")
-    future_matches = mongodb_features.get_future_matches()
+    future_matches = mongodb_features.get_future_matches(fixtures_dataframe_final)
     print(f"Future matches shape: {future_matches.shape}")
     
     print("Exporting venues")

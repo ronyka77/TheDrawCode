@@ -21,7 +21,10 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 from imblearn.over_sampling import ADASYN
 from optuna.trial import FrozenTrial
 
+# Szűrd a specifikus figyelmeztetést
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.base")
 warnings.filterwarnings("ignore", category=UserWarning, module="xgboost")
+warnings.filterwarnings("ignore", category=UserWarning, module="optuna.samplers._tpe.sampler")
 
 # Add project root to Python path
 try:
@@ -30,33 +33,34 @@ try:
         # Handle network path by using raw string
         project_root = Path(r"\\".join(str(project_root).split("\\")))
     sys.path.append(str(project_root))
-    print(f"Project root xgboost_model: {project_root}")
+    print(f"Project root xgboost_ensemble_hypertuning: {project_root}")
 except Exception as e:
     print(f"Error setting project root path: {e}")
     # Fallback to current directory if path resolution fails
     sys.path.append(os.getcwd().parent.parent)
-    print(f"Current directory xgboost_model: {os.getcwd().parent.parent}")
+    print(f"Current directory xgboost_ensemble_hypertuning: {os.getcwd().parent.parent}")
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import create_evaluation_sets_draws_api, get_selected_api_columns_draws, import_training_data_draws_api, setup_mlflow_tracking
+from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
 
 # Core Configuration for CPU-Only Training
 HYPERPARAM_SPEC = {
     'tree_method': 'hist',
     'device': 'cpu',
     'ranges': {
-        'learning_rate': (0.0001, 0.1, 'log'),
+        'learning_rate': (0.001, 0.1, 'log'),
         'min_child_weight': (10, 500),
+        'num_parallel_tree': (1, 10),
         'gamma': (1.0, 30.0),
         'subsample': (0.2, 1.0),
         'colsample_bytree': (0.2, 1.0),
         'scale_pos_weight': (0.1, 20.0),
-        'reg_alpha': (0.01, 20.0, 'log'),
-        'reg_lambda': (0.01, 30.0, 'log'),
+        'reg_alpha': (0.001, 10.0, 'log'),
+        'reg_lambda': (0.01, 10.0, 'log'),
         'n_estimators': (10000, 30000),
-        'max_depth': (3, 12)  # Added max_depth parameter
+        'max_depth': (6, 9)  # Added max_depth parameter
     }
 }
 HYPERPARAM_SPEC['sampler'] = optuna.samplers.TPESampler(
@@ -65,13 +69,12 @@ HYPERPARAM_SPEC['sampler'] = optuna.samplers.TPESampler(
     n_startup_trials=30,           # Enough trials to explore parameter space randomly at the beginning
     n_ei_candidates=100,           # Increased candidates to explore a broader search space for precision maximization
     seed=42,
-    constant_liar=True,            # To support parallelization effectively
-    multivariate=True              # Account for parameter correlations
+    constant_liar=True,
+    multivariate=True,
+    warn_independent_sampling=False
 )
 
-selected_columns = get_selected_api_columns_draws()
-experiment_name = "global_xgboost_hypertuning"
-mlruns_dir = setup_mlflow_tracking(experiment_name)
+
 
 class GlobalHypertuner:
     """Global hyperparameter tuner for XGBoost model optimizing for validation metrics.
@@ -93,7 +96,7 @@ class GlobalHypertuner:
     RECALL_CAP: float = 0.30
 
     def __init__(self, 
-                 logger: Optional[ExperimentLogger] = None,
+                 Logger: Optional[ExperimentLogger] = None,
                  target_precision: float = TARGET_PRECISION,
                  target_recall: float = TARGET_RECALL,
                  precision_weight: float = PRECISION_WEIGHT,
@@ -107,7 +110,7 @@ class GlobalHypertuner:
             precision_weight: Weight for precision in optimization
             hyperparam_spec: Hyperparameter specification dictionary
         """
-        self.logger = logger or ExperimentLogger()
+        self.logger = Logger or ExperimentLogger()
         self.best_params: Dict[str, Any] = {}
         self.target_precision = target_precision
         self.target_recall = target_recall
@@ -179,6 +182,7 @@ class GlobalHypertuner:
                 self.logger.warning(
                     f"Could not find threshold meeting recall requirement. "
                     f"Best recall: {best_metrics['recall']:.4f}"
+                    f"Best precision: {best_metrics['precision']:.4f}"
                 )
             
             return best_metrics['threshold'], best_metrics
@@ -205,9 +209,10 @@ class GlobalHypertuner:
             adasyn_sampling_strategy = trial.suggest_float(
                 name="adasyn_sampling_strategy",
                 low=0.3,  # Minimum 30% minority class
-                high=0.7   # Maximum 70% minority class
+                high=0.5   # Maximum 50% minority class
             )
-
+            adasyn_sampling_strategy = adasyn_sampling_strategy / (1 - adasyn_sampling_strategy)
+            
             # Initialize ADASYN with current trial's parameters
             adasyn = ADASYN(
                 random_state=42,
@@ -221,9 +226,6 @@ class GlobalHypertuner:
             except ValueError as ve:
                 # Check for the specific error message
                 if "No samples will be generated" in str(ve):
-                    self.logger.warning(
-                        f"Trial {trial.number} pruned: ADASYN sampling_strategy {adasyn_sampling_strategy:.4f} did not yield any new samples."
-                    )
                     raise optuna.exceptions.TrialPruned()
                 else:
                     self.logger.warning(f"ADASYN resampling failed: {str(ve)}")
@@ -232,7 +234,7 @@ class GlobalHypertuner:
                     
 
             # Log successful resampling details
-            self.logger.info(f"ADASYN params: {adasyn_n_neighbors}, sampling_strategy: {adasyn_sampling_strategy:.4f}")
+            # self.logger.info(f"ADASYN params: {adasyn_n_neighbors}, sampling_strategy: {adasyn_sampling_strategy:.4f}")
 
             # --- Rest of the training logic remains unchanged ---
             param = {
@@ -242,22 +244,21 @@ class GlobalHypertuner:
                 'eval_metric': ['error', 'auc', 'aucpr'],
                 'verbosity': 0,
                 'nthread': -1,
-                'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.1, log=True),
-                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 100, 1000),
-                'min_child_weight': trial.suggest_int('min_child_weight', 10, 200),
-                'gamma': trial.suggest_float('gamma', 1e-2, 10, log=True),
-                'subsample': trial.suggest_float('subsample', 0.3, 1.0),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.2, 1.0),
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.15, 4.0),
-                'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 2, log=True),
-                'reg_lambda': trial.suggest_float('reg_lambda', 1e-4, 10, log=True),
-                'max_depth': trial.suggest_int('max_depth', 3, 8),
-                'n_estimators': trial.suggest_int('n_estimators', 1000, 30000)
+                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.05, log=True),  # Tightened around optimal 0.0285
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 50, 200),  # Reduced range from best 100
+                'min_child_weight': trial.suggest_int('min_child_weight', 150, 250),  # Centered around optimal 200
+                'gamma': trial.suggest_float('gamma', 0.01, 0.1, log=True),  # Narrowed from optimal 0.03
+                'subsample': trial.suggest_float('subsample', 0.2, 0.4),  # Tightened around optimal 0.3047
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.8, 1.0),  # Higher range from optimal 0.915
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 3.0),  # Adjusted around optimal 2.15
+                'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 0.001, log=True),  # Tightened around optimal 0.0004
+                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 5.0, log=True),  # Focused around optimal 3.99
+                'max_depth': trial.suggest_int('max_depth', 3, 5),  # Reduced from optimal 3
+                'n_estimators': trial.suggest_int('n_estimators', 5000, 12000)  # Centered around optimal 8347
             }
-            
             # --- Create and Train the XGBoost model on oversampled data ---
             model = xgb.XGBClassifier(**param)
-            model.fit(X_train_resampled, y_train_resampled, eval_set=[(features_test, target_test)], verbose=False)
+            model.fit(features_train, target_train, eval_set=[(features_test, target_test)], verbose=False)
             
             # --- Find optimal threshold and evaluate model performance ---
             threshold, metrics = self._find_optimal_threshold(model, features_val, target_val)
@@ -303,7 +304,7 @@ class GlobalHypertuner:
                          target_val: pd.Series,
                          features_test: pd.DataFrame,
                          target_test: pd.Series,
-                         n_trials: int = 100) -> Dict[str, Any]:
+                         n_trials: int = 600) -> Dict[str, Any]:
         """Tune global model with enhanced precision-recall tracking."""
         try:
             study = optuna.create_study(
@@ -336,7 +337,8 @@ class GlobalHypertuner:
                 "best_recall": best_trial.user_attrs["recall"],
                 "best_threshold": best_trial.user_attrs["threshold"],
                 "n_pruned_trials": len(study.get_trials(states=[optuna.trial.TrialState.PRUNED])),
-                "n_completed_trials": len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE]))
+                "n_completed_trials": len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE])),
+                "best_params": study.best_params
             })
             self.best_params = study.best_params
             return study.best_params
@@ -456,25 +458,28 @@ class GlobalHypertuner:
     
 def tune_global_model():
     """Main function to tune the global model with precision-focused features."""
-    logger = ExperimentLogger(experiment_name="global_xgboost_hypertuning", log_dir='./logs/xgboost_hypertuning')
-    
+    logger = ExperimentLogger(experiment_name="xgboost_ensemble_hypertuning", log_dir='./logs/xgboost_ensemble_hypertuning')
+    selected_columns = import_selected_features_ensemble('xgb')
+    experiment_name = "xgboost_ensemble_hypertuning"
+    mlruns_dir = setup_mlflow_tracking(experiment_name)
     try:
         # Initialize hypertuner with target metrics
         hypertuner = GlobalHypertuner(
-            logger=logger,
+            Logger=logger,
             target_precision=0.50,
             target_recall=0.20,  # Updated to match new target
             precision_weight=0.8
         )
         
         # Load data with selected features
-        X_train, y_train, X_test, y_test = import_training_data_draws_api()
-        X_val, y_val = create_evaluation_sets_draws_api()
-        
-  
+        X_train, y_train, X_test, y_test = import_training_data_ensemble()
+        X_val, y_val = create_ensemble_evaluation_set()
+        X_train = X_train[selected_columns]
+        X_val = X_val[selected_columns]
+        X_test = X_test[selected_columns]
         
         # Start MLflow run
-        with mlflow.start_run(run_name=f"api_xgboost_tuning_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+        with mlflow.start_run(run_name=f"ensemble_xgboost_tuning_{datetime.now().strftime('%Y%m%d_%H%M')}"):
             # Log data statistics
             mlflow.log_params({
                 "target_precision": 0.50,

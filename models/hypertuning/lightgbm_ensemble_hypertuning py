@@ -1,0 +1,445 @@
+"""
+CatBoost model hypertuning implementation for binary classification with global training capabilities.
+Provides methods for hyperparameter tuning, prediction, and analysis with configurable parameters.
+"""
+
+# Standard library imports
+import os
+import sys
+from pathlib import Path
+from typing import Dict, Any, Optional, Tuple
+from datetime import datetime
+
+# Third-party imports
+import numpy as np
+import optuna
+import pandas as pd
+import lightgbm as lgb
+import mlflow
+import warnings
+from sklearn.metrics import precision_score, recall_score, f1_score
+from imblearn.over_sampling import ADASYN
+from optuna.trial import FrozenTrial
+
+# Szűrd a specifikus figyelmeztetést
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.base")
+warnings.filterwarnings("ignore", category=UserWarning, module="lightgbm")
+warnings.filterwarnings("ignore", category=UserWarning, module="optuna.samplers._tpe.sampler")
+
+# Add project root to Python path
+try:
+    project_root = Path(__file__).parent.parent.parent
+    if not project_root.exists():
+        # Handle network path by using raw string
+        project_root = Path(r"\\".join(str(project_root).split("\\")))
+    sys.path.append(str(project_root))
+    print(f"Project root catboost_model: {project_root}")
+except Exception as e:
+    print(f"Error setting project root path: {e}")
+    sys.path.append(os.getcwd().parent.parent)
+    print(f"Current directory catboost_model: {os.getcwd().parent.parent}")
+
+# Local imports
+from utils.logger import ExperimentLogger
+from utils.create_evaluation_set import (
+    create_ensemble_evaluation_set,
+    import_selected_features_ensemble,
+    import_training_data_ensemble,
+    setup_mlflow_tracking
+)
+
+# Core Configuration for CPU-only training with LightGBM
+# Define hyperparameter specification ranges for LightGBM
+HYPERPARAM_SPEC = {
+    'ranges': {
+        'learning_rate': (0.001, 0.1, 'log'),    # Szűkített kezdőtartomány
+        'max_depth': (4, 9),                     # Optimalizált fa struktúra
+        'num_leaves': (15, 255),      # Új paraméter - levelek száma
+        'reg_lambda': (0.1, 20),          # Szélesebb regularizációs tartomány
+        'n_estimators': (500, 10000),              # Realisztikusabb felső határ
+        'early_stopping_rounds': (200, 1000),
+        'subsample': (0.6, 0.95),                # Túlilleszkedés elleni védelem
+        'colsample_bytree': (0.7, 1.0),           # Nagyobb feature diversitás
+        'min_child_weight': (1, 20),      # Log skálán optimalizált
+        'feature_fraction': (0.7, 1.0),          # Új paraméter - feature szelekció
+        'path_smooth': (0.0, 1.0)                # Új paraméter - út simítás
+    }
+}
+HYPERPARAM_SPEC['sampler'] = optuna.samplers.TPESampler(
+    consider_prior=True,
+    prior_weight=1.5,
+    n_startup_trials=50,
+    n_ei_candidates=100,
+    seed=42,
+    constant_liar=True,
+    multivariate=True,
+    warn_independent_sampling=False
+)
+
+class GlobalHypertuner:
+    """
+    Global hyperparameter tuner for LightGBM model optimizing for validation metrics.
+    
+    Attributes:
+        MIN_SAMPLES: Minimum number of samples required for training.
+        DEFAULT_THRESHOLD: Default prediction threshold.
+        TARGET_PRECISION: Target precision threshold.
+        TARGET_RECALL: Target recall threshold.
+        PRECISION_WEIGHT: Weight for precision in optimization.
+        RECALL_CAP: Maximum recall to consider.
+    """
+    MIN_SAMPLES: int = 1000
+    DEFAULT_THRESHOLD: float = 0.50
+    TARGET_PRECISION: float = 0.5
+    TARGET_RECALL: float = 0.6
+    PRECISION_WEIGHT: float = 0.7
+    RECALL_CAP: float = 0.30
+
+    def __init__(self, 
+                 logger: Optional[ExperimentLogger] = None,
+                 target_precision: float = TARGET_PRECISION,
+                 target_recall: float = TARGET_RECALL,
+                 precision_weight: float = PRECISION_WEIGHT,
+                 hyperparam_spec: Dict = HYPERPARAM_SPEC):
+        self.logger = logger or ExperimentLogger(experiment_name="ensemble_lightgbm_hypertuning", log_dir='./logs/lightgbm_hypertuning')
+        self.target_precision = target_precision
+        self.target_recall = target_recall
+        self.precision_weight = precision_weight
+        self.hyperparam_spec = hyperparam_spec
+        self.best_params = {}
+
+    def _find_optimal_threshold(
+        self,
+        model: lgb.LGBMClassifier,
+        features_val: pd.DataFrame,
+        target_val: pd.Series) -> Tuple[float, Dict[str, float]]:
+        """
+        Find optimal prediction threshold prioritizing precision while maintaining recall.
+        
+        Args:
+            model: Trained CatBoost model.
+            features_val: Validation features.
+            target_val: Validation targets.
+        
+        Returns:
+            Tuple of (optimal threshold, metrics dictionary).
+        """
+        try:
+            probas = model.predict_proba(features_val)[:, 1]
+            best_metrics = {'precision': 0, 'recall': 0, 'f1': 0, 'threshold': self.DEFAULT_THRESHOLD}
+            best_score = 0.0
+            
+            # Focus on higher thresholds for better precision, starting from 0.5 up to 0.65
+            for threshold in np.arange(0.5, 0.65, 0.01):
+                preds = (probas >= threshold).astype(int)
+                recall = recall_score(target_val, preds)
+                if recall >= self.target_recall:
+                    true_positives = ((preds == 1) & (target_val == 1)).sum()
+                    false_positives = ((preds == 1) & (target_val == 0)).sum()
+                    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+                    f1 = f1_score(target_val, preds)
+                    score = precision * min(1.0, (recall - self.target_recall) / self.target_recall)
+                    if score > best_score:
+                        best_score = score
+                        best_metrics.update({
+                            'precision': precision,
+                            'recall': recall,
+                            'f1': f1,
+                            'threshold': threshold
+                        })
+                        self.logger.info(
+                            f"New best threshold {threshold:.3f}: Precision={precision:.4f}, Recall={recall:.4f}"
+                        )
+                        mlflow.log_metrics({
+                            'best_threshold': threshold,
+                            'best_precision': precision,
+                            'best_recall': recall,
+                            'best_f1': f1
+                        })
+            if best_metrics['recall'] < self.target_recall:
+                self.logger.warning(
+                    f"Could not find threshold meeting recall requirement. Best recall: {best_metrics['recall']:.4f}"
+                )
+            return best_metrics['threshold'], best_metrics
+        except Exception as e:
+            self.logger.error(f"Error in threshold optimization: {str(e)}")
+            raise
+
+    def objective(
+        self, 
+        trial: optuna.Trial, 
+        features_train: pd.DataFrame, 
+        target_train: pd.Series,
+        features_val: pd.DataFrame,
+        target_val: pd.Series,
+        features_test: pd.DataFrame,
+        target_test: pd.Series
+    ) -> float:
+        """
+        Optuna objective function that optimizes CatBoost precision while hypertuning ADASYN parameters.
+        """
+        try:
+           # --- Always start from the base dataset ---
+            original_X_train = features_train.copy()
+            original_y_train = target_train.copy()
+
+            # --- Tune ADASYN parameters ---
+            adasyn_n_neighbors = trial.suggest_int("adasyn_n_neighbors", 3, 10)
+            adasyn_sampling_strategy = trial.suggest_float(
+                name="adasyn_sampling_strategy",
+                low=0.3,  # Minimum 30% minority class
+                high=0.5   # Maximum 50% minority class
+            )
+            adasyn_sampling_strategy = adasyn_sampling_strategy / (1 - adasyn_sampling_strategy)
+            # Initialize ADASYN with current trial's parameters
+            adasyn = ADASYN(
+                random_state=42,
+                n_neighbors=adasyn_n_neighbors,
+                sampling_strategy=adasyn_sampling_strategy
+            )
+
+            try:
+                # Attempt resampling with ADASYN
+                X_train_resampled, y_train_resampled = adasyn.fit_resample(original_X_train, original_y_train)
+            except ValueError as ve:
+                # Check for the specific error message
+                if "No samples will be generated" in str(ve):
+                    raise optuna.exceptions.TrialPruned()
+                else:
+                    self.logger.warning(f"ADASYN resampling failed: {str(ve)}")
+                    X_train_resampled = features_train
+                    y_train_resampled = target_train
+                    
+
+            # Log successful resampling details
+            self.logger.info(f"ADASYN params: {adasyn_n_neighbors}, sampling_strategy: {adasyn_sampling_strategy:.4f}")
+
+            # --- Tune CatBoost parameters using trial suggestions ---
+            lgbm_params = {
+                'objective': 'binary',
+                'metric': ['binary_logloss', 'auc'],  # Added AUC for better tracking
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 50, 200),  # Reduced range
+                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),  # Increased min learning rate
+                'max_depth': trial.suggest_int('max_depth', 3, 7),  # Reduced max depth
+                'num_leaves': trial.suggest_int('num_leaves', 7, 31),  # Reduced leaf count
+                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0, log=True),  # Narrowed regularization
+                'n_estimators': trial.suggest_int('n_estimators', 100, 1000),  # Reduced estimator range
+                'subsample': trial.suggest_float('subsample', 0.7, 0.9),  # Narrowed subsample range
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.8, 1.0),  # Increased min colsample
+                'min_child_samples': trial.suggest_int('min_child_samples', 5, 30),  # Added min samples per leaf
+                'feature_fraction': trial.suggest_float('feature_fraction', 0.8, 1.0),  # Increased min feature fraction
+                'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),  # Added bagging frequency
+                'verbose': -1,
+                'random_state': 42,
+                'boosting_type': 'gbdt'  # Explicitly set boosting type
+            }
+            # --- Create and Train the LightGBM model on oversampled data ---
+            model = lgb.LGBMClassifier(**lgbm_params)
+            model.fit(
+                features_train, target_train,
+                eval_set=(features_test, target_test)
+            )
+            
+            # --- Find optimal threshold and evaluate model performance ---
+            threshold, metrics = self._find_optimal_threshold(model, features_val, target_val)
+            
+            # Early prune if recall requirement is not met
+            if metrics['recall'] < self.target_recall:
+                self.logger.info(f"Trial {trial.number} pruned: Recall {metrics['recall']:.4f} < {self.target_recall}")
+                raise optuna.exceptions.TrialPruned()
+            
+            trial.set_user_attr('adasyn_n_neighbors', adasyn_n_neighbors)
+            trial.set_user_attr('adasyn_sampling_strategy', adasyn_sampling_strategy)
+            trial.set_user_attr('threshold', metrics['threshold'])
+            trial.set_user_attr('precision', metrics['precision'])
+            trial.set_user_attr('recall', metrics['recall'])
+            trial.set_user_attr('f1', metrics['f1'])
+            
+            self.logger.info(
+                f"Trial {trial.number} results: \n"
+                f"Precision={metrics['precision']:.4f}, \n"
+                f"Recall={metrics['recall']:.4f}, \n"
+                f"Threshold={metrics['threshold']:.4f}"
+            )
+            
+            return metrics['precision']
+        except Exception as e:
+            self.logger.error(f"Error in trial {trial.number}: {str(e)}")
+            raise
+
+    def _log_metrics_callback(self, study: optuna.Study, trial: FrozenTrial) -> None:
+        """Callback to log metrics for each trial."""
+        self.logger.info(
+            f"Trial {trial.number}: precision={trial.user_attrs.get('precision')}, "
+            f"recall={trial.user_attrs.get('recall')}, "
+            f"threshold={trial.user_attrs.get('threshold')}"
+        )
+
+    def _pruned_trials_callback(self, study: optuna.Study, trial: FrozenTrial) -> None:
+        """Callback to track pruned trials."""
+        if trial.state == optuna.trial.TrialState.PRUNED:
+            self.logger.info(f"Trial {trial.number} was pruned.")
+
+    def tune_model(
+        self,
+        features_train: pd.DataFrame,
+        target_train: pd.Series,
+        features_val: pd.DataFrame,
+        target_val: pd.Series,
+        features_test: pd.DataFrame,
+        target_test: pd.Series,
+        n_trials: int = 100
+    ) -> Dict[str, Any]:
+        """Tune global model with enhanced precision-recall tracking."""
+        try:
+            study = optuna.create_study(
+                direction="maximize",
+                sampler=self.hyperparam_spec['sampler']
+            )
+            # Run optimization
+            study.optimize(
+                lambda trial: self.objective(
+                    trial,
+                    features_train,
+                    target_train,
+                    features_val,
+                    target_val,
+                    features_test,
+                    target_test
+                ),
+                n_trials=n_trials,
+                callbacks=[self._log_metrics_callback, self._pruned_trials_callback]
+            )
+            
+            best_trial = study.best_trial
+            mlflow.log_metrics({
+                "best_precision": best_trial.user_attrs["precision"],
+                "best_recall": best_trial.user_attrs["recall"],
+                "best_threshold": best_trial.user_attrs["threshold"],
+                "n_pruned_trials": len(study.get_trials(states=[optuna.trial.TrialState.PRUNED])),
+                "n_completed_trials": len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE]))
+            })
+            self.best_params = study.best_params
+            return study.best_params
+        except Exception as e:
+            self.logger.error(f"Error during hyperparameter tuning: {str(e)}")
+            raise
+
+    def evaluate_model(
+        self,
+        features_train: pd.DataFrame,
+        target_train: pd.Series,
+        features_test: pd.DataFrame,
+        target_test: pd.Series,
+        features_eval: pd.DataFrame,
+        target_eval: pd.Series
+    ) -> Dict[str, float]:
+        """Evaluate the model performance on a given evaluation set."""
+        try:
+            model = lgb.LGBMClassifier(
+                objective='binary',
+                metric=['focal_loss','auc'],
+                learning_rate=self.best_params.get('learning_rate', 0.01),
+                max_depth=self.best_params.get('max_depth', 6),
+                reg_lambda=self.best_params.get('reg_lambda', 1),
+                n_estimators=self.best_params.get('n_estimators', 10000),
+                num_leaves=self.best_params.get('num_leaves', 31),
+                early_stopping_rounds=self.best_params.get('early_stopping_rounds', 50),
+                verbose=0,
+                random_state=42
+            )
+            model.fit(features_train, target_train, eval_set=(features_test, target_test))
+            threshold, metrics = self._find_optimal_threshold(model, features_eval, target_eval)
+            return metrics
+        except Exception as e:
+            self.logger.error(f"Error in model evaluation: {str(e)}")
+            raise
+
+
+def tune_global_model():
+    """Main function to tune the global CatBoost model with precision-focused features."""
+    logger = ExperimentLogger(experiment_name="ensemble_lightgbm_hypertuning", log_dir='./logs/lightgbm_hypertuning')
+    selected_columns = import_selected_features_ensemble('lgbm')
+    experiment_name = "ensemble_lightgbm_hypertuning"
+    mlruns_dir = setup_mlflow_tracking(experiment_name)
+    try:
+        # Initialize hypertuner with target metrics
+        hypertuner = GlobalHypertuner(
+            logger=logger,
+            target_precision=0.50,
+            target_recall=0.20,  # Updated to match new target
+            precision_weight=0.8
+        )
+        
+        # Load data with selected features
+        X_train, y_train, X_test, y_test = import_training_data_ensemble()
+        X_val, y_val = create_ensemble_evaluation_set()
+        X_train = X_train[selected_columns]
+        X_val = X_val[selected_columns]
+        X_test = X_test[selected_columns]
+        
+        with mlflow.start_run(run_name=f"ensemble_lightgbm_tuning_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+            mlflow.log_params({
+                "target_precision": 0.50,
+                "target_recall": 0.20,
+                "precision_weight": 0.8,
+                "train_samples": len(X_train),
+                "val_samples": len(X_val),
+                "test_samples": len(X_test),
+                "draw_ratio_train": (y_train == 1).mean(),
+                "draw_ratio_val": (y_val == 1).mean(),
+                "draw_ratio_test": (y_test == 1).mean()
+            })
+            
+            best_params = hypertuner.tune_model(
+                X_train, y_train, X_val, y_val, X_test, y_test, n_trials=600
+            )
+            mlflow.log_params(best_params)
+            
+            val_metrics = hypertuner.evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test)
+            test_metrics = hypertuner.evaluate_model(X_train, y_train, X_test, y_test, X_val, y_val)
+            
+            mlflow.log_metrics({
+                f"val_{k}": v for k, v in val_metrics.items() 
+                if isinstance(v, (int, float)) and k != 'best_params'
+            })
+            mlflow.log_metrics({
+                f"test_{k}": v for k, v in test_metrics.items() 
+                if isinstance(v, (int, float)) and k != 'best_params'
+            })
+            
+            logger.info("\nModel Performance Summary:")
+            logger.info("-" * 80)
+            logger.info("Validation Set Metrics:")
+            for k, v in val_metrics.items():
+                if isinstance(v, (int, float)) and k != 'best_params':
+                    logger.info(f"{k:20}: {v:.4f}")
+            logger.info("\nTest Set Metrics:")
+            for k, v in test_metrics.items():
+                if isinstance(v, (int, float)) and k != 'best_params':
+                    logger.info(f"{k:20}: {v:.4f}")
+            logger.info("-" * 80)
+            logger.info("Global model tuning completed successfully")
+            
+            return {
+                'best_params': best_params,
+                'validation_metrics': val_metrics,
+                'test_metrics': test_metrics
+            }
+    except Exception as e:
+        logger.error(f"Error during global model tuning: {str(e)}")
+        raise
+
+
+if __name__ == "__main__":
+    results = tune_global_model()
+    print("\nFinal Model Performance:")
+    print("-" * 80)
+    print("Validation Set:")
+    print(f"Precision: {results['validation_metrics']['precision']:.4f}")
+    print(f"Recall: {results['validation_metrics']['recall']:.4f}")
+    print(f"F1 Score: {results['validation_metrics']['f1']:.4f}")
+    print("\nTest Set:")
+    print(f"Precision: {results['test_metrics']['precision']:.4f}")
+    print(f"Recall: {results['test_metrics']['recall']:.4f}")
+    print(f"F1 Score: {results['test_metrics']['f1']:.4f}") 
