@@ -1,6 +1,6 @@
 ﻿/* START QUERY BUILDER */
 EVALUATE
-SUMMARIZECOLUMNS(
+FILTER(SUMMARIZECOLUMNS(
     future_matches[Datum],
     future_matches[Away],
     future_matches[Home],
@@ -96,7 +96,7 @@ SUMMARIZECOLUMNS(
     future_matches[venue_encoded_base],
     future_matches[venue_grass],
     future_matches[venue_name]
-)
+), future_matches[away_average_points]>=0)
 ORDER BY 
     future_matches[fixture_id] ASC
 /* END QUERY BUILDER */

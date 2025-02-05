@@ -43,38 +43,25 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
+experiment_name = "xgboost_ensemble_hypertuning"
+logger = ExperimentLogger(experiment_name=experiment_name, log_dir='./logs/xgboost_ensemble_hypertuning')
 
-# Core Configuration for CPU-Only Training
-HYPERPARAM_SPEC = {
-    'tree_method': 'hist',
-    'device': 'cpu',
-    'ranges': {
-        'learning_rate': (0.001, 0.1, 'log'),
-        'min_child_weight': (10, 500),
-        'num_parallel_tree': (1, 10),
-        'gamma': (1.0, 30.0),
-        'subsample': (0.2, 1.0),
-        'colsample_bytree': (0.2, 1.0),
-        'scale_pos_weight': (0.1, 20.0),
-        'reg_alpha': (0.001, 10.0, 'log'),
-        'reg_lambda': (0.01, 10.0, 'log'),
-        'n_estimators': (10000, 30000),
-        'max_depth': (6, 9)  # Added max_depth parameter
-    }
-}
+
+from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
+mlruns_dir = setup_mlflow_tracking(experiment_name)
+
+HYPERPARAM_SPEC = {}
 HYPERPARAM_SPEC['sampler'] = optuna.samplers.TPESampler(
     consider_prior=True,
     prior_weight=1.5,              # Prior knowledge weighted higher based on past experience
     n_startup_trials=30,           # Enough trials to explore parameter space randomly at the beginning
     n_ei_candidates=100,           # Increased candidates to explore a broader search space for precision maximization
     seed=42,
+
     constant_liar=True,
     multivariate=True,
     warn_independent_sampling=False
 )
-
-
 
 class GlobalHypertuner:
     """Global hyperparameter tuner for XGBoost model optimizing for validation metrics.
@@ -89,18 +76,20 @@ class GlobalHypertuner:
     """
     
     MIN_SAMPLES: int = 1000
-    DEFAULT_THRESHOLD: float = 0.53
+    DEFAULT_THRESHOLD: float = 0.50
     TARGET_PRECISION: float = 0.5
     TARGET_RECALL: float = 0.6
     PRECISION_WEIGHT: float = 0.7
     RECALL_CAP: float = 0.30
 
     def __init__(self, 
-                 Logger: Optional[ExperimentLogger] = None,
+                 logger: Optional[ExperimentLogger] = None,
                  target_precision: float = TARGET_PRECISION,
                  target_recall: float = TARGET_RECALL,
                  precision_weight: float = PRECISION_WEIGHT,
                  hyperparam_spec: Dict = HYPERPARAM_SPEC):
+
+
         """Initialize the hypertuner with specified configuration.
         
         Args:
@@ -110,13 +99,37 @@ class GlobalHypertuner:
             precision_weight: Weight for precision in optimization
             hyperparam_spec: Hyperparameter specification dictionary
         """
-        self.logger = Logger or ExperimentLogger()
+   
+        self.logger = logger or ExperimentLogger(experiment_name="xgboost_ensemble_hypertuning", log_dir='./logs/xgboost_ensemble_hypertuning')
         self.best_params: Dict[str, Any] = {}
         self.target_precision = target_precision
         self.target_recall = target_recall
         self.precision_weight = precision_weight
         self.best_metrics = {'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'threshold': 0.5}
         self.hyperparam_spec = hyperparam_spec
+        self._check_logger()
+        
+    def _check_logger(self) -> None:
+        """Verify logger is properly initialized and functional.
+        
+        Raises:
+            ValueError: If logger is not properly configured
+        """
+        if not self.logger:
+            raise ValueError("Logger not initialized")
+            
+        if not hasattr(self.logger, 'info'):
+            raise ValueError("Logger missing required 'info' method")
+            
+        if not hasattr(self.logger, 'error'):
+            raise ValueError("Logger missing required 'error' method")
+            
+        # Test logger functionality and print configuration
+        try:
+            self.logger.info(f"Logger configuration - Experiment: {self.logger.experiment_name}, Log directory: {self.logger.log_dir}")
+            self.logger.info("Logger check: Initialization successful")
+        except Exception as e:
+            raise ValueError(f"Logger test failed: {str(e)}")
     
     def _find_optimal_threshold(
         self,
@@ -164,11 +177,11 @@ class GlobalHypertuner:
                             'threshold': threshold
                         })
                         
-                        # Log improvement
-                        self.logger.info(
-                            f"New best threshold {threshold:.3f}: "
-                            f"Precision={precision:.4f}, Recall={recall:.4f}"
-                        )
+                        # # Log improvement
+                        # self.logger.info(
+                        #     # f"New best threshold {threshold:.3f}: "
+                        #     f"Precision={precision:.4f}, Recall={recall:.4f}"
+                        # )
                         
                         # Log to MLflow
                         mlflow.log_metrics({
@@ -177,6 +190,8 @@ class GlobalHypertuner:
                             'best_recall': recall,
                             'best_f1': f1
                         })
+                        
+                     
             
             if best_metrics['recall'] < 0.20:
                 self.logger.warning(
@@ -184,12 +199,16 @@ class GlobalHypertuner:
                     f"Best recall: {best_metrics['recall']:.4f}"
                     f"Best precision: {best_metrics['precision']:.4f}"
                 )
-            
+            self.logger.info(
+                f"New best threshold {best_metrics['threshold']:.3f}: "
+                f"Precision={best_metrics['precision']:.4f}, Recall={best_metrics['recall']:.4f}"
+            )
             return best_metrics['threshold'], best_metrics
             
         except Exception as e:
             self.logger.error(f"Error in threshold optimization: {str(e)}")
             raise
+        
     def objective(self, 
                  trial: optuna.Trial, 
                  features_train: pd.DataFrame, 
@@ -200,52 +219,23 @@ class GlobalHypertuner:
                  target_test: pd.Series) -> float:
         """Optuna objective function that applies ADASYN to the base dataset in every trial."""
         try:
+            self.logger.info(f"Starting trial {trial.number}...")
+            
             # --- Always start from the base dataset ---
             original_X_train = features_train.copy()
             original_y_train = target_train.copy()
 
-            # --- Tune ADASYN parameters ---
-            adasyn_n_neighbors = trial.suggest_int("adasyn_n_neighbors", 3, 10)
-            adasyn_sampling_strategy = trial.suggest_float(
-                name="adasyn_sampling_strategy",
-                low=0.3,  # Minimum 30% minority class
-                high=0.5   # Maximum 50% minority class
-            )
-            adasyn_sampling_strategy = adasyn_sampling_strategy / (1 - adasyn_sampling_strategy)
-            
-            # Initialize ADASYN with current trial's parameters
-            adasyn = ADASYN(
-                random_state=42,
-                n_neighbors=adasyn_n_neighbors,
-                sampling_strategy=adasyn_sampling_strategy
-            )
-
-            try:
-                # Attempt resampling with ADASYN
-                X_train_resampled, y_train_resampled = adasyn.fit_resample(original_X_train, original_y_train)
-            except ValueError as ve:
-                # Check for the specific error message
-                if "No samples will be generated" in str(ve):
-                    raise optuna.exceptions.TrialPruned()
-                else:
-                    self.logger.warning(f"ADASYN resampling failed: {str(ve)}")
-                    X_train_resampled = features_train
-                    y_train_resampled = target_train
-                    
-
-            # Log successful resampling details
-            # self.logger.info(f"ADASYN params: {adasyn_n_neighbors}, sampling_strategy: {adasyn_sampling_strategy:.4f}")
-
             # --- Rest of the training logic remains unchanged ---
             param = {
                 'objective': 'binary:logistic',
-                'tree_method': self.hyperparam_spec['tree_method'],
-                'device': self.hyperparam_spec['device'],
-                'eval_metric': ['error', 'auc', 'aucpr'],
+                'tree_method': 'hist',
+                'device': 'cpu',
+                'eval_metric': ['error','auc', 'aucpr'],
                 'verbosity': 0,
                 'nthread': -1,
-                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.05, log=True),  # Tightened around optimal 0.0285
-                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 50, 200),  # Reduced range from best 100
+                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1),
+
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 50, 300),
                 'min_child_weight': trial.suggest_int('min_child_weight', 150, 250),  # Centered around optimal 200
                 'gamma': trial.suggest_float('gamma', 0.01, 0.1, log=True),  # Narrowed from optimal 0.03
                 'subsample': trial.suggest_float('subsample', 0.2, 0.4),  # Tightened around optimal 0.3047
@@ -254,7 +244,7 @@ class GlobalHypertuner:
                 'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 0.001, log=True),  # Tightened around optimal 0.0004
                 'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 5.0, log=True),  # Focused around optimal 3.99
                 'max_depth': trial.suggest_int('max_depth', 3, 5),  # Reduced from optimal 3
-                'n_estimators': trial.suggest_int('n_estimators', 5000, 12000)  # Centered around optimal 8347
+                'n_estimators': trial.suggest_int('n_estimators', 200, 2000)  # Centered around optimal 8347
             }
             # --- Create and Train the XGBoost model on oversampled data ---
             model = xgb.XGBClassifier(**param)
@@ -271,11 +261,12 @@ class GlobalHypertuner:
                 raise optuna.exceptions.TrialPruned()
 
             # Log trial attributes for later inspection
-            trial.set_user_attr('adasyn_n_neighbors', adasyn_n_neighbors)
-            trial.set_user_attr('adasyn_sampling_strategy', adasyn_sampling_strategy)
+            # trial.set_user_attr('adasyn_n_neighbors', adasyn_n_neighbors)
+            # trial.set_user_attr('adasyn_sampling_strategy', adasyn_sampling_strategy)
             trial.set_user_attr('threshold', metrics['threshold'])
             trial.set_user_attr('precision', metrics['precision'])
             trial.set_user_attr('recall', metrics['recall'])
+
             trial.set_user_attr('f1', metrics['f1'])
             
             self.logger.info(
@@ -307,12 +298,13 @@ class GlobalHypertuner:
                          n_trials: int = 600) -> Dict[str, Any]:
         """Tune global model with enhanced precision-recall tracking."""
         try:
+            self.logger.info("Starting hyperparameter tuning...")
             study = optuna.create_study(
                 direction="maximize",
                 sampler=self.hyperparam_spec['sampler']
             )
+            self.logger.info(f"Created Optuna study with sampler: {self.hyperparam_spec['sampler']}")
             
-            # Run optimization
             study.optimize(
                 lambda trial: self.objective(
                     trial,
@@ -325,22 +317,25 @@ class GlobalHypertuner:
                 ),
                 n_trials=n_trials,
                 callbacks=[
-                    self._log_metrics_callback,  # New callback for detailed metric logging
-                    self._pruned_trials_callback  # New callback to track pruned trials
+                    self._log_metrics_callback,
+                    self._pruned_trials_callback
                 ]
             )
             
             # Log best trial results
             best_trial = study.best_trial
+            # Log numeric metrics separately from params
             mlflow.log_metrics({
-                "best_precision": best_trial.user_attrs["precision"],
-                "best_recall": best_trial.user_attrs["recall"],
-                "best_threshold": best_trial.user_attrs["threshold"],
-                "n_pruned_trials": len(study.get_trials(states=[optuna.trial.TrialState.PRUNED])),
-                "n_completed_trials": len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE])),
-                "best_params": study.best_params
+                "best_precision": float(best_trial.user_attrs["precision"]),
+                "best_recall": float(best_trial.user_attrs["recall"]),
+                "best_threshold": float(best_trial.user_attrs["threshold"]),
+                "n_pruned_trials": float(len(study.get_trials(states=[optuna.trial.TrialState.PRUNED]))),
+                "n_completed_trials": float(len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE])))
             })
+            # Log params as a separate artifact
+            mlflow.log_params(study.best_params)
             self.best_params = study.best_params
+            self.logger.info(f"Hyperparameter tuning completed. Best trial: {study.best_trial.number}")
             return study.best_params
                 
         except Exception as e:
@@ -401,18 +396,6 @@ class GlobalHypertuner:
                 verbose=False
             )
             
-            # # Second fit - Including test data
-            # full_features = pd.concat([features_train, features_test])
-            # full_target = pd.concat([target_train, target_test])
-            
-            # model_full = xgb.XGBClassifier(**params)
-            # model_full.fit(
-            #     full_features,
-            #     full_target,
-            #     eval_set=[(features_val, target_val)],
-            #     verbose=False
-            # )
-            
             # Store both models
             self.model = model  # Original model
             # self.model_full = model_full  # Model trained on all data
@@ -435,12 +418,15 @@ class GlobalHypertuner:
                 'n_draws': int(target_val.sum()),
                 'n_predicted': int(y_pred.sum()),
                 'n_correct': int(np.logical_and(target_val, y_pred).sum()),
-                'best_params': params
+                'best_params': {k: str(v) for k, v in params.items()}  # Convert all values to strings for MLflow compatibility
             }
             
-            self.logger.info("Model evaluation completed successfully")
+            self.logger.info("Model evaluation completed successfully with metrics:")
+            for k, v in metrics.items():
+                self.logger.info(f"{k}: {v:.4f}")
             return metrics
             
+
         except Exception as e:
             self.logger.error(f"Model evaluation failed: {str(e)}")
             return {
@@ -458,14 +444,13 @@ class GlobalHypertuner:
     
 def tune_global_model():
     """Main function to tune the global model with precision-focused features."""
-    logger = ExperimentLogger(experiment_name="xgboost_ensemble_hypertuning", log_dir='./logs/xgboost_ensemble_hypertuning')
     selected_columns = import_selected_features_ensemble('xgb')
-    experiment_name = "xgboost_ensemble_hypertuning"
-    mlruns_dir = setup_mlflow_tracking(experiment_name)
+    
+    
     try:
         # Initialize hypertuner with target metrics
         hypertuner = GlobalHypertuner(
-            Logger=logger,
+            logger=logger,
             target_precision=0.50,
             target_recall=0.20,  # Updated to match new target
             precision_weight=0.8
@@ -478,6 +463,7 @@ def tune_global_model():
         X_val = X_val[selected_columns]
         X_test = X_test[selected_columns]
         
+
         # Start MLflow run
         with mlflow.start_run(run_name=f"ensemble_xgboost_tuning_{datetime.now().strftime('%Y%m%d_%H%M')}"):
             # Log data statistics
@@ -524,21 +510,24 @@ def tune_global_model():
             })
             
             # Log comprehensive performance summary
-            logger.info("\nModel Performance Summary:")
-            logger.info("-" * 80)
-            logger.info("Validation Set Metrics:")
+            print("\nModel Performance Summary:")
+            print("-" * 80)
+            print("Validation Set Metrics:")
             for k, v in val_metrics.items():
                 if isinstance(v, (int, float)) and k != 'best_params':
-                    logger.info(f"{k:20}: {v:.4f}")
+                    print(f"{k:20}: {v:.4f}")
+
             
-            logger.info("\nTest Set Metrics:")
+            print("\nTest Set Metrics:")
             for k, v in test_metrics.items():
                 if isinstance(v, (int, float)) and k != 'best_params':
-                    logger.info(f"{k:20}: {v:.4f}")
+                    print(f"{k:20}: {v:.4f}")
+
             
-            logger.info("-" * 80)
-            logger.info("Global model tuning completed successfully")
+            print("-" * 80)
+            print("Global model tuning completed successfully")
             
+
             return {
                 'best_params': best_params,
                 'validation_metrics': val_metrics,
@@ -546,8 +535,9 @@ def tune_global_model():
             }
             
     except Exception as e:
-        logger.error(f"Error during global model tuning: {str(e)}")
+        print(f"Error during global model tuning: {str(e)}")
         raise
+
 
 if __name__ == "__main__":
     results = tune_global_model()

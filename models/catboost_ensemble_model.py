@@ -50,17 +50,15 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import (
-    import_selected_features_ensemble,
-    create_ensemble_evaluation_set,
-    import_training_data_ensemble,
-    setup_mlflow_tracking
-)
+experiment_name = "catboost_ensemble_model"
+logger = ExperimentLogger(experiment_name=experiment_name, log_dir='./logs/catboost_ensemble_model')
+
+from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 # Configure warnings
 warnings.filterwarnings('ignore', category=UserWarning)
 
-experiment_name = "catboost_ensemble_model"
 
 class CatBoostModel(BaseEstimator, ClassifierMixin):
     """CatBoost model implementation with global training."""
@@ -78,9 +76,9 @@ class CatBoostModel(BaseEstimator, ClassifierMixin):
         self.selected_features = import_selected_features_ensemble('cat')
         # Global CatBoost parameters
         self.global_params = {
-            'iterations': 18460,
-            'learning_rate': 0.00760022315772835,
-            'depth': 7,
+            'iterations': 2835,
+            'learning_rate': 0.02347589168474322,
+            'depth': 6,
             'loss_function': 'Logloss',
             'eval_metric': 'AUC',
             'verbose': 100,
@@ -88,14 +86,14 @@ class CatBoostModel(BaseEstimator, ClassifierMixin):
             'task_type': 'CPU',
             'auto_class_weights': 'Balanced',
             'od_type': 'Iter',
-            'od_wait': 438,
-            'l2_leaf_reg': 0.00010074907983691477,
+            'od_wait': 568,
+            'l2_leaf_reg': 10.212327784628066,
             'border_count': 192,
-            'subsample': 0.5689379760878746,
-            'random_strength': 0.0012345611991419914,
+            'subsample': 0.7242809290742986,
+            'random_strength': 0.31476618564387954,
             'grow_policy': 'SymmetricTree',
-            'min_data_in_leaf': 123,
-            'feature_weights': [0.6452286116190419] * len(self.selected_features)
+            'min_data_in_leaf': 20,
+            'feature_weights': [0.6237630104733602] * len(self.selected_features)
         }
         
         self.model = None
@@ -338,10 +336,6 @@ class CatBoostModel(BaseEstimator, ClassifierMixin):
         }
 
 if __name__ == "__main__":
-    # Set up MLflow tracking and start run
-    mlruns_dir = setup_mlflow_tracking('catboost_model')
-    
-
     # Load data using utility functions
     selected_features = import_selected_features_ensemble('cat')
     features_train, target_train, features_test, target_test = import_training_data_ensemble()
@@ -356,7 +350,7 @@ if __name__ == "__main__":
 
     with mlflow.start_run(run_name="catboost_training") as run:
         # Create and train the CatBoost model
-        cat_model = CatBoostModel()
+        cat_model = CatBoostModel(logger=logger)
         cat_model.train(features_train, target_train, features_test, target_test, features_val, target_val)
         
         # Make predictions and calculate metrics

@@ -260,13 +260,15 @@ class MongoDBFeatures:
             print("Start adding features...")
             fixtures_dataframe = self.load_and_prepare_data(fixtures_dataframe)
             
-            print("Start adding cumulative sums...")
-            fixtures_dataframe = self.add_cumulative_sums(fixtures_dataframe)
+            # print("Start adding cumulative sums...")
+            # fixtures_dataframe = self.add_cumulative_sums(fixtures_dataframe)
             
-            print("Start adding rolling averages...")
-            fixtures_dataframe = self.add_rolling_averages(fixtures_dataframe)
+            # print("Start adding rolling averages...")
+            # fixtures_dataframe = self.add_rolling_averages(fixtures_dataframe)
             fixtures_dataframe = fixtures_dataframe.rename(columns={'date': 'Date'})
             print("Features added")
+            # Replace infinite values with NaN
+            fixtures_dataframe = fixtures_dataframe.replace([np.inf, -np.inf], np.nan)
             return fixtures_dataframe
         except Exception as e:
             print(f"Error adding features to fixtures data: {e}")
@@ -714,19 +716,23 @@ class MongoDBFeatures:
             'league_id', 'league_name', 'league_round', 'league_season',
             'referee', 'venue_id', 'venue_name'
         ]
+       
         df = df.rename(columns={'date': 'Date'})
+        print(df.columns)
         # Load training data to merge with future fixtures
         try:
-            training_df = pd.read_excel('data/Create_data/data_files/base/api_training_data.xlsx')
+            training_df = training_data
+
             
             # Get common columns between training data and future fixtures
             common_cols = list(set(df.columns).intersection(set(training_df.columns)))
+            print(common_cols)
             
             # Merge data on common columns while preserving df's structure
             df = pd.merge(
                 df,
                 training_df[common_cols],
-                on=common_cols,
+                on='fixture_id',
                 how='left'
             )
             

@@ -41,30 +41,15 @@ except Exception as e:
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import (
-    create_ensemble_evaluation_set,
-    import_selected_features_ensemble,
-    import_training_data_ensemble,
-    setup_mlflow_tracking
-)
+experiment_name = "ensemble_lightgbm_hypertuning"
+logger = ExperimentLogger(experiment_name=experiment_name, log_dir='./logs/xgboost_ensemble_hypertuning')
+
+
+from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 # Core Configuration for CPU-only training with LightGBM
-# Define hyperparameter specification ranges for LightGBM
-HYPERPARAM_SPEC = {
-    'ranges': {
-        'learning_rate': (0.001, 0.1, 'log'),    # Szűkített kezdőtartomány
-        'max_depth': (4, 9),                     # Optimalizált fa struktúra
-        'num_leaves': (15, 255),      # Új paraméter - levelek száma
-        'reg_lambda': (0.1, 20),          # Szélesebb regularizációs tartomány
-        'n_estimators': (500, 10000),              # Realisztikusabb felső határ
-        'early_stopping_rounds': (200, 1000),
-        'subsample': (0.6, 0.95),                # Túlilleszkedés elleni védelem
-        'colsample_bytree': (0.7, 1.0),           # Nagyobb feature diversitás
-        'min_child_weight': (1, 20),      # Log skálán optimalizált
-        'feature_fraction': (0.7, 1.0),          # Új paraméter - feature szelekció
-        'path_smooth': (0.0, 1.0)                # Új paraméter - út simítás
-    }
-}
+HYPERPARAM_SPEC = {}
 HYPERPARAM_SPEC['sampler'] = optuna.samplers.TPESampler(
     consider_prior=True,
     prior_weight=1.5,
@@ -183,47 +168,16 @@ class GlobalHypertuner:
             original_X_train = features_train.copy()
             original_y_train = target_train.copy()
 
-            # --- Tune ADASYN parameters ---
-            adasyn_n_neighbors = trial.suggest_int("adasyn_n_neighbors", 3, 10)
-            adasyn_sampling_strategy = trial.suggest_float(
-                name="adasyn_sampling_strategy",
-                low=0.3,  # Minimum 30% minority class
-                high=0.5   # Maximum 50% minority class
-            )
-            adasyn_sampling_strategy = adasyn_sampling_strategy / (1 - adasyn_sampling_strategy)
-            # Initialize ADASYN with current trial's parameters
-            adasyn = ADASYN(
-                random_state=42,
-                n_neighbors=adasyn_n_neighbors,
-                sampling_strategy=adasyn_sampling_strategy
-            )
-
-            try:
-                # Attempt resampling with ADASYN
-                X_train_resampled, y_train_resampled = adasyn.fit_resample(original_X_train, original_y_train)
-            except ValueError as ve:
-                # Check for the specific error message
-                if "No samples will be generated" in str(ve):
-                    raise optuna.exceptions.TrialPruned()
-                else:
-                    self.logger.warning(f"ADASYN resampling failed: {str(ve)}")
-                    X_train_resampled = features_train
-                    y_train_resampled = target_train
-                    
-
-            # Log successful resampling details
-            self.logger.info(f"ADASYN params: {adasyn_n_neighbors}, sampling_strategy: {adasyn_sampling_strategy:.4f}")
-
             # --- Tune CatBoost parameters using trial suggestions ---
             lgbm_params = {
-                'objective': 'binary',
-                'metric': ['binary_logloss', 'auc'],  # Added AUC for better tracking
-                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 50, 200),  # Reduced range
-                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),  # Increased min learning rate
-                'max_depth': trial.suggest_int('max_depth', 3, 7),  # Reduced max depth
-                'num_leaves': trial.suggest_int('num_leaves', 7, 31),  # Reduced leaf count
-                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0, log=True),  # Narrowed regularization
-                'n_estimators': trial.suggest_int('n_estimators', 100, 1000),  # Reduced estimator range
+               'objective': 'binary',
+                'metric': ['binary_logloss', 'auc'],
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 100, 500),
+                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.2, log=True),
+                'max_depth': trial.suggest_int('max_depth', 5, 12),
+                'num_leaves': trial.suggest_int('num_leaves', 15, 127),
+                'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 15.0),
+                'n_estimators': trial.suggest_int('n_estimators', 200, 2000),
                 'subsample': trial.suggest_float('subsample', 0.7, 0.9),  # Narrowed subsample range
                 'colsample_bytree': trial.suggest_float('colsample_bytree', 0.8, 1.0),  # Increased min colsample
                 'min_child_samples': trial.suggest_int('min_child_samples', 5, 30),  # Added min samples per leaf
@@ -234,7 +188,11 @@ class GlobalHypertuner:
                 'boosting_type': 'gbdt'  # Explicitly set boosting type
             }
             # --- Create and Train the LightGBM model on oversampled data ---
-            model = lgb.LGBMClassifier(**lgbm_params)
+            # Add this before model training
+            class_weights = {0: 1, 1: len(np.where(target_train == 0)[0])/len(np.where(target_train == 1)[0])}
+            
+            model = lgb.LGBMClassifier(**lgbm_params,
+                class_weight=class_weights )
             model.fit(
                 features_train, target_train,
                 eval_set=(features_test, target_test)
@@ -248,11 +206,10 @@ class GlobalHypertuner:
                 self.logger.info(f"Trial {trial.number} pruned: Recall {metrics['recall']:.4f} < {self.target_recall}")
                 raise optuna.exceptions.TrialPruned()
             
-            trial.set_user_attr('adasyn_n_neighbors', adasyn_n_neighbors)
-            trial.set_user_attr('adasyn_sampling_strategy', adasyn_sampling_strategy)
             trial.set_user_attr('threshold', metrics['threshold'])
             trial.set_user_attr('precision', metrics['precision'])
             trial.set_user_attr('recall', metrics['recall'])
+
             trial.set_user_attr('f1', metrics['f1'])
             
             self.logger.info(
@@ -358,10 +315,8 @@ class GlobalHypertuner:
 
 def tune_global_model():
     """Main function to tune the global CatBoost model with precision-focused features."""
-    logger = ExperimentLogger(experiment_name="ensemble_lightgbm_hypertuning", log_dir='./logs/lightgbm_hypertuning')
     selected_columns = import_selected_features_ensemble('lgbm')
-    experiment_name = "ensemble_lightgbm_hypertuning"
-    mlruns_dir = setup_mlflow_tracking(experiment_name)
+  
     try:
         # Initialize hypertuner with target metrics
         hypertuner = GlobalHypertuner(

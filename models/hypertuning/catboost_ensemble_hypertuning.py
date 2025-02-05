@@ -18,8 +18,8 @@ from catboost import CatBoostClassifier
 import mlflow
 import warnings
 from sklearn.metrics import precision_score, recall_score, f1_score
-from imblearn.over_sampling import ADASYN
 from optuna.trial import FrozenTrial
+
 
 # Szűrd a specifikus figyelmeztetést
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.base")
@@ -41,33 +41,17 @@ except Exception as e:
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import (
-    create_ensemble_evaluation_set,
-    import_selected_features_ensemble,
-    import_training_data_ensemble,
-    setup_mlflow_tracking
-)
+experiment_name = "catboost_ensemble_hypertuning"
+logger = ExperimentLogger(experiment_name=experiment_name, log_dir='./logs/catboost_ensemble_hypertuning')
+
+
+from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 # Core Configuration for CPU-only training with CatBoost
-# Define hyperparameter specification for CatBoost
-HYPERPARAM_SPEC = {
-    'auto_class_weights': ['Balanced', 'SqrtBalanced'],  # CatBoost specifikus
-    'grow_policy': ['SymmetricTree', 'Lossguide'],      # Kötelező top_rate-hoz
-    'min_data_in_leaf': (20, 100),
-    'monotone_constraints_mode': ['Cross', 'OneFeature'],  # Biztonságos alternatíva
-    'feature_weights': (0.5, 1.5),
-    'learning_rate': (0.001, 0.1, 'log'),
-    'depth': (4, 9),
-    'l2_leaf_reg': (0.1, 20, 'log'),
-    'iterations': (500, 5000),
-    'border_count': (32, 254, 'step=32'),
-    'subsample': (0.6, 0.95),
-    'random_strength': (0.01, 10, 'log'),
-    'top_rate': (0.1, 0.3),
-    'bottom_rate': (0.1, 0.3)
-}
 
 
+HYPERPARAM_SPEC = {}
 HYPERPARAM_SPEC['sampler'] = optuna.samplers.TPESampler(
     consider_prior=True,
     prior_weight=1.5,
@@ -150,9 +134,9 @@ class GlobalHypertuner:
                             'f1': f1,
                             'threshold': threshold
                         })
-                        self.logger.info(
-                            f"New best threshold {threshold:.3f}: Precision={precision:.4f}, Recall={recall:.4f}"
-                        )
+                        # self.logger.info(
+                        #     f"New best threshold {threshold:.3f}: Precision={precision:.4f}, Recall={recall:.4f}"
+                        # )
                         mlflow.log_metrics({
                             'best_threshold': threshold,
                             'best_precision': precision,
@@ -176,48 +160,16 @@ class GlobalHypertuner:
         features_val: pd.DataFrame,
         target_val: pd.Series,
         features_test: pd.DataFrame,
-        target_test: pd.Series
-    ) -> float:
+        target_test: pd.Series) -> float:
         """
-        Optuna objective function that optimizes CatBoost precision while hypertuning ADASYN parameters.
+        Optuna objective function that optimizes CatBoost precision while hypertuning CatBoost parameters.
         """
         try:
             # --- Always start from the base dataset ---
+
             original_X_train = features_train.copy()
             original_y_train = target_train.copy()
 
-            # --- Tune ADASYN parameters ---
-            adasyn_n_neighbors = trial.suggest_int("adasyn_n_neighbors", 3, 10)
-            adasyn_sampling_strategy = trial.suggest_float(
-                name="adasyn_sampling_strategy",
-                low=0.3,  # Minimum 30% minority class
-                high=0.5   # Maximum 50% minority class
-            )
-            adasyn_sampling_strategy = adasyn_sampling_strategy / (1 - adasyn_sampling_strategy)
-            
-            # Initialize ADASYN with current trial's parameters
-            adasyn = ADASYN(
-                random_state=42,
-                n_neighbors=adasyn_n_neighbors,
-                sampling_strategy=adasyn_sampling_strategy
-            )
-
-            try:
-                # Attempt resampling with ADASYN
-                X_train_resampled, y_train_resampled = adasyn.fit_resample(original_X_train, original_y_train)
-            except ValueError as ve:
-                # Check for the specific error message
-                if "No samples will be generated" in str(ve):
-                    raise optuna.exceptions.TrialPruned()
-                else:
-                    self.logger.warning(f"ADASYN resampling failed: {str(ve)}")
-                    X_train_resampled = features_train
-                    y_train_resampled = target_train
-                    
-
-            # Log successful resampling details
-            self.logger.info(f"ADASYN params: {adasyn_n_neighbors}, sampling_strategy: {adasyn_sampling_strategy:.4f}")
-            
 
             # --- Tune CatBoost parameters using trial suggestions ---
             cat_params = {
@@ -256,11 +208,10 @@ class GlobalHypertuner:
                 self.logger.info(f"Trial {trial.number} pruned: Recall {metrics['recall']:.4f} < {self.target_recall}")
                 raise optuna.exceptions.TrialPruned()
             
-            trial.set_user_attr('adasyn_n_neighbors', adasyn_n_neighbors)
-            trial.set_user_attr('adasyn_sampling_strategy', adasyn_sampling_strategy)
             trial.set_user_attr('threshold', metrics['threshold'])
             trial.set_user_attr('precision', metrics['precision'])
             trial.set_user_attr('recall', metrics['recall'])
+
             trial.set_user_attr('f1', metrics['f1'])
             
             self.logger.info(
@@ -280,12 +231,8 @@ class GlobalHypertuner:
 
     def _log_metrics_callback(self, study: optuna.Study, trial: FrozenTrial) -> None:
         """Callback to log metrics for each trial."""
-        self.logger.info(
-            f"Trial {trial.number}: \n"
-            f"precision={trial.user_attrs.get('precision')}, \n"
-            f"recall={trial.user_attrs.get('recall')}, \n"
-            f"threshold={trial.user_attrs.get('threshold')}"
-        )
+        self.logger.info(f"Trial {trial.number} completed with value: {trial.value}")
+        self.logger.info(f"Trial params: {trial.params}")
 
     def _pruned_trials_callback(self, study: optuna.Study, trial: FrozenTrial) -> None:
         """Callback to track pruned trials."""
@@ -376,11 +323,8 @@ class GlobalHypertuner:
 
 def tune_global_model():
     """Main function to tune the global CatBoost model with precision-focused features."""
-    logger = ExperimentLogger(experiment_name="catboost_ensemble_hypertuning", log_dir='./logs/catboost_ensemble_hypertuning')
-    selected_columns = import_selected_features_ensemble('cat')
-    experiment_name = "ensemble_catboost_hypertuning"
-    mlruns_dir = setup_mlflow_tracking(experiment_name)
     try:
+        selected_columns = import_selected_features_ensemble('cat')
         # Initialize hypertuner with target metrics
         hypertuner = GlobalHypertuner(
             logger=logger,

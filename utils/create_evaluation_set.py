@@ -26,12 +26,14 @@ except Exception as e:
     sys.path.append(os.getcwd().parent)
     print(f"Fallback to current directory: {os.getcwd().parent}")
 
+
 from utils.advanced_goal_features import AdvancedGoalFeatureEngineer
 from utils.mlflow_utils import MLFlowConfig, MLFlowManager
-from utils.logger import ExperimentLogger  
+from utils.logger import ExperimentLogger
 
-# Initialize logger
-logger = ExperimentLogger(log_dir='logs/create_evaluation_set', experiment_name="create_evaluation_set")
+
+logger = ExperimentLogger(experiment_name='create_evaluation_set', log_dir='logs/create_evaluation_set')
+
 
 # Error codes for standardized logging
 class DataProcessingError:
@@ -70,7 +72,7 @@ def retry_on_error(max_retries: int = 3, delay: float = 1.0):
                         time.sleep(delay * (attempt + 1))
                     continue
             if last_error:
-                logger.error(f"Failed to execute function after multiple retries: {last_error}")
+                logger.info(f"Failed to execute function after multiple retries: {last_error}")
                 raise last_error  # Re-raise the last exception after logging
         return wrapper
     return decorator
@@ -95,7 +97,7 @@ def convert_numeric_columns(
         columns (Optional[List[str]]): List of columns to convert. If None, converts all columns
         drop_errors (bool): Whether to drop columns that fail conversion
         fill_value (float): Value to use for empty strings and NaN
-        verbose (bool): Whether to print conversion errors and warnings
+        verbose (bool): Whether to logger.info conversion errors and warnings
 
     Returns:
         pd.DataFrame: DataFrame with converted numeric columns
@@ -103,7 +105,7 @@ def convert_numeric_columns(
     Example:
         >>> df = pd.DataFrame({'A': ['1.5', '2,5', '3'], 'B': ['a', 'b', 'c']})
         >>> result = convert_numeric_columns(df, columns=['A'])
-        >>> print(result['A'].dtype)
+        >>> logger.info(result['A'].dtype)
         float64
 
     Note:
@@ -136,7 +138,7 @@ def convert_numeric_columns(
                 
                 if not has_potential_numbers:
                     if verbose:
-                        print(f"Column {col} contains no numeric values")
+                        logger.info(f"Column {col} contains no numeric values")
                     failed_columns.append(col)
                     if drop_errors:
                         columns_to_drop.append(col)
@@ -165,7 +167,7 @@ def convert_numeric_columns(
                 # Check if conversion was successful
                 if numeric_series.isna().all():
                     if verbose:
-                        print(f"Column {col} contains no valid numeric values")
+                        logger.info(f"Column {col} contains no valid numeric values")
                     failed_columns.append(col)
                     if drop_errors:
                         columns_to_drop.append(col)
@@ -175,11 +177,11 @@ def convert_numeric_columns(
                 df[col] = numeric_series.replace([np.inf, -np.inf], fill_value).fillna(fill_value)
                 
                 if verbose and df[col].isna().any():
-                    print(f"Warning: Column {col} contains NaN values after conversion")
+                    logger.info(f"Warning: Column {col} contains NaN values after conversion")
                     
         except Exception as e:
             if verbose:
-                print(f"Error converting column {col}: {str(e)}")
+                logger.info(f"Error converting column {col}: {str(e)}")
             failed_columns.append(col)
             if drop_errors:
                 columns_to_drop.append(col)
@@ -188,13 +190,13 @@ def convert_numeric_columns(
     if drop_errors and columns_to_drop:
         df = df.drop(columns=columns_to_drop, errors='ignore')
         if verbose:
-            print(f"Dropped columns: {columns_to_drop}")
+            logger.info(f"Dropped columns: {columns_to_drop}")
     
     if verbose and failed_columns:
-        print(f"\nConversion summary:")
-        print(f"Failed columns: {failed_columns}")
-        print(f"Successfully converted: {len(columns) - len(failed_columns)} columns")
-        print(f"Failed conversions: {len(failed_columns)} columns")
+        logger.info(f"\nConversion summary:")
+        logger.info(f"Failed columns: {failed_columns}")
+        logger.info(f"Successfully converted: {len(columns) - len(failed_columns)} columns")
+        logger.info(f"Failed conversions: {len(failed_columns)} columns")
     
     return df
 
@@ -217,7 +219,7 @@ def create_parquet_files(
         Exception: For other errors during Parquet file creation.
     """
     if data.empty:
-        logger.error(
+        logger.info(
             "Cannot create Parquet files from an empty DataFrame.",
             error_code=DataProcessingError.EMPTY_DATASET
         )
@@ -245,7 +247,7 @@ def create_parquet_files(
             )
             logger.info("Successfully created Parquet files without partitioning.")
     except Exception as e:
-        logger.error(
+        logger.info(
             f"Error creating Parquet files: {str(e)}",
             error_code=DataProcessingError.FILE_CORRUPTED
         )
@@ -280,19 +282,19 @@ def setup_mlflow_tracking(experiment_name: str) -> str:
         return mlflow_manager.mlruns_dir
         
     except ConnectionError as e:
-        logger.error(
+        logger.info(
             f"MLflow connection error: {str(e)}",
             error_code=DataProcessingError.MLFLOW_ERROR
         )
         raise
     except ValueError as e:
-        logger.error(
+        logger.info(
             f"Invalid experiment configuration: {str(e)}",
             error_code=DataProcessingError.MLFLOW_ERROR
         )
         raise
     except Exception as e:
-        logger.error(
+        logger.info(
             f"MLflow setup error: {str(e)}",
             error_code=DataProcessingError.MLFLOW_ERROR
         )
@@ -330,19 +332,19 @@ def sync_mlflow() -> None:
         logger.info("MLflow synchronization completed successfully")
         
     except ConnectionError as e:
-        logger.error(
+        logger.info(
             f"Shared storage connection error: {str(e)}",
             error_code=DataProcessingError.MLFLOW_ERROR
         )
         raise
     except PermissionError as e:
-        logger.error(
+        logger.info(
             f"Permission denied accessing shared storage: {str(e)}",
             error_code=DataProcessingError.FILE_PERMISSION_ERROR
         )
         raise
     except Exception as e:
-        logger.error(
+        logger.info(
             f"MLflow sync error: {str(e)}",
             error_code=DataProcessingError.MLFLOW_ERROR
         )
@@ -362,13 +364,13 @@ def update_api_training_data_for_draws():
 
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
-        print(updated_data.shape)
+        logger.info(updated_data.shape)
 
         # Save updated data back to Excel
         updated_data.to_excel(data_path, index=False)
 
     except Exception as e:
-        print(f"Error updating training data for draws: {str(e)}")
+        logger.info(f"Error updating training data for draws: {str(e)}")
 
 def update_api_data_for_draws():
     """
@@ -385,7 +387,7 @@ def update_api_data_for_draws():
 
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
-        print(updated_data.shape)
+        logger.info(updated_data.shape)
         
         # Filter data for dates before 2024-11-01
         api_training_data = updated_data[updated_data['Date'] < '2024-11-01']
@@ -402,29 +404,29 @@ def update_api_data_for_draws():
             (updated_data['match_outcome'].isna())
         ]
         
-        print(f"api_prediction_data.shape: {api_prediction_data.shape}")
-        print(f"api_prediction_eval.shape: {api_prediction_eval.shape}")
-        print(f"api_training_data.shape: {api_training_data.shape}")
+        logger.info(f"api_prediction_data.shape: {api_prediction_data.shape}")
+        logger.info(f"api_prediction_eval.shape: {api_prediction_eval.shape}")
+        logger.info(f"api_training_data.shape: {api_training_data.shape}")
         # Concatenate the filtered dataframes
         updated_data = pd.concat([api_prediction_eval, api_prediction_data], ignore_index=True)
         
         # Export df_before_2024_11_01 to data/api_training_final.xlsx
-        api_training_data.to_excel("data/api_training_final.xlsx", index=False, engine='xlsxwriter')
-        print(f"api_training_final.xlsx updated")
+        api_training_data.to_excel("data/api_training_final.xlsx", index=False)
+        logger.info(f"api_training_final.xlsx updated")
         
         # Export df_after_2024_11_01_not_blank to data/prediction/api_predictions_eval.xlsx
-        api_prediction_eval.to_excel("data/prediction/api_prediction_eval.xlsx", index=False, engine='xlsxwriter')
-        print(f"api_prediction_eval.xlsx updated")
+        api_prediction_eval.to_excel("data/prediction/api_prediction_eval.xlsx", index=False)
+        logger.info(f"api_prediction_eval.xlsx updated")
         
         # Export df_after_2024_11_01_blank to data/prediction/api_predictions_data.xlsx
-        api_prediction_data.to_excel("data/prediction/api_predictions_data.xlsx", index=False, engine='xlsxwriter')
-        print(f"api_predictions_data.xlsx updated")
+        api_prediction_data.to_excel("data/prediction/api_predictions_data.xlsx", index=False)
+        logger.info(f"api_predictions_data.xlsx updated")
 
         # Save updated data back to Excel
         updated_data.to_excel(data_path_new, index=False)
 
     except Exception as e:
-        print(f"Error updating training data for draws: {str(e)}")
+        logger.info(f"Error updating training data for draws: {str(e)}")
 
 def update_api_prediction_data():
     """
@@ -444,7 +446,7 @@ def update_api_prediction_data():
 
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
-        print(f"Updated prediction data shape: {updated_data.shape}")
+        logger.info(f"Updated prediction data shape: {updated_data.shape}")
 
         # Merge with api_prediction_eval but only add columns which are not
         # exists in prediction_data
@@ -456,7 +458,7 @@ def update_api_prediction_data():
         merged_data.to_excel(data_path_new, index=False)
 
     except Exception as e:
-        print(f"Error updating prediction data: {str(e)}")
+        logger.info(f"Error updating prediction data: {str(e)}")
 
 def merge_and_append(updated_data, data_eval):
     """
@@ -489,8 +491,8 @@ def merge_and_append(updated_data, data_eval):
     for col in new_columns:
         merged_data[col] = updated_data[col]
 
-    # Print updated shape
-    print(f"Updated prediction data shape after merge: {merged_data.shape}")
+    # logger.info updated shape
+    logger.info(f"Updated prediction data shape after merge: {merged_data.shape}")
     return merged_data
 
 #  FOR API
@@ -506,11 +508,11 @@ def get_selected_api_columns_draws() -> List[str]:
 
     Example:
         >>> columns = get_selected_api_columns_draws()
-        >>> print(f"Number of features: {len(columns)}")
+        >>> logger.info(f"Number of features: {len(columns)}")
         Number of features: 57
-        >>> print("Top 3 features:")
+        >>> logger.info("Top 3 features:")
         >>> for col in columns[:3]:
-        ...     print(f"- {col}")
+        ...     logger.info(f"- {col}")
         - venue_draw_rate
         - form_weighted_xg_diff
         - home_draw_rate
@@ -618,7 +620,7 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
             # Load data with retry mechanism
             data = pd.read_excel(data_path)
             if data.empty:
-                logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
+                logger.info("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
                 raise ValueError("Dataset is empty")
            
             logger.info(f"Successfully loaded data with shape: {data.shape}")
@@ -630,7 +632,7 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
             
             missing_columns = [col for col in selected_columns if col not in data.columns]
             if missing_columns:
-                logger.error(
+                logger.info(
                     f"Missing required columns: {missing_columns}",
                     error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
                 )
@@ -662,7 +664,7 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
                     try:
                         data[col] = data[col].astype('int64')
                     except Exception as e:
-                        logger.warning(
+                        logger.info(
                             f"Failed to convert {col} to integer: {str(e)}",
                             error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
                         )
@@ -672,13 +674,13 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
             for col in selected_columns:
                 if data[col].dtype == 'object':
                     object_columns.append(col)
-                    logger.warning(
+                    logger.info(
                         f"Column {col} remains as object type after conversion",
                         error_code=DataProcessingError.INVALID_DATA_TYPE
                     )
             
             if object_columns:
-                logger.error(
+                logger.info(
                     f"Found {len(object_columns)} non-numeric columns: {object_columns}",
                     error_code=DataProcessingError.INVALID_DATA_TYPE
                 )
@@ -709,19 +711,19 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
         return X_train, y_train, X_test, y_test
 
     except FileNotFoundError as e:
-        logger.error(
+        logger.info(
             f"Data file not found: {data_path}",
             error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except pd.errors.EmptyDataError as e:
-        logger.error(
+        logger.info(
             f"Empty data file: {data_path}",
             error_code=DataProcessingError.EMPTY_DATASET
         )
         raise
     except Exception as e:
-        logger.error(
+        logger.info(
             f"Error processing training data: {str(e)}",
             error_code=DataProcessingError.FILE_CORRUPTED
         )
@@ -798,16 +800,16 @@ def import_feature_select_draws_api():
 
 
     # Add verification of dtypes
-    print("\nVerifying final dtypes:")
+    logger.info("\nVerifying final dtypes:")
     non_numeric_cols = X_train.select_dtypes(include=['object']).columns
     if len(non_numeric_cols) > 0:
-        print(
+        logger.info(
             f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
 
-    print("\nInteger columns dtypes:")
+    logger.info("\nInteger columns dtypes:")
     for col in int_columns:
         if col in X_train.columns:
-            print(f"{col}: {X_train[col].dtype}")
+            logger.info(f"{col}: {X_train[col].dtype}")
 
     return X_train, y_train, X_test, y_test
 
@@ -840,7 +842,7 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
         # Load data from the Excel file
         data = pd.read_excel(file_path)
         if data.empty:
-            logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
+            logger.info("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
             
         logger.info(f"Successfully loaded data with shape: {data.shape}")
@@ -858,7 +860,7 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
             selected_columns = get_selected_api_columns_draws()
             missing_columns = [col for col in selected_columns if col not in data.columns]
             if missing_columns:
-                logger.error(
+                logger.info(
                     f"Missing required columns: {missing_columns}",
                     error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
                 )
@@ -874,7 +876,7 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
             data['is_draw'] = (data['match_outcome'] == 2).astype(int)
             logger.info(f"Created target variable. Draw rate: {data['is_draw'].mean():.2%}")
         except Exception as e:
-            logger.error(
+            logger.info(
                 f"Failed to process match outcome: {str(e)}",
                 error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
             )
@@ -887,7 +889,7 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
                 data['date_encoded'] = (pd.to_datetime(data['Date']) - reference_date).dt.days
                 logger.info("Added date_encoded column")
             except Exception as e:
-                logger.error(
+                logger.info(
                     f"Failed to create date_encoded: {str(e)}",
                     error_code=DataProcessingError.FEATURE_CREATION_FAILED
                 )
@@ -903,7 +905,7 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
                 try:
                     data[col] = data[col].astype('int64')
                 except Exception as e:
-                    logger.warning(
+                    logger.info(
                         f"Failed to convert {col} to integer: {str(e)}",
                         error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
                     )
@@ -924,13 +926,13 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
         for col in selected_columns:
             if data[col].dtype == 'object':
                 object_columns.append(col)
-                logger.warning(
+                logger.info(
                     f"Column {col} remains as object type after conversion",
                     error_code=DataProcessingError.INVALID_DATA_TYPE
                 )
         
         if object_columns:
-            logger.error(
+            logger.info(
                 f"Found {len(object_columns)} non-numeric columns: {object_columns}",
                 error_code=DataProcessingError.INVALID_DATA_TYPE
             )
@@ -947,19 +949,19 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
         return X, y
 
     except FileNotFoundError as e:
-        logger.error(
+        logger.info(
             f"Data file not found: {file_path}",
             error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except pd.errors.EmptyDataError as e:
-        logger.error(
+        logger.info(
             f"Empty data file: {file_path}",
             error_code=DataProcessingError.EMPTY_DATASET
         )
         raise
     except Exception as e:
-        logger.error(
+        logger.info(
             f"Error processing evaluation data: {str(e)}",
             error_code=DataProcessingError.FILE_CORRUPTED
         )
@@ -990,7 +992,7 @@ def create_prediction_set_api() -> pd.DataFrame:
         # Load data from the Excel file
         data = pd.read_excel(file_path)
         if data.empty:
-            logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
+            logger.info("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
             
         logger.info(f"Successfully loaded data with shape: {data.shape}")
@@ -999,7 +1001,7 @@ def create_prediction_set_api() -> pd.DataFrame:
         selected_columns = ['fixture_id', 'Home', 'Away', 'Date'] + get_selected_api_columns_draws()
         missing_columns = [col for col in selected_columns if col not in data.columns]
         if missing_columns:
-            logger.error(
+            logger.info(
                 f"Missing required columns: {missing_columns}",
                 error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
             )
@@ -1012,7 +1014,7 @@ def create_prediction_set_api() -> pd.DataFrame:
                 data['date_encoded'] = (pd.to_datetime(data['Datum']) - reference_date).dt.days
                 logger.info("Added date_encoded column")
             except Exception as e:
-                logger.error(
+                logger.info(
                     f"Failed to create date_encoded: {str(e)}",
                     error_code=DataProcessingError.FEATURE_CREATION_FAILED
                 )
@@ -1054,19 +1056,19 @@ def create_prediction_set_api() -> pd.DataFrame:
         return X
 
     except FileNotFoundError as e:
-        logger.error(
+        logger.info(
             f"Data file not found: {file_path}",
             error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except pd.errors.EmptyDataError as e:
-        logger.error(
+        logger.info(
             f"Empty data file: {file_path}",
             error_code=DataProcessingError.EMPTY_DATASET
         )
         raise
     except Exception as e:
-        logger.error(
+        logger.info(
             f"Error processing prediction data: {str(e)}",
             error_code=DataProcessingError.FILE_CORRUPTED
         )
@@ -1083,7 +1085,7 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
 
     Args:
         model_type (Optional[str]): Specific model type to return features for.
-            Options: 'xgb', 'cat', 'lgbm'. If None, returns all features.
+            Options: 'xgb', 'cat', 'lgbm', 'all'. If None, returns all features.
 
     Returns:
         Union[dict, list]: If model_type is None, returns dictionary containing selected features 
@@ -1091,7 +1093,8 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
             - 'xgb': List of features for XGBoost
             - 'cat': List of features for CatBoost
             - 'lgbm': List of features for LightGBM
-        If model_type is specified, returns list of features for that model type.
+        If model_type is 'all', returns list of features that are common to all models
+        If model_type is specified ('xgb', 'cat', 'lgbm'), returns list of features for that model type.
 
     Raises:
         FileNotFoundError: If the JSON file cannot be found
@@ -1113,29 +1116,35 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
             
         # Return specific model type if requested
         if model_type is not None:
-            if model_type not in ['xgb', 'cat', 'lgbm']:
-                raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm'")
+            if model_type == 'all':
+                # Get intersection of features across all models
+                common_features = list(
+                    set(features['xgb']).intersection(
+                    features['cat'], features['lgbm']))
+                logger.info("Returning features common to all models")
+                return common_features
+            elif model_type not in ['xgb', 'cat', 'lgbm']:
+                raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'all'")
             logger.info(f"Returning selected features for model type: {model_type}")
             return features[model_type]
             
         logger.info(f"Successfully loaded all selected features from JSON file")
-        # logger.info(f"Selected features: {features}")
         return features
         
     except FileNotFoundError as e:
-        logger.error(
+        logger.info(
             f"Selected features JSON file not found: {str(e)}",
             error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except json.JSONDecodeError as e:
-        logger.error(
+        logger.info(
             f"Invalid JSON format in features file: {str(e)}",
             error_code=DataProcessingError.FILE_CORRUPTED
         )
         raise
     except Exception as e:
-        logger.error(
+        logger.info(
             f"Error loading selected features: {str(e)}",
             error_code=DataProcessingError.FILE_CORRUPTED
         )
@@ -1179,7 +1188,7 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
         missing_features = [feature for feature in all_features if feature not in data.columns]
         if missing_features:
 
-            logger.error(
+            logger.info(
                 f"Missing required features: {missing_features}",
                 error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
             )
@@ -1213,19 +1222,19 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
 
     except FileNotFoundError as e:
 
-        logger.error(
+        logger.info(
             f"Data file not found: {str(e)}",
             error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except ValueError as e:
-        logger.error(
+        logger.info(
             f"Data validation error: {str(e)}",
             error_code=DataProcessingError.INVALID_DATA_TYPE
         )
         raise
     except Exception as e:
-        logger.error(
+        logger.info(
             f"Error creating ensemble evaluation set: {str(e)}",
             error_code=DataProcessingError.FILE_CORRUPTED
         )
@@ -1242,12 +1251,12 @@ def import_training_data_ensemble():
             data = pd.read_parquet(parquet_path)
             logger.info(f"Loaded training data from parquet: {parquet_path}")
             if 'is_draw' not in data.columns:
-                logger.warning(
+                logger.info(
                     "is_draw column not found in parquet file, creating target variable"
                 )
                 data['is_draw'] = (data['match_outcome'] == 2).astype(int)
         except Exception as e:
-            logger.warning(
+            logger.info(
                 f"Failed to load parquet file, falling back to Excel: {str(e)}"
             )
             data = pd.read_excel(data_path)
@@ -1260,6 +1269,7 @@ def import_training_data_ensemble():
 
         # Select features and target
         columns_to_drop = [
+            'match_outcome',
             'home_goals',
             'away_goals',
             'total_goals',
@@ -1357,7 +1367,7 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
         # Load Excel file
         df = pd.read_excel(file_path)
         if df.empty:
-            logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
+            logger.info("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
             
         logger.info(f"Successfully loaded data with shape: {df.shape}")
@@ -1371,7 +1381,7 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
             df['fixture_id'] = df['fixture_id'].astype(int)
             fixture_ids = [int(fixture_id) for fixture_id in fixture_ids]
         except ValueError as e:
-            logger.error(
+            logger.info(
                 f"Invalid fixture ID format: {str(e)}",
                 error_code=DataProcessingError.INVALID_DATA_TYPE
             )
@@ -1380,7 +1390,7 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
         # Filter matches by fixture_ids
         filtered_df = df[df['fixture_id'].isin(fixture_ids)]
         if filtered_df.empty:
-            logger.warning(
+            logger.info(
                 f"No matches found for provided fixture IDs",
                 error_code=DataProcessingError.EMPTY_DATASET
             )
@@ -1404,26 +1414,26 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
             return results_df
             
         except KeyError as e:
-            logger.error(
+            logger.info(
                 f"Missing required columns: {str(e)}",
                 error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
             )
             raise ValueError(f"Missing required columns: {str(e)}")
             
     except FileNotFoundError:
-        logger.error(
+        logger.info(
             f"Data file not found: {file_path}",
             error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except pd.errors.EmptyDataError:
-        logger.error(
+        logger.info(
             f"Empty data file: {file_path}",
             error_code=DataProcessingError.EMPTY_DATASET
         )
         raise
     except Exception as e:
-        logger.error(
+        logger.info(
             f"Error processing match results: {str(e)}",
             error_code=DataProcessingError.FILE_CORRUPTED
         )
@@ -1449,7 +1459,7 @@ def get_selected_columns_from_mlflow_run(run_id: str) -> List[str]:
 
     Example:
         >>> columns = get_selected_columns_from_mlflow_run("1234567890abcdef")
-        >>> print(f"Retrieved {len(columns)} features from MLflow run")
+        >>> logger.info(f"Retrieved {len(columns)} features from MLflow run")
     """
     try:
         # Initialize MLflow client
@@ -1457,7 +1467,7 @@ def get_selected_columns_from_mlflow_run(run_id: str) -> List[str]:
         # Get artifact URI using MLFlowManager
         artifact_uri = manager.get_run_artifact_uri(run_id)
         
-        print(f"Artifact URI: {artifact_uri}")
+        logger.info(f"Artifact URI: {artifact_uri}")
         # Construct the path to MLmodel file, checking for nested model directories
         artifact_path = Path(artifact_uri)
         
@@ -1514,16 +1524,16 @@ def get_selected_columns_from_mlflow_run(run_id: str) -> List[str]:
 if __name__ == "__main__":
 
     # update_api_training_data_for_draws()
-    # print("Training data updated successfully")
+    # logger.info("Training data updated successfully")
 
     update_api_data_for_draws()
-    print("Prediction data updated successfully")
+    logger.info("Prediction data updated successfully")
 
     # try:
     #     run_id = "bc2a97417edb42d48967315de091d12d"
     #     selected_features = get_selected_columns_from_mlflow_run(run_id)
-    #     print(f"Selected features for run {run_id}:")
+    #     logger.info(f"Selected features for run {run_id}:")
     #     for feature in selected_features:
-    #         print(f"- {feature}")
+    #         logger.info(f"- {feature}")
     # except Exception as e:
-    #     print(f"Error retrieving features: {str(e)}")
+    #     logger.info(f"Error retrieving features: {str(e)}")

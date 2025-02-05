@@ -81,16 +81,20 @@ class LightGBMModel(BaseEstimator, ClassifierMixin):
             'objective': 'binary',
             'metric': 'auc',
             'boosting_type': 'gbdt',
-            'num_leaves': 31,
-            'learning_rate': 0.01,
-            'feature_fraction': 0.9,
-            'bagging_fraction': 0.8,
-            'bagging_freq': 5,
+            'num_leaves': 21,
+            'learning_rate': 0.010613454122159499,
+            'feature_fraction': 0.9184993834178807,
+            'bagging_fraction': 0.7510496512913906,
+            'bagging_freq': 2,
             'verbose': -1,
             'seed': 42,
-            'max_depth': -1,
+            'max_depth': 8,
             'is_unbalance': True,
-            'early_stopping_rounds': 100
+            'early_stopping_rounds': 390,
+            'reg_lambda': 12.892697330760878,
+            'n_estimators': 1523,
+            'colsample_bytree': 0.8954024976110304,
+            'min_child_samples': 15
         }
         
         self.model = None
@@ -218,28 +222,27 @@ class LightGBMModel(BaseEstimator, ClassifierMixin):
             X_train, y_train, X_test, y_test, X_val, y_val = self._validate_data(
                 features_train, target_train, features_test, target_test, features_val, target_val
             )
+            class_weights = {0: 1, 1: len(np.where(y_train == 0)[0])/len(np.where(y_train == 1)[0])}
+            
 
-            # Apply ADASYN oversampling
-            adasyn = ADASYN(random_state=42, n_neighbors=5, sampling_strategy='auto')
-            X_train_resampled, y_train_resampled = adasyn.fit_resample(X_train, y_train)
-            self.logger.info(f"Training data shape after ADASYN: {X_train_resampled.shape}, {y_train_resampled.shape}")
+            self.model = lgb.LGBMClassifier(**self.global_params,
+                class_weight=class_weights )
+            if X_test is not None and y_test is not None:   
 
-            # Initialize and train the LightGBM model with early stopping
-            self.model = lgb.LGBMClassifier(**self.global_params)
-            if X_test is not None and y_test is not None:
                 self.model.fit(
-                    X_train_resampled, y_train_resampled,
+                    X_train, y_train,
                     eval_set=[(X_test, y_test)]
                 )
             else:
-                self.model.fit(X_train_resampled, y_train_resampled)
+                self.model.fit(X_train, y_train)
+            
             
             # Optimize prediction threshold based on validation F1-score if validation data is provided
             if X_val is not None and y_val is not None:
                 val_pred_proba = self.model.predict_proba(X_val)[:, 1]
                 best_threshold = 0.5
                 best_f1 = 0
-                for threshold in np.arange(0.4, 0.61, 0.01):
+                for threshold in np.arange(0.5, 0.61, 0.01):
                     preds = (val_pred_proba >= threshold).astype(int)
                     current_f1 = f1_score(y_val, preds, zero_division=0)
                     if current_f1 > best_f1:
@@ -336,8 +339,7 @@ class LightGBMModel(BaseEstimator, ClassifierMixin):
 
 if __name__ == "__main__":
     # Set up MLflow tracking and start run
-    mlruns_dir = setup_mlflow_tracking('catboost_model')
-    
+    mlruns_dir = setup_mlflow_tracking('lightgbm_model')
 
     # Load data using utility functions
     selected_features = import_selected_features_ensemble('lgbm')
@@ -346,7 +348,10 @@ if __name__ == "__main__":
     features_train = features_train[selected_features]
     features_test = features_test[selected_features]
     features_val = features_val[selected_features]
-    
+    print(features_train.shape)
+    print(features_test.shape)
+    print(features_val.shape)
+
 
     with mlflow.start_run(run_name="lightgbm_training") as run:
         # Create and train the LightGBM model

@@ -22,7 +22,7 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, precision_score, recall_score
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
@@ -38,6 +38,8 @@ from pathlib import Path
 import os
 import sys
 from imblearn.over_sampling import ADASYN
+from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import make_scorer
 
 
 # Add project root to Python path
@@ -56,14 +58,14 @@ except Exception as e:
     
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
-from utils.create_evaluation_set import import_training_data_ensemble, create_ensemble_evaluation_set, setup_mlflow_tracking, import_selected_features_ensemble
+# Local imports
 from utils.logger import ExperimentLogger
+experiment_name = "stacked_ensemble_model"
+logger = ExperimentLogger(experiment_name=experiment_name, log_dir='./logs/stacked_ensemble_model')
 
-logger = ExperimentLogger(
-    experiment_name="soccer_prediction",
-    log_dir="logs/soccer_prediction"
-)
-mlruns_dir = setup_mlflow_tracking('stacked_ensemble_model')
+
+from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 def load_pretrained_model(run_id: str, model_type: str = "xgboost"):
     """Load the pretrained model from MLflow using run ID and model type.
@@ -92,9 +94,9 @@ def build_base_models(calibrate: bool = False, calibration_method: str = "isoton
     """
     Build ensemble base models using the pretrained XGBoost and new CatBoost and LightGBM models.
     """
-    pretrained_xgb_run_id = "2b74a32592ae4f259ab08671a9b5d8f9"
-    pretrained_cat_run_id = "c9c2698cb03343f08436a84f9d98eb01"
-    pretrained_lgbm_run_id = "511a71e11137404fb7d8b5b304874c5b"
+    pretrained_xgb_run_id = "7a9b90e58dc74ca2a2b596fc0cdd1e04"
+    pretrained_cat_run_id = "91ffd6888c39443eb76eba02a06f55bf"
+    pretrained_lgbm_run_id = "506e82faa72a4c63912becda17b6c5f2"
     # Load pretrained XGBoost model
     xgb_model = load_pretrained_model(pretrained_xgb_run_id, model_type="xgboost")
     
@@ -117,7 +119,7 @@ class EnsembleModel:
     """
     Modified EnsembleModel that respects individual model feature requirements
     """
-    def __init__(self, voting_method="soft", weights=None, calibrate=False, calibration_method="isotonic"):
+    def __init__(self, logger, voting_method="soft", weights=None, calibrate=False, calibration_method="isotonic"):
         """
         Initialize the EnsembleModel.
         """
@@ -125,21 +127,17 @@ class EnsembleModel:
         self.calibration_method = calibration_method   
         self.voting_method = voting_method
 
-
         # Build base models
         xgb_model, cat_model, lgbm_model = build_base_models(calibrate=self.calibrate, calibration_method=self.calibration_method)
         self.base_models = [
-            ("xgb", xgb_model),
-            ("cat", cat_model),
-            ("lgbm", lgbm_model)
+            ("xgb", XGBClassifier(scale_pos_weight=3.5)),  # Higher class weight
+            ("cat", CatBoostClassifier(auto_class_weights='Balanced')),
+            ("lgbm", LGBMClassifier(class_weight={0:1, 1:3}))
         ]
         
         # Setup custom weights if provided; default to equal weighting
-        self.weights = weights if weights is not None else [1.0] * len(self.base_models)
-        self.logger = ExperimentLogger(
-            experiment_name="soccer_prediction",
-            log_dir="logs/soccer_prediction"
-        )
+        self.weights = weights if weights is not None else [1.5, 1.8, 1.7]
+        self.logger = logger
 
         # Store feature sets for each model
         self.feature_sets = {
@@ -147,6 +145,14 @@ class EnsembleModel:
             'cat': cat_features,
             'lgbm': lgbm_features
         }
+
+        # Add to EnsembleModel __init__:
+        def recall_precision_balance(y_true, y_pred):
+            recall = recall_score(y_true, y_pred)
+            precision = precision_score(y_true, y_pred)
+            return 0.7 * recall + 0.3 * precision  # Custom weighting
+
+        custom_scorer = make_scorer(recall_precision_balance)
 
     def train(self, X_train, y_train, X_val, y_val):
         """Modified training that respects individual model features"""
@@ -164,23 +170,48 @@ class EnsembleModel:
                 model.fit(X_train_subset, y_train, eval_set=[(X_test_subset, y_test)])
                 
             # Log model-specific features
-            self.logger.log_params({
+            mlflow.log_params({
                 f"{name}_features": str(model_features),
                 f"{name}_feature_count": len(model_features)
             })
 
+        # Add to train method:
+        proba = self.predict_proba(X_val)
+        precisions, recalls, thresholds = precision_recall_curve(y_val, proba)
+        optimal_idx = np.argmax(precisions >= 0.5)  # First threshold reaching 50% precision
+        optimal_threshold = thresholds[optimal_idx]
+        mlflow.log_param("optimal_threshold", optimal_threshold)
+
+        # Add to train method:
+        # Convert probabilities to binary predictions using optimal threshold
+        binary_preds = (proba >= optimal_threshold).astype(int)
+        class1_precision = precision_score(y_val, binary_preds, labels=[1], zero_division=0)
+        mlflow.log_metric("class1_precision", class1_precision)
+        if class1_precision < 0.4:
+            logger.warning("Class 1 precision below safety threshold")
+
+        # Add to train method:
+        class1_recall = recall_score(y_val, binary_preds, labels=[1], zero_division=0)
+        mlflow.log_metric("class1_recall", class1_recall)
+        if class1_recall < 0.15:
+            logger.warning("Recall below minimum threshold")
+
+        if precision_score(y_val, binary_preds) < 0.4:
+            raise ValueError("Precision safety check failed")
+
     def predict(self, X):
-        """Aggregate predictions using model-specific features"""
-        predictions = []
-        for (name, model), weight in zip(self.base_models, self.weights):
-            model_features = self.feature_sets[name]
-            X_subset = X[model_features]
-            preds = model.predict_proba(X_subset)[:, 1]  # Get positive class probabilities
-            predictions.append(preds * weight)
-            
-        # Average weighted probabilities
-        avg_probs = np.mean(predictions, axis=0)
-        return (avg_probs > 0.5).astype(int)  # Apply threshold
+        proba = self.predict_proba(X)
+        
+        # Primary threshold (precision focus)
+        high_conf = proba > 0.65
+        # Secondary threshold (recall focus)
+        med_conf = (proba > 0.53) & (proba <= 0.65)
+        
+        predictions = np.zeros_like(proba)
+        predictions[high_conf] = 1
+        predictions[med_conf] = self._meta_predict(X[med_conf])  # Additional meta-model check
+        
+        return predictions
     
     def predict_proba(self, X):
         """Aggregate predictions using model-specific features"""
@@ -192,6 +223,10 @@ class EnsembleModel:
             predictions.append(preds * weight)
         return np.mean(predictions, axis=0)
     
+    def _meta_predict(self, X_subset):
+        # Use simple logistic regression check
+        return (X_subset['draw_probability_score'] > 0.6).astype(int)
+
     def _validate_features(self, X):
         """Ensure all required features are present"""
         all_required = set()
@@ -204,25 +239,26 @@ class EnsembleModel:
 
 if __name__ == "__main__":
     # Load data using your existing utility functions
-    selected_features = import_selected_features_ensemble()
-    xgb_features = selected_features['xgb']
-    cat_features = selected_features['cat']
-    lgbm_features = selected_features['lgbm']
-    all_features = list(
-        set(xgb_features + cat_features + lgbm_features)
-    )
+    selected_features = import_selected_features_ensemble('all')
+    xgb_features = selected_features
+    cat_features = selected_features
+    lgbm_features = selected_features
+
+    # all_features = list(
+    #     set(xgb_features + cat_features + lgbm_features)
+    # )
     X_train, y_train, X_test, y_test = import_training_data_ensemble()
     X_val, y_val = create_ensemble_evaluation_set()
-    X_train = X_train[all_features]
-    X_test = X_test[all_features]
-    X_val = X_val[all_features]
-
+    X_train = X_train[selected_features]
+    X_test = X_test[selected_features]
+    X_val = X_val[selected_features]
+    
     # Initialize ensemble model 
     ensemble_model = EnsembleModel(
-        voting_method="soft",
-        weights=[1.0, 1.0, 1.0],  # Consider weighting XGBoost higher if it performs well
-        calibrate=False,
-        calibration_method="isotonic"
+        logger=logger,
+        weights=[1.5, 1.8, 1.7],  # Boost LightGBM (better recall potential)
+        calibrate=True,
+        calibration_method="sigmoid"
     )
 
      # Set MLflow experiment and start run

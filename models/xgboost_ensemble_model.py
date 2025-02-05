@@ -24,7 +24,6 @@ from sklearn.metrics import (
     log_loss, average_precision_score
 )
 from sklearn.model_selection import train_test_split
-from imblearn.over_sampling import ADASYN
 import mlflow
 # Add warning filter imports
 import warnings
@@ -49,20 +48,17 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import (
-    import_selected_features_ensemble,
-    create_ensemble_evaluation_set,
-    import_training_data_ensemble,
-    setup_mlflow_tracking
-)
+experiment_name = "xgboost_ensemble_model"
+logger = ExperimentLogger(experiment_name=experiment_name, log_dir='./logs/xgboost_ensemble_model')
+
+from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 
 # Configure warnings
 warnings.filterwarnings('ignore', category=UserWarning, 
                        module='xgboost.core', 
                        message='.*Saving model in the UBJSON format as default.*')
-
-experiment_name = "xgboost_model_ensemble"
 
 # Configure XGBoost for CPU-only training
 xgb.set_config(verbosity=2)
@@ -84,17 +80,17 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         
         # Updated global parameters based on hypertuning insights
         self.global_params = {
-            'learning_rate': 0.02849618710708009,
-            'early_stopping_rounds': 100,
-            'min_child_weight': 200,
-            'gamma': 0.030078137393526768,
-            'subsample': 0.3047169668866021,
-            'colsample_bytree': 0.9151977354870733,
-            'scale_pos_weight': 2.152295173433954,
-            'reg_alpha': 0.00040793928480969044,
-            'reg_lambda': 3.9935425705356153,
+            'learning_rate': 0.06166387549783449,
+            'early_stopping_rounds': 148,
+            'min_child_weight': 204,
+            'gamma': 0.010030789930195011,
+            'subsample': 0.31919553093855807,
+            'colsample_bytree': 0.9439116695218811,
+            'scale_pos_weight': 2.083349059657468,
+            'reg_alpha': 0.0001899952621510598,
+            'reg_lambda': 1.5185497674234751,
             'max_depth': 3,
-            'n_estimators': 8347,
+            'n_estimators': 985,
             'objective': 'binary:logistic',
             'tree_method': 'hist',
             'device': 'cpu',
@@ -102,11 +98,6 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             'verbosity': 0,
             'nthread': -1,
             'random_state': 42
-        }
-        self.adasyn_params = {
-            'random_state': 42,
-            'n_neighbors': 10,
-            'sampling_strategy': 0.35 / (1 - 0.35)
         }
         # Initialize other attributes
         self.model = None
@@ -256,18 +247,13 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         target_test: Optional[Union[pd.Series, np.ndarray]] = None,
         features_val: Optional[Union[pd.DataFrame, np.ndarray]] = None,
         target_val: Optional[Union[pd.Series, np.ndarray]] = None) -> None:
-        """Train the XGBoost model with ADASYN oversampling for the training set."""
+        """Train the XGBoost model."""
         try:
-            
             X_train, y_train, X_test, y_test, X_val, y_val = self._validate_data(
                 features_train, target_train, features_test, target_test, features_val, target_val
             )
             X_train_original = X_train.copy()
             y_train_original = y_train.copy()
-            # Apply ADASYN oversampling to correct class imbalance in the training set.
-            adasyn = ADASYN(**self.adasyn_params)
-            X_train_resampled, y_train_resampled = adasyn.fit_resample(X_train_original, y_train_original)
-            self.logger.info(f"Training data shape after ADASYN: {X_train_resampled.shape}, {y_train_resampled.shape}")
             
             # Initialize and train the XGBoost model with early stopping
             self.model = xgb.XGBClassifier(**self.global_params)
@@ -277,7 +263,6 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
                     eval_set=[(X_test, y_test)],
                     verbose=100
                 )
-
             else:
                 self.model.fit(X_train, y_train)
             

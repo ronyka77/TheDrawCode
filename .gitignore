@@ -5,6 +5,8 @@ context/
 catboost_info/
 logs/
 models/base/backup/
+models/saved/
+data/Create_data/pipeline/models/
 data/raw/model_data_training_newPoisson.xlsx
 data/raw/preprocessed_data.parquet
 data/processed/metadata/
@@ -108,17 +110,7 @@ cumsum_home_api.xlsx
 fixtures_with_stats.xlsx
 fixtures_with_stats_old.xlsx
 data/training_data_20250116.xlsx
-data/Create_data/pipeline/models/
-data/Create_data/pipeline/models/away_poisson_model.joblib
-data/Create_data/pipeline/models/home_poisson_model.joblib
-data/Create_data/pipeline/models/poisson_scaler.joblib
-data/Create_data/pipeline/models/away_poisson_model.joblib
-data/Create_data/pipeline/models/home_poisson_model.joblib
-data/Create_data/pipeline/models/poisson_scaler.joblib
 data/Create_data/merge_data_prediction.pbix
-data/Create_data/pipeline/models/away_poisson_model.joblib
-data/Create_data/pipeline/models/home_poisson_model.joblib
-data/Create_data/pipeline/models/poisson_scaler.joblib
 data/Create_data/PowerBI_pbix/Old_files/api_data_merge.pbix
 data/Create_data/PowerBI_pbix/Old_files/api_merge_data_final.pbix
 data/Create_data/PowerBI_pbix/Old_files/api_prediction_data_final.pbix
@@ -132,8 +124,6 @@ model_global/soccer_draw_model_pycaret.pkl.pkl
 soccer_draw_model_pycaret.pkl
 logs.log
 .cursorrules_old
-models/saved/xgboost_api_20250201_1755.pkl
-models/saved/xgboost_api_20250201_1924.pkl
 data/Create_data/PowerBI_pbix/DAX_studio/api_football_prediction_final.dax
 data/Create_data/PowerBI_pbix/DAX_studio/api_football_prediction_final.dax.evalAndLogTrace
 data/Create_data/PowerBI_pbix/DAX_studio/api_football_prediction_final.dax.queryBuilder
@@ -177,3 +167,13 @@ data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visual
 data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/01000_card (3a1db)/query.json
 data/Create_data/PowerBI_pbix/api_prediction/Report/sections/000_1. oldal/visualContainers/01000_card (3a1db)/visualContainer.json
 data/Create_data/PowerBI_pbix/api_prediction/StaticResources/SharedResources/BaseThemes/CY24SU10.json
+data/archive/api_training_final_0127.xlsx
+data/archive/api_training_final_0128.xlsx
+data/archive/api_training_final_0129.xlsx
+data/archive/api_training_final_0130.xlsx
+data/archive/api_training_final_0131.xlsx
+data/archive/api_training_final_to_solve.xlsx
+data/api_data_training_final.xlsx
+data/api_training_final_.xlsx
+data/api_training_final másolata.xlsx
+data/api_training_final.xlsx

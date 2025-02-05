@@ -202,7 +202,7 @@ def main():
     
     # Model URIs to evaluate
     model_uris = [
-        'c2bc775a5fe14f81bc43cd5c209b1e42'
+        'db1d81ad2dad4f0cb9b25dfa3eb8b79a'
     ]
 
     # Get preprocessed prediction data using standardized function

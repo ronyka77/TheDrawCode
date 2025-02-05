@@ -43,30 +43,27 @@ except Exception as e:
     # Fallback to current directory if path resolution fails
     sys.path.append(os.getcwd().parent)
     print(f"Current directory xgboost_model: {os.getcwd().parent}")
-    
+
+# Configure XGBoost for CPU-only training
+xgb.set_config(verbosity=2)
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU 
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-from utils.create_evaluation_set import (
-    get_selected_api_columns_draws,
-    create_evaluation_sets_draws_api,
-    import_training_data_draws_api,
-    setup_mlflow_tracking
-)
+experiment_name = "xgboost_api_model"
+logger = ExperimentLogger(experiment_name=experiment_name, log_dir='./logs/xgboost_api_model')
+
+
+from utils.create_evaluation_set import get_selected_api_columns_draws, import_training_data_draws_api, create_evaluation_sets_draws_api, setup_mlflow_tracking
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 # Configure warnings
 warnings.filterwarnings('ignore', category=UserWarning, 
                        module='xgboost.core', 
                        message='.*Saving model in the UBJSON format as default.*')
 
-experiment_name = "xgboost_api_model"
 
-# Configure XGBoost for CPU-only training
-xgb.set_config(verbosity=2)
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU
-
-mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 class XGBoostModel(BaseEstimator, ClassifierMixin):
     """XGBoost model implementation with global training."""
@@ -81,17 +78,17 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         
         # Updated global parameters based on hypertuning insights
         self.global_params = {
-            'learning_rate': 0.009031785571116727,
-            'early_stopping_rounds': 989,
-            'min_child_weight': 157,
-            'gamma': 1.5804296818768522,
-            'subsample': 0.3740057975431217,
-            'colsample_bytree': 0.32742948450695347,
-            'scale_pos_weight': 2.648623871275727,
-            'reg_alpha': 0.0019229867783639222,
-            'reg_lambda': 0.19864550086477664,
-            'max_depth': 6,
-            'n_estimators': 7706,
+            'learning_rate': 0.042471904732936806,
+            'early_stopping_rounds': 66,
+            'min_child_weight': 183,
+            'gamma': 0.07766298705800327,
+            'subsample': 0.31611819801336105,
+            'colsample_bytree': 0.9065572642476265,
+            'scale_pos_weight': 2.098148134866216,
+            'reg_alpha': 0.0006792700762734514,
+            'reg_lambda': 4.122852950651938,
+            'max_depth': 3,
+            'n_estimators': 1339,
             'objective': 'binary:logistic',
             'tree_method': 'hist',
             'device': 'cpu',
