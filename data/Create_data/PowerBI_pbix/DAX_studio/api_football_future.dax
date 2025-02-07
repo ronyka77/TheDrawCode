@@ -96,7 +96,7 @@ FILTER(SUMMARIZECOLUMNS(
     future_matches[venue_encoded_base],
     future_matches[venue_grass],
     future_matches[venue_name]
-), future_matches[away_average_points]>=0)
+), future_matches[away_average_points]<>BLANK())
 ORDER BY 
     future_matches[fixture_id] ASC
 /* END QUERY BUILDER */

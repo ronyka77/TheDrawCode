@@ -177,12 +177,6 @@ class GlobalHypertuner:
                             'threshold': threshold
                         })
                         
-                        # # Log improvement
-                        # self.logger.info(
-                        #     # f"New best threshold {threshold:.3f}: "
-                        #     f"Precision={precision:.4f}, Recall={recall:.4f}"
-                        # )
-                        
                         # Log to MLflow
                         mlflow.log_metrics({
                             'best_threshold': threshold,
@@ -234,7 +228,6 @@ class GlobalHypertuner:
                 'verbosity': 0,
                 'nthread': -1,
                 'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1),
-
                 'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 50, 300),
                 'min_child_weight': trial.suggest_int('min_child_weight', 150, 250),  # Centered around optimal 200
                 'gamma': trial.suggest_float('gamma', 0.01, 0.1, log=True),  # Narrowed from optimal 0.03
@@ -261,8 +254,6 @@ class GlobalHypertuner:
                 raise optuna.exceptions.TrialPruned()
 
             # Log trial attributes for later inspection
-            # trial.set_user_attr('adasyn_n_neighbors', adasyn_n_neighbors)
-            # trial.set_user_attr('adasyn_sampling_strategy', adasyn_sampling_strategy)
             trial.set_user_attr('threshold', metrics['threshold'])
             trial.set_user_attr('precision', metrics['precision'])
             trial.set_user_attr('recall', metrics['recall'])

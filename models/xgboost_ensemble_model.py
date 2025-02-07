@@ -80,32 +80,29 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         
         # Updated global parameters based on hypertuning insights
         self.global_params = {
-            'learning_rate': 0.06166387549783449,
-            'early_stopping_rounds': 148,
-            'min_child_weight': 204,
-            'gamma': 0.010030789930195011,
-            'subsample': 0.31919553093855807,
-            'colsample_bytree': 0.9439116695218811,
-            'scale_pos_weight': 2.083349059657468,
-            'reg_alpha': 0.0001899952621510598,
-            'reg_lambda': 1.5185497674234751,
-            'max_depth': 3,
-            'n_estimators': 985,
+            'learning_rate': 0.02190378119690766,
+            'early_stopping_rounds': 500,
+            'min_child_weight': 165,
+            'gamma': 0.06268817081995443,
+            'subsample': 0.39841425636563177,
+            'colsample_bytree': 0.9311323559904169,
+            'scale_pos_weight': 2.003902849861491,
+            'reg_alpha': 0.0004175183986636507,
+            'reg_lambda': 1.9321415795995613,
+            'max_depth': 5,
+            'n_estimators': 556,
             'objective': 'binary:logistic',
             'tree_method': 'hist',
             'device': 'cpu',
             'eval_metric': ['error', 'auc', 'aucpr'],
             'verbosity': 0,
-            'nthread': -1,
-            'random_state': 42
+            'nthread': -1
         }
         # Initialize other attributes
         self.model = None
         self.feature_importance = {}
-        self.selected_features = import_selected_features_ensemble('xgb')
+        self.selected_features = import_selected_features_ensemble('all')
         self.threshold = 0.50  # Default threshold for predictions
-        self.focal_alpha = 2.0  # Added for focal loss
-        self.focal_gamma = 2.0  # Added for focal loss
 
     def _validate_data(
         self,
@@ -258,11 +255,13 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             # Initialize and train the XGBoost model with early stopping
             self.model = xgb.XGBClassifier(**self.global_params)
             if X_test is not None and y_test is not None:
+                self.logger.info("Training XGBoost model with early stopping")
                 self.model.fit(
                     X_train, y_train,
                     eval_set=[(X_test, y_test)],
                     verbose=100
                 )
+
             else:
                 self.model.fit(X_train, y_train)
             
@@ -270,16 +269,51 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             if X_val is not None and y_val is not None:
                 val_pred_proba = self.model.predict_proba(X_val)[:, 1]
                 best_threshold = 0.5
-                best_f1 = 0
+                best_score = 0
+                best_metrics = {
+                    'precision': 0,
+                    'recall': 0,
+                    'f1': 0,
+                    'threshold': 0.5
+                }
+                
+                # Focus on higher thresholds for better precision, starting from 0.5
                 for threshold in np.arange(0.5, 0.65, 0.01):
                     preds = (val_pred_proba >= threshold).astype(int)
-                    current_f1 = f1_score(y_val, preds, zero_division=0)
-                    if current_f1 > best_f1:
-                        best_f1 = current_f1
-                        best_threshold = threshold
+                    
+                    # Calculate recall and only consider thresholds meeting minimum requirement
+                    recall = recall_score(y_val, preds, zero_division=0)
+                    if recall >= 0.15:
+                        true_positives = ((preds == 1) & (y_val == 1)).sum()
+                        false_positives = ((preds == 1) & (y_val == 0)).sum()
+                        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+                        f1 = f1_score(y_val, preds, zero_division=0)
+                        
+                        # Modified scoring to prioritize precision while maintaining minimum recall
+                        score = precision * min(1.0, (recall - 0.15) / 0.15)
+                        
+                        if score > best_score:
+                            best_score = score
+                            best_threshold = threshold
+                            best_metrics.update({
+                                'precision': precision,
+                                'recall': recall,
+                                'f1': f1,
+                                'threshold': threshold
+                            })
                 self.threshold = best_threshold
                 self.logger.info(f"Optimal threshold set to {self.threshold}")
-            
+                
+            if best_metrics['recall'] < 0.15:
+                self.logger.warning(
+                    f"Could not find threshold meeting recall requirement. "
+                    f"Best recall: {best_metrics['recall']:.4f}"
+                    f"Best precision: {best_metrics['precision']:.4f}"
+                )
+            self.logger.info(
+                f"New best threshold {best_metrics['threshold']:.3f}: "
+                f"Precision={best_metrics['precision']:.4f}, Recall={best_metrics['recall']:.4f}"
+            )
         except Exception as e:
             self.logger.error(f"Training error: {str(e)}")
             raise
@@ -307,26 +341,29 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         target: Union[pd.Series, np.ndarray]) -> Dict[str, Any]:
         """Analyze model predictions."""
         # Get predictions
-        y_prob = self.predict_proba(features)
-        y_pred = (y_prob[:, 1] >= self.threshold).astype(int)
+        y_prob = self.model.predict_proba(features)
+        # Handle both 1D and 2D probability arrays
+        y_prob_class1 = y_prob[:, 1] if y_prob.ndim == 2 else y_prob
+        y_pred = (y_prob_class1 >= self.threshold).astype(int)
+        
         # Calculate confusion matrix
         true_positives = ((target == 1) & (y_pred == 1)).sum()
         false_positives = ((target == 0) & (y_pred == 1)).sum()
         true_negatives = ((target == 0) & (y_pred == 0)).sum()
         false_negatives = ((target == 1) & (y_pred == 0)).sum()
-        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
         
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
         recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
         f1 = f1_score(target, y_pred, zero_division=0)
-        
+
         # Calculate metrics
         metrics = {
             'accuracy': np.mean(y_pred == target),
             'precision': precision,
             'recall': recall,
             'f1': f1,
-            'log_loss': log_loss(target, y_prob[:, 1]),
-            'average_precision': average_precision_score(target, y_prob[:, 1]),
+            'log_loss': log_loss(target, y_prob_class1),
+            'average_precision': average_precision_score(target, y_prob_class1),
             'draw_rate': float(target.mean()),
             'predicted_rate': float(y_pred.mean()),
             'n_samples': len(target),
@@ -445,7 +482,7 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
         
         # Load and prepare data
         logger.info("Loading training data...")
-        selected_features = import_selected_features_ensemble('xgb')
+        selected_features = import_selected_features_ensemble('all')
         X_train, y_train, X_test, y_test = import_training_data_ensemble()
         logger.info("Creating evaluation set...")
         X_eval, y_eval = create_ensemble_evaluation_set()

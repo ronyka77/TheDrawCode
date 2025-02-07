@@ -1,9 +1,11 @@
 import pymongo
 from typing import List, Dict
 import pandas as pd
+
 try:
     # Set the configuration key
     pd.set_option('future.no_silent_downcasting', True)
+
 except KeyError as e:
     print(f"Configuration key not found: {e}")
 import numpy as np
@@ -718,24 +720,34 @@ class MongoDBFeatures:
         ]
        
         df = df.rename(columns={'date': 'Date'})
-        print(df.columns)
+        # print(f"Future matches columns: {df.columns}")
         # Load training data to merge with future fixtures
         try:
-            training_df = training_data
+            training_df = pd.DataFrame(training_data)
 
-            
             # Get common columns between training data and future fixtures
             common_cols = list(set(df.columns).intersection(set(training_df.columns)))
-            print(common_cols)
-            
+            print(f"Common columns: {common_cols}")
+            merge_df = training_df(columns=common_cols)
+            # print(f"Training data columns: {merge_df.columns}")
+              # Fix type mismatches
+            df['fixture_id'] = df['fixture_id'].astype(int)
+
+            # df['season_encoded'] = df['season_encoded'].astype(training_df['season_encoded'].dtype)
+            # # Check dtypes for key columns
+            # for col in common_cols:
+            #     if col in training_df.columns and col in df.columns:
+            #         print(f"Training {col} dtype: {training_df[col].dtype}")
+            #         print(f"Future {col} dtype: {df[col].dtype}")
+
             # Merge data on common columns while preserving df's structure
             df = pd.merge(
                 df,
-                training_df[common_cols],
+                merge_df,
                 on='fixture_id',
                 how='left'
             )
-            
+
             # Ensure we only keep the original columns from df
             df = df[columns]
             
@@ -834,9 +846,9 @@ def main():
     future_matches = mongodb_features.get_future_matches(fixtures_dataframe_final)
     print(f"Future matches shape: {future_matches.shape}")
     
-    print("Exporting venues")
-    venues = mongodb_features.export_venues()
-    print(f"Venues shape: {venues.shape}")
+    # print("Exporting venues")
+    # venues = mongodb_features.export_venues()
+    # print(f"Venues shape: {venues.shape}")
 
 if __name__ == "__main__":
     main()

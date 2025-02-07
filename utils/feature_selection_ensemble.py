@@ -33,9 +33,7 @@ except Exception as e:
     sys.path.append(os.getcwd().parent)
     print(f"Current directory feature_selection_ensemble: {os.getcwd().parent}")
 
-
-
-from utils.create_evaluation_set import import_training_data_draws_api, create_evaluation_sets_draws_api
+from utils.create_evaluation_set import import_training_data_ensemble, create_ensemble_evaluation_set
 from utils.logger import ExperimentLogger
 
 
@@ -254,14 +252,47 @@ def select_features_differentiated(
         "union": union_features
     }
 
+def sync_columns(train_df, val_df, logger):
+    """Ensure both DataFrames have exactly the same columns"""
+    # Find common columns
+    common_cols = list(set(train_df.columns) & set(val_df.columns))
+    
+    # Log differences
+    train_only = set(train_df.columns) - set(common_cols)
+    val_only = set(val_df.columns) - set(common_cols)
+    
+    if train_only:
+        logger.warning(f"Dropping training-only columns: {list(train_only)}")
+    if val_only:
+        logger.warning(f"Dropping validation-only columns: {list(val_only)}")
+    
+    # Return synchronized DataFrames
+    return train_df[common_cols], val_df[common_cols]
+
 if __name__ == "__main__":
-    # Load data using utility functions
-    features_train, target_train, features_test, target_test = import_training_data_draws_api()
-    features_val, target_val = create_evaluation_sets_draws_api()
     logger = ExperimentLogger(
         experiment_name="feature_selection_ensemble",
         log_dir="logs/feature_selection_ensemble"
     )
+    # Load data using utility functions
+    features_train, target_train, features_test, target_test = import_training_data_ensemble()
+    features_val, target_val = create_ensemble_evaluation_set()
+    # Validate that all columns exist in both training and validation sets
+    missing_train = [col for col in features_val.columns if col not in features_train.columns]
+    missing_val = [col for col in features_train.columns if col not in features_val.columns]
+    features_train, features_val = sync_columns(features_train, features_val, logger)
+    features_test, features_val = sync_columns(features_test, features_val, logger)
+    
+    # if missing_train:
+    #     logger.info(f"Dropping columns missing in training data: {missing_train}")
+    #     features_val = features_val.drop(columns=missing_train, errors='ignore')
+    # if missing_val:
+    #     logger.info(f"Dropping columns missing in validation data: {missing_val}")
+    #     features_train = features_train.drop(columns=missing_val, errors='ignore')
+    #     features_test = features_test.drop(columns=missing_val, errors='ignore')
+    # logger.info("All columns validated successfully")
+   
     logger.info("Starting feature selection...")
+    features_train, features_val = sync_columns(features_train, features_val, logger)
     selected_features = select_features_differentiated(features_train, target_train,features_val, target_val, verbose=True)
     logger.info(f"Selected features: {selected_features}")

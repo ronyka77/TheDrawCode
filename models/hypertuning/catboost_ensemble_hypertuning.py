@@ -186,9 +186,9 @@ class GlobalHypertuner:
                 'auto_class_weights': trial.suggest_categorical('auto_class_weights', ['Balanced']),  # Minden sikeres trial 'Balanced'-t használt
                 'grow_policy': trial.suggest_categorical('grow_policy', ['SymmetricTree']),
                 'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 20, 80),  # Sikeres trialok 23-80 között
-                'feature_weights': [trial.suggest_float('feature_weights', 0.5, 1.3) for _ in range(features_train.shape[1])],  # Bővített tartomány a trialok alapján
-                'verbose': False,
-                'random_seed': 42
+                # 'feature_weights': [trial.suggest_float('feature_weights', 0.5, 1.3) for _ in range(features_train.shape[1])],  # Bővített tartomány a trialok alapján
+                'verbose': False
+                # 'random_seed': 42
             }
             
            

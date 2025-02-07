@@ -233,7 +233,7 @@ def create_parquet_files(
             data.to_parquet(
                 output_path,
                 partition_cols=partition_cols,
-                engine="pyarrow",
+                engine="fastparquet",
                 index=False
             )
             logger.info(
@@ -242,7 +242,7 @@ def create_parquet_files(
         else:
             data.to_parquet(
                 output_path,
-                engine="pyarrow",
+                engine="fastparquet",
                 index=False
             )
             logger.info("Successfully created Parquet files without partitioning.")
@@ -1011,7 +1011,7 @@ def create_prediction_set_api() -> pd.DataFrame:
         if 'date_encoded' not in data.columns:
             try:
                 reference_date = pd.Timestamp('2020-08-11')
-                data['date_encoded'] = (pd.to_datetime(data['Datum']) - reference_date).dt.days
+                data['date_encoded'] = (pd.to_datetime(data['Date']) - reference_date).dt.days
                 logger.info("Added date_encoded column")
             except Exception as e:
                 logger.info(
@@ -1119,7 +1119,7 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
             if model_type == 'all':
                 # Get intersection of features across all models
                 common_features = list(
-                    set(features['xgb']).intersection(
+                    set(features['xgb']).union(
                     features['cat'], features['lgbm']))
                 logger.info("Returning features common to all models")
                 return common_features
@@ -1172,17 +1172,41 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
         data_path = "data/prediction/api_prediction_eval.xlsx"
         logger.info(f"Loading training data from: {data_path}")
         data = pd.read_excel(data_path)
-        
+     
 
         # Create target variable
         data['is_draw'] = (data['match_outcome'] == 2).astype(int)
-        
+           # Select features and target
+        columns_to_drop = [
+            'match_outcome',
+            'home_goals',
+            'away_goals',
+            'total_goals',
+            'score',
+            'Referee', 
+            'draw', 
+            'venue_name', 
+            'Home', 
+            'Away', 
+            'away_win', 
+            'Date',
+            'date',
+            'referee_draw_rate', 
+            'referee_draws', 
+            'referee_match_count',
+            'referee_foul_rate',
+            'referee_match_count',
+            'referee_encoded',
+            'ref_goal_tendency',
+            'mid_season_factor'  
+        ]
+        data = data.drop(columns=columns_to_drop, errors='ignore')
         # Import selected features for ensemble models
-        selected_features = import_selected_features_ensemble()
-        all_features = list(
-            set(selected_features['xgb'] + selected_features['cat'] + selected_features['lgbm'])
-        )
-        logger.info(f"All features: {all_features}")
+        selected_features =  data.columns.tolist()  #import_selected_features_ensemble()
+        all_features = [feature for feature in selected_features if feature != 'is_draw']
+        #list(
+        #    set(selected_features['xgb'] + selected_features['cat'] + selected_features['lgbm'])
+        #)
         
         # Validate all features exist in data
         missing_features = [feature for feature in all_features if feature not in data.columns]
@@ -1195,7 +1219,7 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
             raise ValueError(f"Missing required features: {missing_features}")
         
         # Select features and add evaluator column
-        evaluation_data = data[all_features].copy()
+        evaluation_data = data[selected_features].copy()
         evaluation_data['is_draw'] = data['is_draw']
         
         # Convert numeric columns
@@ -1288,7 +1312,8 @@ def import_training_data_ensemble():
             'referee_foul_rate',
             'referee_match_count',
             'referee_encoded',
-            'ref_goal_tendency'
+            'ref_goal_tendency',
+            'mid_season_factor' 
         ]
         data = data.drop(columns=columns_to_drop, errors='ignore')
 
@@ -1333,18 +1358,96 @@ def import_training_data_ensemble():
 
     return X_train, y_train, X_test, y_test
 
+@retry_on_error(max_retries=3, delay=1.0)
+def create_prediction_set_ensemble() -> pd.DataFrame:
+    """Optimized data loading and preprocessing for predictions."""
+    file_path = "data/prediction/api_prediction_data_new.xlsx"
+    logger.info(f"Loading prediction data from: {file_path}")
+    selected_columns = import_selected_features_ensemble('all')
+    try:
+        # Load data with optimized parameters
+        data = pd.read_excel(
+            file_path,
+            engine='openpyxl',
+            dtype={'fixture_id': 'int64'}
+        )
+        
+        # Validate early
+        if data.empty:
+            logger.info("Empty dataset loaded", error_code=DataProcessingError.EMPTY_DATASET)
+            raise ValueError("Dataset is empty")
+            
+        logger.info(f"Initial data shape: {data.shape}")
+        data_copy = data.copy()
+        # Column management
+        required_columns = {'fixture_id', 'Date', 'Home', 'Away'}
+        missing = required_columns - set(data.columns)
+        if missing:
+            logger.info(f"Missing required columns: {missing}", error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS)
+            raise ValueError(f"Missing columns: {missing}")
+
+        # Date handling
+        if 'date_encoded' not in data.columns:
+            try:
+                data['date_encoded'] = (pd.to_datetime(data['Date'], errors='coerce') 
+                                      - pd.Timestamp('2020-08-11')).dt.days
+                data['date_encoded'] = data['date_encoded'].fillna(0).astype('int64')
+            except Exception as e:
+                logger.info(f"Date encoding failed: {str(e)}", error_code=DataProcessingError.FEATURE_CREATION_FAILED)
+                raise
+
+        # Optimized column dropping
+        cols_to_drop = {'Date', 'Home', 'Away'}
+        if cols_to_drop:
+            data = data.drop(columns=cols_to_drop)
+            logger.info(f"Dropped columns: {cols_to_drop}")
+        print(f"data.columns: {data.shape}")
+        # Numeric conversion with parallel processing
+        data = convert_numeric_columns(
+            data=data,
+            drop_errors=True,
+            fill_value=0.0,
+            verbose=False
+        )
+
+        # Restore columns using vectorized merge
+        if 'Date' in data_copy.columns:
+            restore_cols = data_copy[['fixture_id', 'Date', 'Home', 'Away']]
+            # Only merge columns that don't already exist in data
+            cols_to_restore = [col for col in restore_cols.columns if col not in data.columns]
+            print(f"cols_to_restore: {cols_to_restore}")
+            if cols_to_restore:
+                data = data.merge(
+                    restore_cols[['fixture_id'] + cols_to_restore],
+                    on='fixture_id',
+                    how='left',
+                    validate='one_to_one'  # Ensure no duplicate fixture_ids
+                )
+
+        # # Final feature selection
+        # X = data.reindex(columns=selected_columns)  # More efficient than pd.DataFrame()
+        
+        # # Validation checks
+        # if X.isnull().sum().sum() > 0:
+        #     logger.info("Null values detected in final features")
+        #     X = X.fillna(0)
+            
+        logger.info(f"Final feature shape: {data.shape}")
+        return data
+
+    except Exception as e:
+        logger.info(f"Critical error: {str(e)}", error_code=DataProcessingError.EMPTY_DATASET)
+        raise
+
+
 # OTHER FUNCTIONS
 @retry_on_error(max_retries=3, delay=1.0)
-def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
-    """Get real match scores from an Excel file.
+def get_real_api_scores_from_excel() -> pd.DataFrame:
+    """Get all real match scores from an Excel file.
     
-    This function retrieves actual match results from the API prediction evaluation
-    Excel file for a given list of fixture IDs. It handles data validation and
-    type conversion for match outcomes.
+    This function retrieves all actual match results from the API prediction evaluation
+    Excel file. It handles data validation and type conversion for match outcomes.
     
-    Args:
-        fixture_ids (List[str]): List of fixture IDs to retrieve.
-        
     Returns:
         pd.DataFrame: DataFrame containing match results with columns:
             - fixture_id: Unique identifier for the match
@@ -1376,50 +1479,32 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
         df = df.dropna(subset=['match_outcome'])
         logger.info(f"Data shape after filtering NA match outcomes: {df.shape}")
 
-        # Convert fixture_id column and input IDs to integer type
-        try:
-            df['fixture_id'] = df['fixture_id'].astype(int)
-            fixture_ids = [int(fixture_id) for fixture_id in fixture_ids]
-        except ValueError as e:
-            logger.info(
-                f"Invalid fixture ID format: {str(e)}",
-                error_code=DataProcessingError.INVALID_DATA_TYPE
-            )
-            raise ValueError("Invalid fixture ID format")
-
-        # Filter matches by fixture_ids
-        filtered_df = df[df['fixture_id'].isin(fixture_ids)]
-        if filtered_df.empty:
-            logger.info(
-                f"No matches found for provided fixture IDs",
-                error_code=DataProcessingError.EMPTY_DATASET
-            )
-            return pd.DataFrame()
-
-        try:
-            # Create new column for is_draw based on match_outcome
-            filtered_df['is_draw'] = (filtered_df['match_outcome'] == 2).astype(int)
-            
-            # Select and rename relevant columns
-            results_df = filtered_df[[
-                'fixture_id', 'Home', 'Away', 'Date', 'league_name', 'match_outcome', 'is_draw'
-            ]].rename(columns={
-                'Home': 'home_team',
-                'Away': 'away_team',
-                'Date': 'date',
-                'league_name': 'league'
-            })
-            
-            logger.info(f"Successfully retrieved {len(results_df)} matches")
-            return results_df
-            
-        except KeyError as e:
-            logger.info(
-                f"Missing required columns: {str(e)}",
-                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
-            )
-            raise ValueError(f"Missing required columns: {str(e)}")
-            
+        # Convert fixture_id column to integer type
+        df['fixture_id'] = pd.to_numeric(df['fixture_id'], errors='coerce').astype('Int64')
+        
+        # Create new column for is_draw based on match_outcome
+        df['is_draw'] = (df['match_outcome'] == 2).astype(int)
+        
+        # Select and rename relevant columns
+        results_df = df[[
+            'fixture_id', 'Home', 'Away', 'Date', 'league_name', 'match_outcome', 'is_draw'
+        ]].rename(columns={
+            'Home': 'home_team',
+            'Away': 'away_team',
+            'Date': 'date',
+            'league_name': 'league'
+        })
+        
+        logger.info(f"Successfully retrieved {len(results_df)} matches")
+        return results_df
+        
+    except KeyError as e:
+        logger.info(
+            f"Missing required columns: {str(e)}",
+            error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+        )
+        raise ValueError(f"Missing required columns: {str(e)}")
+        
     except FileNotFoundError:
         logger.info(
             f"Data file not found: {file_path}",
