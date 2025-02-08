@@ -1,0 +1,11 @@
+mcpServers:
+  localFileContext:
+    command: "python"
+    args:
+      - "server.py"
+    type: stdio
+    port: 8000
+    description: "Local MCP server for providing file context and documentation."
+  localFileContextSSE:
+    url: "http://127.0.0.1:8000/sse"
+    type: sse 

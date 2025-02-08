@@ -1,9 +1,6 @@
 from pathlib import Path
 import os
 import sys
-import logging
-
-logger = logging.getLogger(__name__)
 
 def setup_project_root() -> Path:
     """
@@ -21,18 +18,19 @@ def setup_project_root() -> Path:
         project_root_str = str(project_root)
         if project_root_str not in sys.path:
             sys.path.append(project_root_str)
-            logger.info(f"Added project root to sys.path: {project_root_str}")
+            print(f"Added project root to sys.path: {project_root_str}")
         else:
-            logger.info(f"Project root already in sys.path: {project_root_str}")
+            print(f"Project root already in sys.path: {project_root_str}")
         
+
         return project_root
     
     except Exception as e:
-        logger.error(f"Error setting project root path: {e}", exc_info=True)
+        print(f"Error setting project root path: {e}", exc_info=True)
         # Fallback: use the parent of the current working directory.
         fallback = Path(os.path.dirname(os.getcwd())).resolve()
         fallback_str = str(fallback)
         if fallback_str not in sys.path:
             sys.path.append(fallback_str)
-            logger.info(f"Used fallback project root: {fallback_str}")
+            print(f"Used fallback project root: {fallback_str}")
         return fallback 

@@ -1,38 +1,52 @@
-# MCP Plan
+# Model Context Protocol Server (MCPS) Plan
 
 ## 1. Project Overview & Goals
 
 **Objective:**
-- Build an MCP that serves as an interactive hub for model training, tuning, evaluation, and monitoring.
-- Ensure that the MCP adheres to the Soccer Prediction Project guidelines (e.g., CPU-only training, robust logging, MLflow integration, versioning, and reproducibility).
-- Integrate this control panel seamlessly within VS Code (either as an extension or a terminal/webview dashboard) so that AI development and run monitoring are streamlined.
+- Build a Model Context Protocol Server (MCPS) that acts as the central hub for managing the entire lifecycle of soccer prediction models, including training, tuning, evaluation, and context-aware metadata management.
+- Ensure strict adherence to Soccer Prediction Project guidelines:
+  - Enforce CPU-only training (XGBoost with `tree_method='hist'`, CatBoost with `device='cpu'`)
+  - Implement robust logging via ExperimentLogger (structured JSON, ISO 8601 timestamps, file rotations)
+  - Integrate MLflow tracking for full experiment reproducibility
+  - Maintain strict versioning and reproducibility protocols
+- Expose a robust API (RESTful/gRPC) for external clients to:
+  - Trigger/schedule training runs and hyperparameter tuning
+  - Monitor real-time training progress and access historical data
+  - Retrieve contextual metadata and model performance metrics
 
 **Key Outcomes:**
-- A modular dashboard/control panel to launch training runs, view experiment logs and metrics, inspect hyperparameter tuning outcomes, and quickly iterate on model improvements.
-- Consolidated documentation and code annotations (linking to [docs/plan.md](../docs/plan.md), [DOCS-CHANGELOG.md](../DOCS-CHANGELOG.md), etc.) that track changes according to the versioning & reproducibility rules.
-- Improved error handling, data validation, and logging in alignment with the provided guidelines.
+- Centralized server managing training contexts for XGBoost/CatBoost models
+- Comprehensive API endpoints for:
+  - Task initiation/control (start, stop, resume)
+  - Real-time status monitoring and log access
+  - Contextual metadata retrieval (hyperparameters, metrics, sample counts)
+- Protocol-compliant documentation with traceability to [docs/plan.md](../docs/plan.md) and [DOCS-CHANGELOG.md](../DOCS-CHANGELOG.md)
 
 ---
 
 ## 2. Requirement Analysis & Codebase Assessment
 
 ### A. Functional Requirements
-- Support model training for both XGBoost and CatBoost ensemble models with hyperparameter tuning.
-- Integrate MLflow tracking to log metrics, parameters, and model signatures as currently done.
-- Present training progress and metrics in an interactive panel (e.g., lists of active runs, parameter summaries, validation scores, model thresholds).
-- Provide options to launch, monitor, and even stop/restart training tasks from within VS Code.
+- **Model Training & Tuning:**
+  - Support launch/monitoring of XGBoost & CatBoost training with Optuna hyperparameter tuning
+- **MLflow Integration:**
+  - Log parameters, metrics, signatures, and artifacts for every run
+- **API Controls:**
+  - RESTful/gRPC endpoints for training operations, status monitoring, and historical data access
 
-### B. Non-functional Requirements
-- The implementation must enforce CPU-only training (e.g., setting `tree_method='hist'`, `device='cpu'`).
-- Logging needs to align with the ExperimentLogger design (structured JSON, ISO 8601 timestamps, file rotations) and MLflow integration guidelines.
-- All code changes should be surgical with minimal impact (referencing the Soccer Prediction Project rules).
+### B. Non-Functional Requirements
+- **CPU-Only Enforcement:** Configurations must prevent GPU usage
+- **Structured Logging:** ExperimentLogger with JSON format and file rotation
+- **Surgical Changes:** Minimal code modifications following project guidelines
 
 ### C. Technical Review
-- The codebase already includes:
-  - A CatBoost hypertuning module (using Optuna callbacks, hyperparam_spec definition, and MLflow logging)
-  - An XGBoost model implementation with threshold optimization, data validation, and extensive logging
-- Shared utilities (for feature selection, evaluation set creation, and MLflow configuration) are available and should be integrated into the MCP.
-- Documentation references and changelog updates must be maintained.
+- **Existing Assets:**
+  - CatBoost/XGBoost modules with MLflow integration
+  - Shared utilities for feature selection and data validation
+- **Improvements:**
+  - Consolidate common functions into shared modules
+  - Implement async processing for long-running tasks
+  - Use in-memory state/database for training context
 
 ---
 
@@ -40,89 +54,81 @@
 
 ### A. Component Separation
 1. **Data Ingestion & Validation:**
-   - Centralize functions that load and validate training and evaluation datasets.
-   - Enhance conversion functions (like `convert_int_columns`) and ensure compliance with minimum sample counts.
-2. **Model Training & Tuning Modules:**
-   - Keep separate modules for XGBoost and CatBoost so that each can report back to the central MCP.
-   - Refactor common elements (e.g., threshold optimization, logging of best parameters) to shared libraries if beneficial.
-3. **Logging & MLflow Integration:**
-   - Ensure that both models use the ExperimentLogger and log to MLflow consistently.
-   - Validate that MLflow signatures (and metadata) are correctly generated and recorded.
-4. **MCP (Modular Control Panel) – The Interactive UI:**
-   - Decide on the interface:
-     - **Option A:** A VS Code extension that uses webview panels to show training metrics, active runs, and error logs.
-     - **Option B:** A lightweight web dashboard (e.g., using Streamlit or a similar tool) that can be launched from VS Code.
-   - Integrate command hooks so that the MCP can trigger training runs, display results, and auto-refresh logs.
+   - Centralized dataset loading/validation with MLflow-compatible conversions
+2. **Model Training Modules:**
+   - Separate XGBoost/CatBoost implementations with unified API interface
+3. **Logging & MLflow:**
+   - Standardized ExperimentLogger usage across components
+   - Artifact validation and metadata capture
+4. **MCPS API Layer:**
+   - FastAPI/Flask implementation with endpoints for:
+     - Training operations
+     - Real-time monitoring
+     - Context management
+   - Async task processing for non-blocking operations
 
-### B. Communication between Components
-- Use an internal API (or shared state in a central module) to record training run details.
-- The MCP will serve as a front-end to visualize MLflow run IDs, parameter sets, evaluation metrics, and logs generated by ExperimentLogger.
-- Ensure that any code changes or new logs update the MCP in near-real time or on demand.
+### B. Communication Framework
+- **Shared State:** In-memory store for training context and metrics
+- **Real-Time Updates:** Websocket/polling mechanisms for status changes
+- **Error Handling:** Comprehensive logging with error contextualization
 
 ---
 
 ## 4. Implementation Roadmap & Milestones
 
-**Phase I: Requirements Finalization & Planning (Week 1)**
-- Confirm the definition of "MCP" (Modular Control Panel) or clarify if an alternative meaning was intended.
-- Review Soccer Prediction Project documentation ([plan.md](../docs/plan.md), [DOCS-CHANGELOG.md](../DOCS-CHANGELOG.md), etc.) and update the internal plan reference numbers.
-- Meet with the team (if applicable) for final feedback on scope.
+**Phase I: Planning & Finalization (Week 1)**
+- Finalize API spec and async processing strategy
+- Align with project documentation and protocols
 
-**Phase II: Codebase Refactoring & Modularization (Week 2–Week 3)**
-- Refactor data ingestion and validation functions for consistency across XGBoost and CatBoost modules.
-- Extract and consolidate common elements (logging, MLflow setup, threshold optimization) into shared utility modules.
-- Ensure all changes follow the surgical code-change principle as stated in the Soccer Prediction Project rules.
+**Phase II: Codebase Refactoring (Week 2-3)**
+- Modularize data ingestion/logging components
+- Extract common utilities for shared use
 
-**Phase III: MCP Development – Building the Interactive Control Panel (Week 4–Week 5)**
-- Decide on UI approach (VS Code extension vs. external web dashboard) and set up project scaffolding accordingly.
-- Develop views to display:
-  - Experiment run details and summaries from MLflow.
-  - Real-time logs and metrics from ExperimentLogger.
-  - Hyperparameter tuning progress (number of completed vs. pruned trials, best metrics so far).
-- Integrate command triggers so users can start a new training run, view detailed logs, and inspect model evaluation outputs.
+**Phase III: Server Implementation (Week 4-5)**
+- Develop API endpoints with FastAPI/Flask
+- Implement background task processing
+- Integrate MLflow and ExperimentLogger
 
-**Phase IV: Integration & Testing (Week 6)**
-- Perform end-to-end integration tests from data loading through training runs and metric logging.
-- Execute unit and integration tests (using `python -m pytest python_tests/`).
-- Validate that environmental constraints (CPU-only training) and data validations are consistently enforced.
+**Phase IV: Integration Testing (Week 6)**
+- End-to-end testing of training workflows
+- Validate CPU enforcement and data integrity
+- Stress-test API performance
 
-**Phase V: Documentation, Code Reviews & Deployment (Week 7)**
-- Update internal documentation and changelogs to reflect new modules and integration points.
-- Include detailed instructions for using the MCP within VS Code.
-- Conduct code reviews and incorporate feedback.
-- Prepare deployment scripts (and VS Code extension packaging if applicable).
+**Phase V: Deployment Prep (Week 7)**
+- Update documentation and changelogs
+- Create client integration guides
+- Prepare containerization scripts
 
 ---
 
-## 5. Risk Assessment & Future Enhancements
+## 5. Risk Assessment & Future Roadmap
 
 **Risks:**
-- Integration challenges between disparate modules (XGBoost/CatBoost, MLflow, logging).
-- Performance issues during hyperparameter tuning (even with CPU-only constraints).
-- Potential difficulties in real-time log updating in the chosen UI framework.
+- Integration complexity between ML components
+- Latency in real-time updates
+- State synchronization challenges
 
-**Mitigation Strategies:**
-- Modularize code to isolate failures.
-- Implement robust error logging and early notifications via ExperimentLogger.
-- Plan periodic reviews of experimental configurations and performance thresholds.
+**Mitigations:**
+- Modular isolation for independent testing
+- Celery/asyncio for task management
+- Robust error handling and logging
 
 **Future Enhancements:**
-- Extend the MCP to support additional models or GPU training if required later.
-- Add functionalities for automated deployment, A/B testing of model variations, and advanced visualization of feature importance.
-- Consider enhancing the VS Code extension with code intelligence features (e.g., inline parameter suggestions based on prior successful runs).
+- GPU support and additional model types
+- Advanced visualization endpoints
+- Automated deployment pipelines
+- A/B testing capabilities
 
 ---
 
 ## 6. Next Steps & Clarifications
 
-Before proceeding further, please clarify what "MCP" stands for in your project's context. For example:
-- Do you mean a "Modular Control Panel" (a dashboard/extension for managing your prediction models), or
-- Did you have another interpretation in mind (such as a "Minimum Code Product" or "Model Configuration Pipeline"?
-
-Your input on this will help refine the plan details further, and we can adjust milestones or components if needed.
+- Review API endpoint specifications
+- Validate async processing approach
+- Finalize shared state management design
 
 ---
 
 ## Conclusion
 
-This initial plan leverages the existing codebase—ensuring consistent adherence to the Soccer Prediction Project guidelines—and defines clear phases from refactoring through to the development of an interactive control panel integrated in VS Code. Once you clarify the exact meaning of "MCP" and any additional requirements, the plan can be iterated on to ensure it's perfectly tailored to the project's needs. 
+This MCPS plan establishes a centralized server architecture adhering to all Soccer Prediction Project guidelines. The API-driven design enables secure, scalable management of model training and context while maintaining strict reproducibility. The implementation phases ensure minimal disruption through surgical code changes and comprehensive testing.

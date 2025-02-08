@@ -222,13 +222,12 @@ class ModelTrainingFeatures:
                 'ccp_alpha': 0.01  # Cost-complexity pruning
             },
             'knn': {
-                'n_neighbors': 50,  # Higher than current 5
+                'n_neighbors': 50,
                 'weights': 'distance',
-                'algorithm': 'brute',  # More precise than auto
+                'algorithm': 'brute',
                 'leaf_size': 20,
-                'p': 1,  # Manhattan distance
-                'n_jobs': -1,
-                'metric_params': {'w': 3}  # Weight class 1 higher
+                'p': 1,
+                'n_jobs': -1
             },
             'svm': {
                 'C': 0.5,  # Lower than current for tighter margin
@@ -380,8 +379,8 @@ class EnsembleModel:
                 model.fit(
                     X_train.iloc[svm_train_idx], 
                     y_train.iloc[svm_train_idx],
-                    eval_set=[(X_val, y_val)],
-                    verbose=100
+                    # eval_set=[(X_val, y_val)],
+                    # verbose=100
                 )
             # For KNN - incremental training
             elif name == 'knn' and len(X_train) > 20000:
@@ -466,10 +465,8 @@ class EnsembleModel:
     def predict_proba(self, X):
         """Modified prediction with feature alignment"""
         predictions = []
-        
+        model_features = self.selected_features
         for (name, model), weight in zip(self.base_models, self.weights):
-            model_features = self.feature_sets[name]
-            
             # Create feature matrix with proper columns
             X_model = X.reindex(columns=model_features, fill_value=0)
             
@@ -482,7 +479,7 @@ class EnsembleModel:
             X_model = X_model.astype(np.float32)
             
             preds = model.predict_proba(X_model)[:, 1]
-            predictions.append(preds * weight)
+            predictions.append(preds * self.weights[name])  # Explicitly use numerical weights from model registry
         
         return np.mean(predictions, axis=0)
     
@@ -509,16 +506,7 @@ class EnsembleModel:
 if __name__ == "__main__":
     # Load data using your existing utility functions
     selected_features = import_selected_features_ensemble('all')
-    # xgb_features = selected_features
-    # cat_features = selected_features
-    # lgbm_features = selected_features
-    # rf_features = selected_features
-    # knn_features = selected_features
-    # svm_features = selected_features
 
-    # all_features = list(
-    #     set(xgb_features + cat_features + lgbm_features)
-    # )
     X_train, y_train, X_test, y_test = import_training_data_ensemble()
     X_val, y_val = create_ensemble_evaluation_set()
     X_train = X_train[selected_features]
