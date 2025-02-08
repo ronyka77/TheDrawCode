@@ -4,7 +4,7 @@ SELECTCOLUMNS(
     "Home", future_matches[Home],
     "Away", future_matches[Away],
     "league_name", future_matches[league_name],
-    "Datum", future_matches[Datum],
+    "Date", future_matches[Date],
     "venue_name", future_matches[venue_name],
     "referee", future_matches[referee],
     "match_outcome", future_matches[match_outcome],

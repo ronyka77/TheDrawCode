@@ -204,7 +204,6 @@ def main():
     model_uris = [
         'd5d3379009334751ad89fdc835c2bbb2'
     ]
-
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_api()
     prediction_data = prediction_df.copy()

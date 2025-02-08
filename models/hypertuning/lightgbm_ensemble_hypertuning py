@@ -20,6 +20,7 @@ import warnings
 from sklearn.metrics import precision_score, recall_score, f1_score
 from imblearn.over_sampling import ADASYN
 from optuna.trial import FrozenTrial
+from multi_model_hypertuning import MultiModelHypertuner
 
 # Szűrd a specifikus figyelmeztetést
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.base")
@@ -249,11 +250,25 @@ class GlobalHypertuner:
     ) -> Dict[str, Any]:
         """Tune global model with enhanced precision-recall tracking."""
         try:
+            # First tune all models using the new multi-model tuner
+            multi_tuner = MultiModelHypertuner(logger=self.logger)
+            all_best_params = multi_tuner.tune_all_models(
+                features_train, target_train, 
+                features_val, target_val,
+                n_trials=n_trials//6
+            )
+            
+            # Then focus on LightGBM with more trials
             study = optuna.create_study(
                 direction="maximize",
                 sampler=self.hyperparam_spec['sampler']
             )
-            # Run optimization
+            
+            # Initialize with best params from multi-model tuning
+            if 'lgbm' in all_best_params:
+                study.enqueue_trial(all_best_params['lgbm'])
+            
+            # Run optimization with enhanced logging
             study.optimize(
                 lambda trial: self.objective(
                     trial,
@@ -268,18 +283,32 @@ class GlobalHypertuner:
                 callbacks=[self._log_metrics_callback, self._pruned_trials_callback]
             )
             
+            # Log final metrics and parameters
             best_trial = study.best_trial
-            mlflow.log_metrics({
-                "best_precision": best_trial.user_attrs["precision"],
-                "best_recall": best_trial.user_attrs["recall"],
-                "best_threshold": best_trial.user_attrs["threshold"],
-                "n_pruned_trials": len(study.get_trials(states=[optuna.trial.TrialState.PRUNED])),
-                "n_completed_trials": len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE]))
-            })
+            with mlflow.start_run(nested=True):
+                mlflow.log_params({
+                    "n_trials": n_trials,
+                    "precision_weight": self.precision_weight,
+                    "final_threshold": best_trial.user_attrs["threshold"]
+                })
+                mlflow.log_metrics({
+                    "best_precision": best_trial.user_attrs["precision"],
+                    "best_recall": best_trial.user_attrs["recall"],
+                    "pruned_trials": len(study.get_trials(states=[optuna.trial.TrialState.PRUNED])),
+                    "completed_trials": len(study.get_trials(states=[optuna.trial.TrialState.COMPLETE]))
+                })
+                
             self.best_params = study.best_params
+            self.logger.info(f"Optimization completed. Best params: {study.best_params}")
             return study.best_params
+            
         except Exception as e:
-            self.logger.error(f"Error during hyperparameter tuning: {str(e)}")
+            self.logger.error(f"Hyperparameter tuning failed: {str(e)}", exc_info=True)
+            self.logger.log_to_mlflow({
+                "error": str(e),
+                "stage": "hyperparameter_tuning",
+                "severity": "critical"
+            })
             raise
 
     def evaluate_model(

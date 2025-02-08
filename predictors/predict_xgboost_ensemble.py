@@ -13,54 +13,59 @@ from pymongo import MongoClient
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.create_evaluation_set import import_selected_features_ensemble, get_real_api_scores_from_excel, setup_mlflow_tracking, create_prediction_set_ensemble
+from utils.create_evaluation_set import get_real_api_scores_from_excel, setup_mlflow_tracking, create_prediction_set_ensemble
 
 mlruns_dir = setup_mlflow_tracking("xgboost_draw_model")
 
 class DrawPredictor:
+
     """Predictor class for draw predictions using the stacked model."""
     
-    def __init__(self, model_uri: str, selected_features: List[str]):
+    def __init__(self, model_uri: str):
         """Initialize predictor with model URI."""
         # Set up MLflow tracking URI based on current environment
         current_dir = os.getcwd()
         self.model = mlflow.xgboost.load_model(model_uri)
-        # model_info = mlflow.models.get_model_info(model_uri=model_uri)
-        # self.input_example = model_info.metadata.get("input_example", None)
-        # print(f"Input example loaded from MLflow model: {self.input_example}")
-    
-        self.required_features = selected_features
+        try:
+            self.test_model = mlflow.pyfunc.load_model(model_uri)
+            # Get feature names from signature
+            if self.test_model.metadata.signature:
+                self.required_features = self.test_model.metadata.signature.inputs.input_names()
+                print(f"Features from signature: {self.required_features}")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+
         # Define expected input columns based on model requirements
-        self.expected_columns = [
-            "position_equilibrium", "venue_match_count", "league_draw_rate", "possession_balance",
-            "xg_form_similarity", "away_poisson_xG", "home_position_form", "away_team_elo",
-            "venue_draws", "form_difference", "away_attack_strength_home_league_position_interaction",
-            "home_poisson_xG", "away_set_piece_threat", "away_passing_efficiency", "away_h2h_weighted",
-            "venue_draw_rate", "home_corners_mean", "home_draw_rate", "home_passing_efficiency",
-            "Away_offsides_mean", "home_attack_xg_power", "away_average_points", "away_style_compatibility",
-            "home_style_compatibility", "Home_shot_on_target_mean", "league_draw_rate_composite",
-            "home_season_form", "home_xg_form", "Home_team_matches", "away_referee_impact",
-            "strength_possession_interaction", "season_progress", "away_form_stability",
-            "away_form_momentum_away_attack_strength_interaction", "Home_passes_mean", "home_goal_momentum",
-            "home_h2h_wins", "away_scoring_efficiency", "goal_pattern_similarity", "home_form_weighted_xg",
-            "Home_offsides_mean", "combined_draw_rate", "avg_league_position", "away_historical_strength",
-            "home_yellow_cards_rollingaverage", "seasonal_draw_pattern", "draw_xg_indicator",
-            "away_offensive_sustainability", "away_form_weighted_xg", "home_ref_interaction",
-            "away_attack_conversion", "home_defense_weakness", "fixture_id", "league_home_draw_rate",
-            "Home_possession_mean", "home_team_elo", "away_shots_on_target_accuracy_rollingaverage",
-            "away_corners_mean", "home_yellow_cards_mean", "away_days_since_last_draw", "h2h_avg_goals",
-            "home_goal_rollingaverage", "form_position_interaction", "away_fouls_rollingaverage",
-            "draw_propensity_score", "Home_draws", "referee_goals_per_game", "away_attack_xg_power",
-            "away_defensive_organization", "elo_similarity_form_similarity", "home_corners_rollingaverage",
-            "away_crowd_resistance", "away_xg_momentum", "Away_saves_mean", "Home_goal_difference_cum",
-            "xg_equilibrium", "home_attack_strength_home_league_position_interaction", "defensive_stability",
-            "away_ref_interaction", "home_defense_index", "away_defense_index", "strength_equilibrium",
-            "home_weighted_attack", "away_corners_rollingaverage", "away_shot_on_target_mean",
-            "away_attack_strength", "away_saves_rollingaverage", "form_weighted_xg_diff", "away_encoded",
-            "home_offensive_sustainability", "draw_probability_score", "venue_capacity", "Home_fouls_mean",
-            "home_xG_rolling_rollingaverage", "away_possession_mean", "away_shot_on_target_rollingaverage",
-            "away_draw_rate", "away_yellow_cards_mean", "home_xg_momentum"
-        ]
+        # self.expected_columns = [
+        #     "position_equilibrium", "venue_match_count", "league_draw_rate", "possession_balance",
+        #     "xg_form_similarity", "away_poisson_xG", "home_position_form", "away_team_elo",
+        #     "venue_draws", "form_difference", "away_attack_strength_home_league_position_interaction",
+        #     "home_poisson_xG", "away_set_piece_threat", "away_passing_efficiency", "away_h2h_weighted",
+        #     "venue_draw_rate", "home_corners_mean", "home_draw_rate", "home_passing_efficiency",
+        #     "Away_offsides_mean", "home_attack_xg_power", "away_average_points", "away_style_compatibility",
+        #     "home_style_compatibility", "Home_shot_on_target_mean", "league_draw_rate_composite",
+        #     "home_season_form", "home_xg_form", "Home_team_matches", "away_referee_impact",
+        #     "strength_possession_interaction", "season_progress", "away_form_stability",
+        #     "away_form_momentum_away_attack_strength_interaction", "Home_passes_mean", "home_goal_momentum",
+        #     "home_h2h_wins", "away_scoring_efficiency", "goal_pattern_similarity", "home_form_weighted_xg",
+        #     "Home_offsides_mean", "combined_draw_rate", "avg_league_position", "away_historical_strength",
+        #     "home_yellow_cards_rollingaverage", "seasonal_draw_pattern", "draw_xg_indicator",
+        #     "away_offensive_sustainability", "away_form_weighted_xg", "home_ref_interaction",
+        #     "away_attack_conversion", "home_defense_weakness", "fixture_id", "league_home_draw_rate",
+        #     "Home_possession_mean", "home_team_elo", "away_shots_on_target_accuracy_rollingaverage",
+        #     "away_corners_mean", "home_yellow_cards_mean", "away_days_since_last_draw", "h2h_avg_goals",
+        #     "home_goal_rollingaverage", "form_position_interaction", "away_fouls_rollingaverage",
+        #     "draw_propensity_score", "Home_draws", "referee_goals_per_game", "away_attack_xg_power",
+        #     "away_defensive_organization", "elo_similarity_form_similarity", "home_corners_rollingaverage",
+        #     "away_crowd_resistance", "away_xg_momentum", "Away_saves_mean", "Home_goal_difference_cum",
+        #     "xg_equilibrium", "home_attack_strength_home_league_position_interaction", "defensive_stability",
+        #     "away_ref_interaction", "home_defense_index", "away_defense_index", "strength_equilibrium",
+        #     "home_weighted_attack", "away_corners_rollingaverage", "away_shot_on_target_mean",
+        #     "away_attack_strength", "away_saves_rollingaverage", "form_weighted_xg_diff", "away_encoded",
+        #     "home_offensive_sustainability", "draw_probability_score", "venue_capacity", "Home_fouls_mean",
+        #     "home_xG_rolling_rollingaverage", "away_possession_mean", "away_shot_on_target_rollingaverage",
+        #     "away_draw_rate", "away_yellow_cards_mean", "home_xg_momentum"
+        # ]
         # Load the threshold from the model if available
         self.threshold = 0.50
     
@@ -119,7 +124,7 @@ class DrawPredictor:
     
 #     return df
 
-def make_prediction(prediction_data, model_uri, selected_features, real_scores_df) -> pd.DataFrame:
+def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
     """Make predictions and return results with probabilities."""
     try:
         # Initialize default values
@@ -127,7 +132,7 @@ def make_prediction(prediction_data, model_uri, selected_features, real_scores_d
         draws_recall = 0.0
         
         # Initialize predictor
-        predictor = DrawPredictor(model_uri, selected_features)
+        predictor = DrawPredictor(model_uri)
         prediction_df = prediction_data.copy()
         print(f"Prediction data len(prediction_df): {len(prediction_df)}")
 
@@ -138,7 +143,7 @@ def make_prediction(prediction_data, model_uri, selected_features, real_scores_d
         if not isinstance(prediction_data, pd.DataFrame):
             raise TypeError("prediction_data must be a pandas DataFrame")
         
-        prediction_df = prediction_data[predictor.expected_columns]
+        prediction_df = prediction_data[predictor.required_features]
         # Make predictions first
         results = predictor.predict(prediction_df)
         print(f"Prediction successful...")
@@ -234,7 +239,9 @@ def main():
     
     # Model URIs to evaluate
     model_uris = [
-        'd0adbbe461e54cc2b981f7964cb68d96'
+        'd0adbbe461e54cc2b981f7964cb68d96',
+        '984ff71c0c704517a371048da7044202',
+        '2ac6b3a56102419b80e9ee0c6b598b2d'
     ]
 
     # Get preprocessed prediction data using standardized function
@@ -254,16 +261,16 @@ def main():
         # Create empty DataFrame to allow continuation
         real_scores_df = pd.DataFrame()
     
-    # Get selected columns using standardized function
-    selected_columns = import_selected_features_ensemble('all')
-    print(f"Number of selected columns: {len(selected_columns)}")
+    # # Get selected columns using standardized function
+    # selected_columns = import_selected_features_ensemble('all')
+    # print(f"Number of selected columns: {len(selected_columns)}")
     
     # Evaluate each model
     for uri in model_uris:
         try:
             uri_full = f"runs:/{uri}/xgboost_api_model"
-            predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full, selected_columns, real_scores_df)
-            
+            predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full, real_scores_df)
+
             # Add validation check
             if not isinstance(predicted_df, pd.DataFrame) or predicted_df.empty:
                 print(f"Skipping invalid predictions from model {uri}")

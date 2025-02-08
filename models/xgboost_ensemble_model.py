@@ -45,6 +45,7 @@ except Exception as e:
     print(f"Current directory xgboost_model: {os.getcwd().parent}")
     
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
+os.environ['MLFLOW_RECORD_ENV_VARS_IN_MODEL_LOGGING'] = 'false'
 
 # Local imports
 from utils.logger import ExperimentLogger
@@ -80,29 +81,31 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         
         # Updated global parameters based on hypertuning insights
         self.global_params = {
-            'learning_rate': 0.02190378119690766,
-            'early_stopping_rounds': 500,
-            'min_child_weight': 165,
-            'gamma': 0.06268817081995443,
-            'subsample': 0.39841425636563177,
-            'colsample_bytree': 0.9311323559904169,
-            'scale_pos_weight': 2.003902849861491,
-            'reg_alpha': 0.0004175183986636507,
-            'reg_lambda': 1.9321415795995613,
+            'learning_rate': 0.03712270070523545,
+            'early_stopping_rounds': 138,
+            'min_child_weight': 150,
+            'gamma': 0.07885447021911686,
+            'subsample': 0.37211323836617827,
+            'colsample_bytree': 0.9605627321007261,
+            'scale_pos_weight': 2.1916382456627153,
+            'reg_alpha': 0.00011387133610121963,
+            'reg_lambda': 1.1226490017501514,
             'max_depth': 5,
-            'n_estimators': 556,
+            'n_estimators': 1765,
             'objective': 'binary:logistic',
             'tree_method': 'hist',
             'device': 'cpu',
             'eval_metric': ['error', 'auc', 'aucpr'],
             'verbosity': 0,
-            'nthread': -1
+            'nthread': -1,
+            'random_state': 42,
         }
         # Initialize other attributes
         self.model = None
         self.feature_importance = {}
         self.selected_features = import_selected_features_ensemble('all')
         self.threshold = 0.50  # Default threshold for predictions
+
 
     def _validate_data(
         self,

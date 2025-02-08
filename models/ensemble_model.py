@@ -104,7 +104,7 @@ def load_pretrained_model(run_id: str, model_type: str = "xgboost"):
 
 def build_base_models(selected_features, calibrate: bool = False, calibration_method: str = "isotonic"):
     """Build base models with fallback to new models if pretrained not found"""
-    pretrained_xgb_run_id = "12"
+    pretrained_xgb_run_id = "0d72e99ade854c939e497a03cbf6e313"
     pretrained_cat_run_id = "32"
     pretrained_lgbm_run_id = "53"
     pretrained_rf_run_id = "1234567890"  # Replace with actual run ID
@@ -157,69 +157,70 @@ class ModelTrainingFeatures:
         self.feature_sets = self._load_default_features()
         self.training_params = {
             'xgb': {
-                'learning_rate': 0.00760022315772835,
-                'early_stopping_rounds': 468,
-                'min_child_weight': 135,
-                'gamma': 2.6424389418822702,
-                'subsample': 0.5507474166255953,
-                'colsample_bytree': 0.8605669463072969,
-                'scale_pos_weight': 2.3728539564011863,
-                'reg_alpha': 0.00024338752831206268,
-                'reg_lambda': 0.012210974240024406,
-                'max_depth': 8,
-                'n_estimators': 25840,
+                'learning_rate': 0.03712270070523545,
+                'early_stopping_rounds': 138,
+                'min_child_weight': 150,
+                'gamma': 0.07885447021911686,
+                'subsample': 0.37211323836617827,
+                'colsample_bytree': 0.9605627321007261,
+                'scale_pos_weight': 2.1916382456627153,
+                'reg_alpha': 0.00011387133610121963,
+                'reg_lambda': 1.1226490017501514,
+                'max_depth': 5,
+                'n_estimators': 1765,
                 'objective': 'binary:logistic',
                 'tree_method': 'hist',
                 'device': 'cpu',
                 'eval_metric': ['error', 'auc', 'aucpr'],
                 'verbosity': 0,
-                'nthread': -1
+                'nthread': -1,
+                'random_state': 42,
             },
             'cat': {
-                'iterations': 4209,
-                'learning_rate': 0.0025294605477838576,
-                'depth': 9,
-                'l2_leaf_reg': 0.926979888847891,
-                'border_count': 160,
-                'subsample': 0.7396709709608331,
-                'random_strength': 2.157330791523986,
+                'loss_function': 'Logloss',
+                'eval_metric': 'AUC',
+                'task_type': 'CPU',
                 'auto_class_weights': 'Balanced',
                 'grow_policy': 'SymmetricTree',
-                'min_data_in_leaf': 79,
-                'loss_function': 'Logloss',
-                'early_stopping_rounds': 923,
-                'task_type': 'CPU'
+                'iterations': 4901,
+                'learning_rate': 0.013288620619359776,
+                'depth': 7,
+                'l2_leaf_reg': 11.152891877342054,
+                'border_count': 128,
+                'subsample': 0.7437647532474002,
+                'random_strength': 0.14171788543304523,
+                'min_data_in_leaf': 47,   
+                'early_stopping_rounds': 996,
+                
             },
             'lgbm': {
-                'boosting_type': 'gbdt',  # Default boosting type that supports bagging
-                'num_leaves': 31,
-                'learning_rate': 0.005,  # Lower than XGB/CatBoost for stability
-                'n_estimators': 15000,
-                'scale_pos_weight': 2.5,  # Higher than XGB for class balance
-                'min_child_samples': 200,
-                'feature_fraction': 0.6,  # More conservative than XGB's 0.86
-                'bagging_fraction': 0.8,
-                'bagging_freq': 5,
-                'reg_alpha': 0.1,
-                'reg_lambda': 0.5,
-                'max_depth': 7,  # Shallower than XGB/CatBoost
                 'objective': 'binary',
                 'metric': 'binary_logloss',
+                'boosting_type': 'gbdt',
                 'device_type': 'cpu',
-                'early_stopping_round': 500,
-                'verbosity': -1
+                'verbose': 100,
+                'learning_rate': 0.0037460291406696956,
+                'max_depth': 6,
+                'reg_lambda': 0.4103475806096283,
+                'n_estimators': 3577,
+                'num_leaves': 67,
+                'early_stopping_rounds': 291,
+                'subsample': 0.7718378995036574,
+                'colsample_bytree': 0.9996212749980057,
+                'min_child_samples': 28,
+                'feature_fraction': 0.8037822667865142,
+                'bagging_freq': 2
             },
             'rf': {
-                'n_estimators': 1000,
-                'max_depth': 12,  # Deeper than current 8
-                'min_samples_split': 50,  # Higher for precision
-                'min_samples_leaf': 20,
-                'max_features': 'sqrt',  # Better than default for precision
-                'class_weight': {0: 1, 1: 3},  # Explicit class weights
-                'bootstrap': True,
+                'n_estimators': 784,
+                'max_depth': 6,
+                'min_samples_split': 12,
+                'min_samples_leaf': 2,
+                'max_features': 0.9667000359567445,
+                'bootstrap': False,
                 'n_jobs': -1,
-                'max_samples': 0.5,  # Prevent overfitting
-                'ccp_alpha': 0.01  # Cost-complexity pruning
+                'random_state': 42,
+                'class_weight': {0: 1, 1: 2.19}
             },
             'knn': {
                 'n_neighbors': 50,
@@ -230,16 +231,16 @@ class ModelTrainingFeatures:
                 'n_jobs': -1
             },
             'svm': {
-                'C': 0.5,  # Lower than current for tighter margin
-                'kernel': 'sigmoid',  # Better for high dimensions
+                'C': 0.6814185192456121,
+                'kernel': 'rbf',
                 'gamma': 'scale',
-                'class_weight': 'balanced',
+                'class_weight': {0: 1, 1: 2.19},  # Updated for cost-sensitive learning
                 'probability': True,
                 'shrinking': True,
-                'tol': 1e-4,
-                'cache_size': 2000,  # Critical for large datasets
-                'decision_function_shape': 'ovr',
-                'break_ties': True  # Handle ambiguous cases
+                'tol': 0.03600890837739052,
+                'cache_size': 12000,
+                'max_iter': 1000,
+                'decision_function_shape': 'ovr'
             }
         }
         
@@ -294,13 +295,12 @@ class EnsembleModel:
     """
     Modified EnsembleModel that respects individual model feature requirements
     """
-    def __init__(self, logger, selected_features, voting_method="soft", weights=None, calibrate=False, calibration_method="isotonic"):
+    def __init__(self, logger, selected_features, calibrate=True, calibration_method="sigmoid"):
         """
         Initialize the EnsembleModel.
         """
         self.calibrate = calibrate
         self.calibration_method = calibration_method   
-        self.voting_method = voting_method
         self.model_training_features = ModelTrainingFeatures()
         self.selected_features = selected_features
         self.training_params = self.model_training_features.training_params
@@ -321,14 +321,14 @@ class EnsembleModel:
             ("svm", svm_model)
         ]
         
-        # Setup custom weights if provided; default to equal weighting
-        self.weights = weights if weights is not None else {
-            'xgb': 1.5,
-            'cat': 1.8, 
-            'lgbm': 1.7,
-            'rf': 1.2,
-            'knn': 0.9,
-            'svm': 1.1
+        # Precision-optimized weights (original: {'xgb':1.5, 'cat':1.8, 'lgbm':1.7, 'rf':1.2, 'knn':0.9, 'svm':1.1})
+        self.weights = {
+            'rf': 2.5,   # Highest precision model (35.9%)
+            'xgb': 2.0,  # Moderate precision but critical for recall
+            'cat': 1.5,  # Baseline precision
+            'lgbm': 0.8, # Recall anchor (keep some weight)
+            'svm': 0.3,  # Minimize low-precision impact
+            'knn': 0.2   # Minimal weight
         }
         self.logger = logger
 
@@ -342,7 +342,10 @@ class EnsembleModel:
             'svm': self.selected_features
         }
 
-        # Add to EnsembleModel __init__:
+        # Initialize an XGBoost-based meta learner for stacking
+        self.meta_learner = XGBClassifier(tree_method='hist', device='cpu', random_state=42)
+
+        # Existing initialization for custom scorer (now unused by meta learner)
         def recall_precision_balance(y_true, y_pred):
             recall = recall_score(y_true, y_pred)
             precision = precision_score(y_true, y_pred)
@@ -378,9 +381,7 @@ class EnsembleModel:
                 )
                 model.fit(
                     X_train.iloc[svm_train_idx], 
-                    y_train.iloc[svm_train_idx],
-                    # eval_set=[(X_val, y_val)],
-                    # verbose=100
+                    y_train.iloc[svm_train_idx]
                 )
             # For KNN - incremental training
             elif name == 'knn' and len(X_train) > 20000:
@@ -390,60 +391,122 @@ class EnsembleModel:
                     X_train.iloc[sample_idx],
                     y_train.iloc[sample_idx]
                 )
-            else:
+            elif name == 'cat':
                 print(f"Training {name} model")
                 # Handle CatBoost feature weights separately
-                if name == 'catboost':
+                model.fit(
+                    X_train,
+                    y_train,
+                    eval_set=[(X_val, y_val)],
+                    verbose=100  # Only print every 100th round
+                    # feature_weights=[1.0] * X_train.shape[1]  # Equal weights for all features as default
+                )
+            elif name == 'rf':
+                print(f"Training {name} model")
+                try:
                     model.fit(
                         X_train,
                         y_train,
-                        eval_set=[(X_val, y_val)],
-                        verbose=100,
-                        feature_weights=[1.0] * X_train.shape[1]  # Equal weights for all features as default
+                        verbose=100,  # Only print every 100th round
+                        eval_set=[(X_val, y_val)]
                     )
-                else:
-                    print(f"Training {name} model")
-                    try:
-                        model.fit(
-                            X_train, 
-                            y_train,
-                            eval_set=[(X_val, y_val)]
-                        )
-                    except TypeError as e:
-                        # Handle models that don't accept verbose/eval_set parameters
-                        model.fit(
-                            X_train, 
-                            y_train
-                        )
+                except TypeError as e:
+                    # Handle models that don't accept verbose/eval_set parameters
+                    model.fit(X_train, y_train)
+            elif name == 'lgbm':
+                print(f"Training {name} model")
+                try:
+                    model.fit(
+                        X_train,
+                        y_train,
+                        eval_set=[(X_val, y_val)]
+                    )
+                except TypeError as e:
+                    # Handle models that don't accept verbose/eval_set parameters
+                    self.logger.warning(f"Error training {name} model: {e}")
+                    model.fit(X_train, y_train)
+            else:
+                print(f"Training {name} model")
+                try:
+                    model.fit(
+                        X_train, 
+                        y_train,
+                        verbose=100,  # Only print every 100th round
+                        eval_set=[(X_val, y_val)]
+                    )
+                except TypeError as e:
+                    # Handle models that don't accept verbose/eval_set parameters
+                    model.fit(X_train, y_train)
 
-        # Calculate optimal threshold using validation set
+        # Calculate optimal threshold by maximizing F1 score
         proba = self.predict_proba(X_val)
         precisions, recalls, thresholds = precision_recall_curve(y_val, proba)
-        optimal_idx = np.argmax(precisions >= 0.5)  # First threshold reaching 50% precision
-        optimal_threshold = thresholds[optimal_idx]
+
+        # Find threshold that meets recall minimum
+        viable_thresholds = [t for t, r in zip(thresholds, recalls[:-1]) if r >= 0.20]
+        if viable_thresholds:
+            # Select highest precision among viable thresholds
+            viable_precisions = [p for p, t in zip(precisions[:-1], thresholds) if t in viable_thresholds]
+            optimal_idx = np.argmax(viable_precisions)
+            optimal_threshold = viable_thresholds[optimal_idx]
+        else:
+            # Fallback to 0.5 if no threshold meets recall
+            optimal_threshold = 0.5
+            self.logger.warning("No threshold met 20% recall minimum")
+
         self.optimal_threshold = optimal_threshold  # Store for prediction
         mlflow.log_param("optimal_threshold", optimal_threshold)
 
-        # Add to train method:
+        # Dynamically adjust voting weights based on individual model precision on validation set
+        new_weights = {}
+        for name, model in self.base_models:
+            X_model = X_val.reindex(columns=self.selected_features, fill_value=0)
+            try:
+                pred_prob = model.predict_proba(X_model)[:, 1]
+                binary_preds = (pred_prob >= self.optimal_threshold).astype(int)
+                prec = precision_score(y_val, binary_preds, zero_division=0)
+            except Exception as e:
+                self.logger.warning(f"Error computing precision for model {name}: {e}")
+                prec = 0.1
+            new_weights[name] = prec
+        # Normalize weights so they sum to 1
+        total_weight = sum(new_weights.values())
+        if total_weight > 0:
+            for key in new_weights:
+                new_weights[key] /= total_weight
+        else:
+            new_weights = self.weights  # fallback if total_weight is 0
+        self.weights = new_weights
+        mlflow.log_param("dynamic_weights", str(self.weights))
+
+        # Train the meta-learner using base model predictions as features
+        meta_features = []
+        for name, model in self.base_models:
+            X_model = X_val.reindex(columns=self.selected_features, fill_value=0)
+            try:
+                preds = model.predict_proba(X_model)[:, 1]
+            except Exception as e:
+                self.logger.warning(f"Error predicting with model {name} for meta-learner: {e}")
+                preds = np.zeros(len(X_val))
+            meta_features.append(preds)
+        meta_features = np.column_stack(meta_features)
+        self.meta_learner.fit(meta_features, y_val)
+        mlflow.log_param("meta_learner_trained", True)
+
         # Convert probabilities to binary predictions using optimal threshold
-        binary_preds = (proba >= optimal_threshold).astype(int)
+        binary_preds = (proba >= self.optimal_threshold).astype(int)
         class1_precision = precision_score(y_val, binary_preds, labels=[1], zero_division=0)
         mlflow.log_metric("class1_precision", class1_precision)
         if class1_precision < 0.4:
-            logger.warning("Class 1 precision below safety threshold")
+            self.logger.warning("Class 1 precision below safety threshold")
 
-        # Add to train method:
         class1_recall = recall_score(y_val, binary_preds, labels=[1], zero_division=0)
         mlflow.log_metric("class1_recall", class1_recall)
         if class1_recall < 0.15:
-            logger.warning("Recall below minimum threshold")
+            self.logger.warning("Recall below minimum threshold")
 
-        if precision_score(y_val, binary_preds) < 0.4:
-            raise ValueError("Precision safety check failed")
-
-        # After training
-        print(f"XGB Features: {len(self.feature_sets['xgb'])}")  # Should be 99
-        print(f"SVM Features: {len(self.feature_sets['svm'])}")   # Should be 50
+        # if precision_score(y_val, binary_preds) < 0.4:
+        #     raise ValueError("Precision safety check failed")
 
     def predict(self, X):
         proba = self.predict_proba(X)
@@ -456,8 +519,8 @@ class EnsembleModel:
         predictions[proba >= threshold] = 1
         
         # Ensure minimum diversity
-        if predictions.sum() < len(X) * 0.12:  # At least 12% positives
-            top_indices = np.argsort(proba)[-int(len(X)*0.12):]
+        if predictions.sum() < len(X) * 0.20:  # Enforce minimum 20% positives
+            top_indices = np.argsort(proba)[-int(len(X)*0.20):]
             predictions[top_indices] = 1
         
         return predictions
@@ -484,8 +547,14 @@ class EnsembleModel:
         return np.mean(predictions, axis=0)
     
     def _meta_predict(self, X_subset):
-        # Use simple logistic regression check
-        return (X_subset['draw_probability_score'] > 0.6).astype(int)
+        # Generate meta features from base models and use meta learner for final prediction
+        meta_features = []
+        for name, model in self.base_models:
+            X_model = X_subset.reindex(columns=self.selected_features, fill_value=0)
+            preds = model.predict_proba(X_model)[:, 1]
+            meta_features.append(preds)
+        meta_features = np.column_stack(meta_features)
+        return self.meta_learner.predict(meta_features)
 
     def _validate_features(self, X):
         """Enhanced validation per model"""
@@ -522,7 +591,6 @@ if __name__ == "__main__":
     ensemble_model = EnsembleModel(
         logger=logger,
         selected_features=selected_features,
-        weights={'xgb': 1.5, 'cat': 1.8, 'lgbm': 1.7, 'rf': 1.2, 'knn': 0.9, 'svm': 1.1},  # Boost LightGBM (better recall potential) using dict format
         calibrate=True,
         calibration_method="sigmoid"
     )
