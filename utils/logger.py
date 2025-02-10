@@ -16,8 +16,6 @@ from logging.handlers import RotatingFileHandler
 import structlog
 from pythonjsonlogger import jsonlogger
 
-from data.Create_data.pipeline.config_loader import load_config, get_environment
-
 class ReadableFormatter(logging.Formatter):
     def format(self, record):
         # Format the basic message

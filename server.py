@@ -68,15 +68,65 @@ def echo(message: str) -> str:
     logger.info(f"Echoing message: {message}")
     return f"Echo: {message}"
 
+# MCP Tool: Get Docs Folder Markdown Files.
+@mcp.tool()
+def get_docs_markdown() -> str:
+    """
+    Retrieves and concatenates all Markdown files from the docs folder.
+    """
+    logger.info("Retrieving Markdown files from the docs folder.")
+    docs_folder = "docs"
+    merged_markdown = ""
+    if os.path.isdir(docs_folder):
+        for fname in sorted(os.listdir(docs_folder)):
+            # Process only Markdown files.
+            if fname.lower().endswith(".md"):
+                fpath = os.path.join(docs_folder, fname)
+                try:
+                    with open(fpath, 'r') as f:
+                        content = f.read()
+                    merged_markdown += f"\n=== {fname} ===\n{content}\n"
+                except Exception as e:
+                    logger.error(f"Error reading {fpath}: {e}")
+                    merged_markdown += f"\n=== {fname} ===\nError reading file: {e}\n"
+    else:
+        logger.warning("Docs folder not found.")
+        merged_markdown = "Docs folder not found."
+    return merged_markdown.strip()
+
+# Helper function: Read all files in the docs folder.
+def read_docs_folder() -> str:
+    docs_folder = "docs"
+    docs_content = ""
+    if os.path.isdir(docs_folder):
+        for fname in sorted(os.listdir(docs_folder)):
+            fpath = os.path.join(docs_folder, fname)
+            if os.path.isfile(fpath):
+                try:
+                    with open(fpath, 'r') as f:
+                        content = f.read()
+                    docs_content += f"\n=== {fname} ===\n{content}\n"
+                except Exception as e:
+                    logger.error(f"Error reading {fpath}: {e}")
+                    docs_content += f"\n=== {fname} ===\nError reading file: {e}\n"
+    else:
+        logger.warning("Docs folder not found.")
+    return docs_content.strip()
+
 # MCP Prompt: Provide a file context prompt for AI-enhanced responses.
 @mcp.prompt()
 def file_context_prompt(file_path: str) -> str:
     """
-    Creates a prompt using the file's content, suitable for AI documentation.
+    Creates a prompt using the file's content along with the contents 
+    of your docs folder for comprehensive AI documentation.
     """
     logger.info(f"Generating file context prompt for: {file_path}")
     content = read_file(file_path)
-    return f"File content for {file_path}:\n{content}"
+    docs_content = read_docs_folder()
+    final_prompt = f"File content for {file_path}:\n{content}"
+    if docs_content:
+        final_prompt += f"\n\n--- Docs Folder Context ---\n{docs_content}"
+    return final_prompt
 
 # Create a FastAPI app and mount the MCP instance at /mcp.
 app = FastAPI(
@@ -112,8 +162,8 @@ async def sse_endpoint():
 @app.get("/ai_context")
 async def ai_context(file_path: str):
     """
-    Returns enhanced context (file content and additional details) for a specified file,
-    which can be used to improve AI responses.
+    Returns enhanced context (file content combined with docs folder content) for a 
+    specified file, which can be used to improve AI responses.
     """
     logger.info(f"Generating AI context for file: {file_path}")
     try:
@@ -130,6 +180,14 @@ async def root():
         "message": "Enhanced MCP Server is running",
         "endpoints": ["/mcp", "/sse", "/ai_context"]
     })
+
+@app.get("/tools")
+async def tools_endpoint():
+    """
+    Returns a list of registered MCP tools.
+    """
+    # Update the static list to reflect both tools.
+    return {"tools": ["echo", "get_docs_markdown"]}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

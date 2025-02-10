@@ -11,7 +11,7 @@ SELECTCOLUMNS(
             future_matches[venue_encoded],
             future_matches[venue_capacity],
             future_matches[venue_grass],
-            future_matches[venue_name],
+            future_matches[venue_name], 
             future_matches[league_encoded],
             future_matches[league_name],
             future_matches[referee],
@@ -36,26 +36,21 @@ SELECTCOLUMNS(
             future_matches[away_league_position],
             future_matches[Away_offsides_mean],
             future_matches[Away_passes_mean],
-         
             future_matches[Away_points_cum],
             future_matches[away_possession_mean],
             future_matches[away_red_cards_mean],
             future_matches[away_red_cards_rollingaverage],
             future_matches[Away_saves_mean],
             future_matches[away_saves_rollingaverage],
-        
             future_matches[away_shot_on_target_mean],
             future_matches[away_shot_on_target_rollingaverage],
             future_matches[away_shots_on_target_accuracy_rollingaverage],
             future_matches[Away_team_matches],
-       
             future_matches[away_win_rate],
             future_matches[Away_wins],
             future_matches[away_xG_rolling_rollingaverage],
             future_matches[away_yellow_cards_mean],
             future_matches[away_yellow_cards_rollingaverage],
-   
-   
             future_matches[fixture_id],
             future_matches[h2h_avg_goals],
             future_matches[h2h_draws], 
@@ -78,33 +73,28 @@ SELECTCOLUMNS(
             future_matches[home_league_position],
             future_matches[Home_offsides_mean],
             future_matches[Home_passes_mean],
-   
             future_matches[Home_points_cum],
             future_matches[Home_possession_mean],
             future_matches[home_red_cards_mean],
             future_matches[home_red_cards_rollingaverage],
             future_matches[Home_saves_mean],
             future_matches[home_saves_rollingaverage],
-         
             future_matches[Home_shot_on_target_mean],
             future_matches[home_shot_on_target_rollingaverage],
             future_matches[home_shots_on_target_accuracy_rollingaverage],
             future_matches[Home_team_matches],
-          
             future_matches[home_win_rate],
             future_matches[Home_wins],
             future_matches[home_xG_rolling_rollingaverage],
             future_matches[home_yellow_cards_mean],
             future_matches[home_yellow_cards_rollingaverage],
-  
             future_matches[referee_foul_rate],
             future_matches[home_founded_year],
             future_matches[away_founded_year],
             future_matches[season_encoded],
             future_matches[Season_league]
-    
         ),
-        future_matches[away_average_points] >= 0 || future_matches[Away_fouls_mean] <> BLANK()
+        future_matches[away_average_points] <> BLANK() || future_matches[Away_fouls_mean] <> BLANK()
     ),
     "home_encoded", ROUNDUP(future_matches[home_encoded], 0),
     "away_encoded", ROUNDUP(future_matches[away_encoded], 0),

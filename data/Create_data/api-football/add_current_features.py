@@ -65,14 +65,14 @@ class MongoDBFeatures:
                 home_stats = fixture.get('home', {}).get('stats', {})
                 if not home_stats:
                     error_count += 1
-                    print(f"Missing home stats for fixture: {fixture.get('fixture_id')}")
+                    # print(f"Missing home stats for fixture: {fixture.get('fixture_id')}")
                     continue
                 
                 # Extract away team stats - add safety checks    
                 away_stats = fixture.get('away', {}).get('stats', {})
                 if not away_stats:
                     error_count += 1
-                    print(f"Missing away stats for fixture: {fixture.get('fixture_id')}")
+                    # print(f"Missing away stats for fixture: {fixture.get('fixture_id')}")
                     continue
                 
                 fixture_id = fixture['fixture_id']
@@ -705,41 +705,37 @@ class MongoDBFeatures:
         
         # Select and rename columns
         columns = [
-            'fixture_id', 'away_team_id', 'away_team_name', 
-            'date', 'home_team_id', 'home_team_name',
-            'league_id', 'league_name', 'league_round', 'league_season',
-            'referee', 'venue_id', 'venue_name'
+            'fixture_id', 'date',
+            'league_id', 'league_season', 'league_name', 
+            'referee', 'venue_name', 'venue_id',
+            'home_team_id', 'home_team_name', 'away_team_id', 'away_team_name', 
         ]
         
         df = df[columns]
         df.columns = [
-            'fixture_id', 'away_team_id', 'away_team_name', 
-            'date', 'home_team_id', 'home_team_name',
-            'league_id', 'league_name', 'league_round', 'league_season',
-            'referee', 'venue_id', 'venue_name'
+            'fixture_id', 'date',
+            'league_id', 'league_season', 'league_name', 
+            'referee', 'venue_name', 'venue_id',
+            'home_team_id', 'home_team_name', 'away_team_id', 'away_team_name', 
         ]
-       
         df = df.rename(columns={'date': 'Date'})
         # print(f"Future matches columns: {df.columns}")
         # Load training data to merge with future fixtures
         try:
             training_df = pd.DataFrame(training_data)
-
             # Get common columns between training data and future fixtures
             common_cols = list(set(df.columns).intersection(set(training_df.columns)))
             print(f"Common columns: {common_cols}")
             merge_df = training_df(columns=common_cols)
             # print(f"Training data columns: {merge_df.columns}")
-              # Fix type mismatches
+            # Fix type mismatches
             df['fixture_id'] = df['fixture_id'].astype(int)
-
             # df['season_encoded'] = df['season_encoded'].astype(training_df['season_encoded'].dtype)
             # # Check dtypes for key columns
             # for col in common_cols:
             #     if col in training_df.columns and col in df.columns:
             #         print(f"Training {col} dtype: {training_df[col].dtype}")
             #         print(f"Future {col} dtype: {df[col].dtype}")
-
             # Merge data on common columns while preserving df's structure
             df = pd.merge(
                 df,
@@ -747,7 +743,6 @@ class MongoDBFeatures:
                 on='fixture_id',
                 how='left'
             )
-
             # Ensure we only keep the original columns from df
             df = df[columns]
             

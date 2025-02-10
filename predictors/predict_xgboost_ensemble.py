@@ -5,22 +5,24 @@ from pathlib import Path
 import json
 import os
 import sys
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 import pymongo
 import mlflow.xgboost
 import mlflow.pyfunc
 from pymongo import MongoClient
+from sklearn.metrics import recall_score, f1_score
+from xgboost import XGBClassifier
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.create_evaluation_set import get_real_api_scores_from_excel, setup_mlflow_tracking, create_prediction_set_ensemble
 
-mlruns_dir = setup_mlflow_tracking("xgboost_draw_model")
+experiment_name = "xgboost_draw_model"
+mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 class DrawPredictor:
-
     """Predictor class for draw predictions using the stacked model."""
-    
+
     def __init__(self, model_uri: str):
         """Initialize predictor with model URI."""
         # Set up MLflow tracking URI based on current environment
@@ -31,59 +33,23 @@ class DrawPredictor:
             # Get feature names from signature
             if self.test_model.metadata.signature:
                 self.required_features = self.test_model.metadata.signature.inputs.input_names()
-                print(f"Features from signature: {self.required_features}")
+                print(f"Features from signature: {len(self.required_features)}")
         except Exception as e:
             print(f"Error loading model: {e}")
-
-        # Define expected input columns based on model requirements
-        # self.expected_columns = [
-        #     "position_equilibrium", "venue_match_count", "league_draw_rate", "possession_balance",
-        #     "xg_form_similarity", "away_poisson_xG", "home_position_form", "away_team_elo",
-        #     "venue_draws", "form_difference", "away_attack_strength_home_league_position_interaction",
-        #     "home_poisson_xG", "away_set_piece_threat", "away_passing_efficiency", "away_h2h_weighted",
-        #     "venue_draw_rate", "home_corners_mean", "home_draw_rate", "home_passing_efficiency",
-        #     "Away_offsides_mean", "home_attack_xg_power", "away_average_points", "away_style_compatibility",
-        #     "home_style_compatibility", "Home_shot_on_target_mean", "league_draw_rate_composite",
-        #     "home_season_form", "home_xg_form", "Home_team_matches", "away_referee_impact",
-        #     "strength_possession_interaction", "season_progress", "away_form_stability",
-        #     "away_form_momentum_away_attack_strength_interaction", "Home_passes_mean", "home_goal_momentum",
-        #     "home_h2h_wins", "away_scoring_efficiency", "goal_pattern_similarity", "home_form_weighted_xg",
-        #     "Home_offsides_mean", "combined_draw_rate", "avg_league_position", "away_historical_strength",
-        #     "home_yellow_cards_rollingaverage", "seasonal_draw_pattern", "draw_xg_indicator",
-        #     "away_offensive_sustainability", "away_form_weighted_xg", "home_ref_interaction",
-        #     "away_attack_conversion", "home_defense_weakness", "fixture_id", "league_home_draw_rate",
-        #     "Home_possession_mean", "home_team_elo", "away_shots_on_target_accuracy_rollingaverage",
-        #     "away_corners_mean", "home_yellow_cards_mean", "away_days_since_last_draw", "h2h_avg_goals",
-        #     "home_goal_rollingaverage", "form_position_interaction", "away_fouls_rollingaverage",
-        #     "draw_propensity_score", "Home_draws", "referee_goals_per_game", "away_attack_xg_power",
-        #     "away_defensive_organization", "elo_similarity_form_similarity", "home_corners_rollingaverage",
-        #     "away_crowd_resistance", "away_xg_momentum", "Away_saves_mean", "Home_goal_difference_cum",
-        #     "xg_equilibrium", "home_attack_strength_home_league_position_interaction", "defensive_stability",
-        #     "away_ref_interaction", "home_defense_index", "away_defense_index", "strength_equilibrium",
-        #     "home_weighted_attack", "away_corners_rollingaverage", "away_shot_on_target_mean",
-        #     "away_attack_strength", "away_saves_rollingaverage", "form_weighted_xg_diff", "away_encoded",
-        #     "home_offensive_sustainability", "draw_probability_score", "venue_capacity", "Home_fouls_mean",
-        #     "home_xG_rolling_rollingaverage", "away_possession_mean", "away_shot_on_target_rollingaverage",
-        #     "away_draw_rate", "away_yellow_cards_mean", "home_xg_momentum"
-        # ]
-        # Load the threshold from the model if available
         self.threshold = 0.50
-    
+
     def _validate_input(self, df: pd.DataFrame) -> None:
         """Validate input dataframe has all required columns."""
         missing_cols = set(self.required_features) - set(df.columns)
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
 
-    
     def predict(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Make predictions and return results with probabilities."""
-        
-        # self._validate_input(predict_df)
         # Get probabilities
         probas = self.model.predict_proba(df)
-        predictions = self.model.predict(df)
-   
+        # Apply threshold to get predictions
+        predictions = (probas[:, 1] >= self.threshold).astype(int)
         # Prepare results
         results = {
             'predictions': predictions.tolist(),
@@ -96,33 +62,68 @@ class DrawPredictor:
         print(f"results: {results['prediction_rate']}")
         return results
 
-# def _preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
-#     """Preprocess data to handle number formats and missing values."""
-#     # Create a copy to avoid modifying original data
-#     df = df.copy()
-    
-#     # Replace comma with dot for ALL numeric-like columns
-#     for col in df.columns:
-#         try:
-#             if col in df.columns:
-#                 df[col] = (
-#                     df[col]
-#                     .apply(lambda x: str(x) if pd.notnull(x) else '0')
-#                     .str.strip()
-#                     .str.replace('[^0-9.eE-]', '', regex=True)
-#                     .apply(lambda x: '0' if x in ['e', 'e-', 'e+'] else x)
-#                     .apply(lambda x: '1' + x if x.lower().startswith(('e', 'e-', 'e+')) else x)
-#                     .apply(lambda x: x.replace('-', 'e-', 1) if '-' in x and 'e' not in x.lower() else x)
-#                     .replace('', '0')
-#                     .pipe(pd.to_numeric, errors='coerce')
-#                     .replace([np.inf, -np.inf], np.nan)
-#                     .fillna(0)
-#                 )
-#         except Exception as e:
-#             print(f"Error converting column {col}: {str(e)}")
-#             continue
-    
-#     return df
+    def _find_optimal_threshold(
+        self,
+        model: XGBClassifier,
+        features_val: pd.DataFrame,
+        target_val: pd.Series) -> Tuple[float, Dict[str, float]]:
+        """Find optimal prediction threshold prioritizing precision while maintaining recall.
+        Args:
+            model: Trained XGBoost model
+            features_val: Validation features
+            target_val: Validation targets
+        Returns:
+            Tuple of (optimal threshold, metrics dictionary)
+        """
+        try:
+            prediction_df = features_val.copy()
+            prediction_df = prediction_df[self.required_features]
+            probas = self.model.predict_proba(prediction_df)[:, 1]
+            best_metrics = {'precision': 0, 'recall': 0, 'f1': 0, 'threshold': 0.5}
+            best_score = 0
+            
+            # Focus on higher thresholds for better precision, starting from 0.5
+            for threshold in np.arange(0.5, 0.65, 0.01):
+                preds = (probas >= threshold).astype(int)
+                true_positives = ((preds == 1) & (target_val == 1)).sum()
+                false_positives = ((preds == 1) & (target_val == 0)).sum()
+                true_negatives = ((preds == 0) & (target_val == 0)).sum()
+                false_negatives = ((preds == 0) & (target_val == 1)).sum()
+                # Calculate metrics
+                recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+                # Only consider thresholds that meet minimum recall
+                if recall >= 0.14:
+                    precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+                    f1 = f1_score(target_val, preds)
+                    # Modified scoring to prioritize precision
+                    score = precision
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_metrics.update({
+                            'precision': precision,
+                            'recall': recall,
+                            'f1': f1,
+                            'threshold': threshold
+                        })
+            self.threshold = best_metrics['threshold']
+            print(f"Optimal threshold set to {self.threshold}")        
+            
+            if best_metrics['recall'] < 0.14:
+                print(
+                    f"Could not find threshold meeting recall requirement. "
+                    f"Best recall: {best_metrics['recall']:.4f}"
+                    f"Best precision: {best_metrics['precision']:.4f}"
+                )
+            print(
+                f"New best threshold {best_metrics['threshold']:.3f}: "
+                f"Precision={best_metrics['precision']:.4f}, Recall={best_metrics['recall']:.4f}"
+            )
+            return self.threshold, best_metrics
+            
+        except Exception as e:
+            print(f"Error in threshold optimization: {str(e)}")
+            raise
 
 def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
     """Make predictions and return results with probabilities."""
@@ -134,9 +135,8 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Initialize predictor
         predictor = DrawPredictor(model_uri)
         prediction_df = prediction_data.copy()
-        print(f"Prediction data len(prediction_df): {len(prediction_df)}")
-
-         # Add column validation
+        # print(f"Prediction data len(prediction_df): {len(prediction_df)}")
+        # Add column validation
         predictor._validate_input(prediction_df)
         
         # Add dtype consistency check with proper DataFrame handling
@@ -144,13 +144,23 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
             raise TypeError("prediction_data must be a pandas DataFrame")
         
         prediction_df = prediction_data[predictor.required_features]
+        # Merge prediction data with real scores to get is_draw column
+        predict_df = prediction_df.merge(
+            real_scores_df[['fixture_id', 'is_draw']],
+            on='fixture_id',
+            how='left'
+        )
+        # Drop rows with NaN in is_draw column
+        predict_df = predict_df.dropna(subset=['is_draw'])
+        print(f"Merged prediction data with real scores and dropped NaN is_draw. Shape: {predict_df.shape}")
         # Make predictions first
+        threshold, best_metrics = predictor._find_optimal_threshold(predictor.model, predict_df, predict_df['is_draw'])
         results = predictor.predict(prediction_df)
         print(f"Prediction successful...")
-
-        # Add predictions to dataframe
-        prediction_df['draw_predicted'] = results['predictions']
-        prediction_df['draw_probability'] = [round(prob, 2) for prob in results['draw_probabilities']]
+        # Add predictions to dataframe using .loc to avoid SettingWithCopyWarning
+        prediction_df = prediction_df.copy()  # Create explicit copy
+        prediction_df.loc[:, 'draw_predicted'] = results['predictions']
+        prediction_df.loc[:, 'draw_probability'] = [round(prob, 2) for prob in results['draw_probabilities']]
         # Get real scores and merge - this is where the error occurs
         if 'fixture_id' in prediction_data.columns:
             print(f"prediction_data.columns: {prediction_data.shape}")
@@ -166,22 +176,19 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                         real_scores_df['is_draw'] = None
                 # Merge with validation data
                 prediction_df = prediction_df.merge(
-                    prediction_data, 
+                    prediction_data[['fixture_id', 'league_name'] + [col for col in prediction_data.columns if col not in prediction_df.columns]], 
                     on='fixture_id', 
                     how='left'
                 )
-
                 # Merge with validation data
                 matches_with_results = prediction_df.merge(
                     real_scores_df, 
                     on='fixture_id', 
                     how='left'
                 )
-                
                 # Ensure is_draw is properly typed
                 if 'is_draw' in matches_with_results.columns:
                     matches_with_results['is_draw'] = matches_with_results['is_draw'].fillna(-1).astype(int)
-                
                 if len(matches_with_results) > 0 and 'is_draw' in matches_with_results.columns:
                     # Filter out rows without valid is_draw values
                     valid_matches = matches_with_results[matches_with_results['is_draw'] != -1]
@@ -198,10 +205,10 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                                         (valid_matches['is_draw'] == 1)).sum()
                         
                         print(f"\nDetailed Metrics:")
-                        print(f"True Positives: {true_positives}")
-                        print(f"False Positives: {false_positives}")
-                        print(f"True Negatives: {true_negatives}")
-                        print(f"False Negatives: {false_negatives}")
+                        # print(f"True Positives: {true_positives}")
+                        # print(f"False Positives: {false_positives}")
+                        # print(f"True Negatives: {true_negatives}")
+                        # print(f"False Negatives: {false_negatives}")
                         print(f"Actual Draws: {valid_matches['is_draw'].sum()}")
                         print(f"Predicted Draws: {valid_matches['draw_predicted'].sum()}")
                         
@@ -218,14 +225,13 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                         print(f"Accuracy: {accuracy:.2%}")
                         print(f"Precision: {precision:.2%}")
                         print(f"Recall: {draws_recall:.2%}")
+                        print(f"Threshold: {threshold:.2%}")
                     else:
                         print("Warning: No match outcomes available for metric calculation")
             else:
                 print("Warning: No real scores data available")
                 matches_with_results = prediction_df.copy()
-        
         return matches_with_results, precision, draws_recall
-        
     except Exception as e:
         print(f"Error during prediction: {str(e)}")
         print(f"Error type: {type(e).__name__}")
@@ -236,14 +242,22 @@ def main():
     best_model_uri = None
     best_predictions = pd.DataFrame()  # Initialize empty DataFrame
     predicted_df = pd.DataFrame()  # Initialize predicted_df
-    
     # Model URIs to evaluate
     model_uris = [
         'd0adbbe461e54cc2b981f7964cb68d96',
         '984ff71c0c704517a371048da7044202',
-        '2ac6b3a56102419b80e9ee0c6b598b2d'
+        '2ac6b3a56102419b80e9ee0c6b598b2d',
+        '37336ab51b674881abbe2a7f5d994aba',
+        'bf43e3b6010c4c3db6c3b0d05271716d',
+        '9ec2a33f1e294401a9cb763332c566ee',
+        '7270e387de494f8ca34242db16ff50f1',
+        '0f07cc5b724247dfbce53be4d02a4372',
+        '84dbcee0122148feb8c748f7c38a9d9d',
+        'cd82a16976744025a9793e57d9917368',
+        'c31b83f6d2904d8a9815e4b9dfb14e3c',
+        '0a73f8bb70a14c2499ac8a0f76a2df01',
+        '2fb3b8049d104b2dbb0752be87c7d0ce'
     ]
-
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
     prediction_data = prediction_df.copy()
@@ -253,24 +267,16 @@ def main():
         # Get real scores with error handling
         real_scores_df = get_real_api_scores_from_excel()
         print(f"real_scores_df: {len(real_scores_df)}")
-        
-
     except Exception as e:
         print(f"Error processing fixture IDs: {str(e)}")
         print(f"Error type: {type(e).__name__}")
         # Create empty DataFrame to allow continuation
         real_scores_df = pd.DataFrame()
-    
-    # # Get selected columns using standardized function
-    # selected_columns = import_selected_features_ensemble('all')
-    # print(f"Number of selected columns: {len(selected_columns)}")
-    
     # Evaluate each model
     for uri in model_uris:
         try:
             uri_full = f"runs:/{uri}/xgboost_api_model"
             predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full, real_scores_df)
-
             # Add validation check
             if not isinstance(predicted_df, pd.DataFrame) or predicted_df.empty:
                 print(f"Skipping invalid predictions from model {uri}")
@@ -282,11 +288,9 @@ def main():
                 best_predictions = predicted_df.copy()
                 print(f"New best model: {uri} with precision: {precision:.2%}")
                 print(f"Draws recall: {draws_recall:.2%}")
-
         except Exception as e:
             print(f"Error evaluating model {uri}: {str(e)}")
             continue
-
     print(f"\nBest model URI: {best_model_uri}")
     print(f"Best precision: {best_precision:.2%}")
     
@@ -296,9 +300,13 @@ def main():
         predicted_df = pd.DataFrame(columns=['fixture_id', 'draw_predicted', 'draw_probability'])
     else:
         predicted_df = best_predictions
-   
+        # Reorder columns to place draw_predicted and draw_probability last
+        cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
+        cols.extend(['draw_predicted', 'draw_probability'])
+        predicted_df = predicted_df[cols]
+    
     # Save results
-    output_path = Path("./data/prediction/predictions_xgboost_api.xlsx")
+    output_path = Path("./data/prediction/predictions_xgboost_ensemble.xlsx")
     predicted_df.to_excel(output_path, index=False)
     print(f"\nPredictions saved to: {output_path}")
 

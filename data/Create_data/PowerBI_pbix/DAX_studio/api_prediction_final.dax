@@ -11,7 +11,7 @@ SELECTCOLUMNS(
     "home_goals", ROUNDUP(model_data_training[home_goals], 2),
     "away_goals", ROUNDUP(model_data_training[away_goals], 2),
     "fixture_id", ROUNDUP(model_data_training[fixture_id], 2),
-    "AwayFormStdDev",model_data_training[AwayFormStdDev],
+    "AwayFormStdDev",model_data_training[AwayFormStdDev], 
     "MeanStdDev",model_data_training[MeanStdDev],
     "HomeFormStdDev",model_data_training[HomeFormStdDev],
     "attack_xg_equilibrium", ROUNDUP(model_data_training[attack_xg_equilibrium], 2),

@@ -26,14 +26,11 @@ except Exception as e:
     sys.path.append(os.getcwd().parent)
     print(f"Fallback to current directory: {os.getcwd().parent}")
 
-
 from utils.advanced_goal_features import AdvancedGoalFeatureEngineer
 from utils.mlflow_utils import MLFlowConfig, MLFlowManager
 from utils.logger import ExperimentLogger
 
-
 logger = ExperimentLogger(experiment_name='create_evaluation_set', log_dir='logs/create_evaluation_set')
-
 
 # Error codes for standardized logging
 class DataProcessingError:
@@ -55,7 +52,6 @@ class DataProcessingError:
     # External services
     MONGODB_CONNECTION_ERROR = "E301"
     MLFLOW_ERROR = "E302"
-
 
 # Retry decorator for file operations
 def retry_on_error(max_retries: int = 3, delay: float = 1.0):
@@ -205,15 +201,12 @@ def create_parquet_files(
     output_path: str,
     partition_cols: Optional[List[str]] = None) -> None:
     """Create Parquet files from a DataFrame.
-
     This function takes a Pandas DataFrame and saves it as Parquet files.
     It supports partitioning by specified columns and handles error logging.
-
     Args:
         data: The DataFrame to be saved.
         output_path: The base name for the Parquet files.
         partition_cols: Optional list of columns to partition by.
-
     Raises:
         ValueError: If the DataFrame is empty or if partitioning fails.
         Exception: For other errors during Parquet file creation.
@@ -224,10 +217,7 @@ def create_parquet_files(
             error_code=DataProcessingError.EMPTY_DATASET
         )
         raise ValueError("DataFrame is empty")
-
-
     logger.info(f"Creating Parquet files at: {output_path}")
-
     try:
         if partition_cols:
             data.to_parquet(
@@ -1074,7 +1064,6 @@ def create_prediction_set_api() -> pd.DataFrame:
         )
         raise
 
-
 # ENSEMBLE FUNCTIONS
 def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union[dict, list]:
     """Import selected features for XGBoost, CatBoost, and LightGBM models from JSON file.
@@ -1152,16 +1141,13 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
 
 def create_ensemble_evaluation_set() -> pd.DataFrame:
     """Create evaluation set for ensemble training with selected features and evaluation columns.
-
     This function creates a dataset containing all features from selected_features_ensemble.json
     along with the target variable (is_draw) and an evaluator column for model comparison.
-
     Returns:
         pd.DataFrame: DataFrame containing:
             - All features from selected_features_ensemble
             - is_draw: Target variable (1 for draw, 0 otherwise)
             - evaluator: Column for model evaluation tracking
-
     Raises:
         FileNotFoundError: If required data files are not found
         ValueError: If data validation fails
@@ -1172,11 +1158,10 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
         data_path = "data/prediction/api_prediction_eval.xlsx"
         logger.info(f"Loading training data from: {data_path}")
         data = pd.read_excel(data_path)
-     
 
         # Create target variable
         data['is_draw'] = (data['match_outcome'] == 2).astype(int)
-           # Select features and target
+        # Select features and target 
         columns_to_drop = [
             'match_outcome',
             'home_goals',
@@ -1204,20 +1189,16 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
         # Import selected features for ensemble models
         selected_features =  data.columns.tolist()  #import_selected_features_ensemble()
         all_features = [feature for feature in selected_features if feature != 'is_draw']
-        #list(
-        #    set(selected_features['xgb'] + selected_features['cat'] + selected_features['lgbm'])
-        #)
         
         # Validate all features exist in data
         missing_features = [feature for feature in all_features if feature not in data.columns]
         if missing_features:
-
             logger.info(
                 f"Missing required features: {missing_features}",
                 error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
             )
             raise ValueError(f"Missing required features: {missing_features}")
-        
+
         # Select features and add evaluator column
         evaluation_data = data[selected_features].copy()
         evaluation_data['is_draw'] = data['is_draw']
@@ -1235,7 +1216,6 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
         X_val = evaluation_data.drop(columns=['is_draw'])
         y_val = evaluation_data['is_draw']
         
-     
         # Final validation
         logger.info(f"Ensemble evaluation set created with shape: {evaluation_data.shape}")
         logger.info(f"Draw rate: {evaluation_data['is_draw'].mean():.2%}")
@@ -1243,7 +1223,6 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
         logger.info(f"Test set shape: {y_val.shape}")
         
         return X_val, y_val
-
     except FileNotFoundError as e:
 
         logger.info(
@@ -1380,7 +1359,7 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
         logger.info(f"Initial data shape: {data.shape}")
         data_copy = data.copy()
         # Column management
-        required_columns = {'fixture_id', 'Date', 'Home', 'Away'}
+        required_columns = {'fixture_id', 'Date', 'Home', 'Away', 'league_name'}
         missing = required_columns - set(data.columns)
         if missing:
             logger.info(f"Missing required columns: {missing}", error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS)
@@ -1390,14 +1369,14 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
         if 'date_encoded' not in data.columns:
             try:
                 data['date_encoded'] = (pd.to_datetime(data['Date'], errors='coerce') 
-                                      - pd.Timestamp('2020-08-11')).dt.days
+                                        - pd.Timestamp('2020-08-11')).dt.days
                 data['date_encoded'] = data['date_encoded'].fillna(0).astype('int64')
             except Exception as e:
                 logger.info(f"Date encoding failed: {str(e)}", error_code=DataProcessingError.FEATURE_CREATION_FAILED)
                 raise
 
         # Optimized column dropping
-        cols_to_drop = {'Date', 'Home', 'Away'}
+        cols_to_drop = {'Date', 'Home', 'Away', 'league_name'}
         if cols_to_drop:
             data = data.drop(columns=cols_to_drop)
             logger.info(f"Dropped columns: {cols_to_drop}")
@@ -1409,10 +1388,9 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
             fill_value=0.0,
             verbose=False
         )
-
         # Restore columns using vectorized merge
         if 'Date' in data_copy.columns:
-            restore_cols = data_copy[['fixture_id', 'Date', 'Home', 'Away']]
+            restore_cols = data_copy[['fixture_id', 'Date', 'Home', 'Away', 'league_name']]
             # Only merge columns that don't already exist in data
             cols_to_restore = [col for col in restore_cols.columns if col not in data.columns]
             print(f"cols_to_restore: {cols_to_restore}")
@@ -1423,31 +1401,19 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
                     how='left',
                     validate='one_to_one'  # Ensure no duplicate fixture_ids
                 )
-
-        # # Final feature selection
-        # X = data.reindex(columns=selected_columns)  # More efficient than pd.DataFrame()
-        
-        # # Validation checks
-        # if X.isnull().sum().sum() > 0:
-        #     logger.info("Null values detected in final features")
-        #     X = X.fillna(0)
             
         logger.info(f"Final feature shape: {data.shape}")
         return data
-
     except Exception as e:
         logger.info(f"Critical error: {str(e)}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
-
 
 # OTHER FUNCTIONS
 @retry_on_error(max_retries=3, delay=1.0)
 def get_real_api_scores_from_excel() -> pd.DataFrame:
     """Get all real match scores from an Excel file.
-    
     This function retrieves all actual match results from the API prediction evaluation
     Excel file. It handles data validation and type conversion for match outcomes.
-    
     Returns:
         pd.DataFrame: DataFrame containing match results with columns:
             - fixture_id: Unique identifier for the match
@@ -1456,8 +1422,7 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
             - date: Match date
             - league: League name
             - match_outcome: Match result code (2 for draw)
-            - is_draw: Boolean indicating if match was a draw (1 or 0)
-            
+            - is_draw: Boolean indicating if match was a draw (1 or 0)       
     Raises:
         FileNotFoundError: If the data file cannot be found
         ValueError: If data validation fails
@@ -1465,7 +1430,6 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
     """
     file_path = Path("./data/prediction/api_prediction_eval.xlsx")
     logger.info(f"Loading match results from: {file_path}")
-    
     try:
         # Load Excel file
         df = pd.read_excel(file_path)
@@ -1526,22 +1490,17 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
 
 def get_selected_columns_from_mlflow_run(run_id: str) -> List[str]:
     """Retrieve selected feature columns from a specific MLflow run.
-
     This function queries MLflow to get the list of selected features that were
     used in a particular model training run. The features are extracted from
     the model signature in the MLmodel artifact file.
-
     Args:
         run_id (str): The MLflow run ID to query
-
     Returns:
         List[str]: List of selected feature column names
-
     Raises:
         ValueError: If the run ID is invalid or features cannot be retrieved
         FileNotFoundError: If the MLmodel artifact is missing
         Exception: For any other errors during retrieval
-
     Example:
         >>> columns = get_selected_columns_from_mlflow_run("1234567890abcdef")
         >>> logger.info(f"Retrieved {len(columns)} features from MLflow run")
@@ -1605,15 +1564,11 @@ def get_selected_columns_from_mlflow_run(run_id: str) -> List[str]:
             f"Error retrieving features from MLflow run {run_id}: {str(e)}"
         )
 
-
 if __name__ == "__main__":
-
     # update_api_training_data_for_draws()
     # logger.info("Training data updated successfully")
-
     update_api_data_for_draws()
     logger.info("Prediction data updated successfully")
-
     # try:
     #     run_id = "bc2a97417edb42d48967315de091d12d"
     #     selected_features = get_selected_columns_from_mlflow_run(run_id)

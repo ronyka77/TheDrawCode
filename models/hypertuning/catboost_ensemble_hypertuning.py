@@ -83,11 +83,11 @@ class GlobalHypertuner:
     RECALL_CAP: float = 0.30
 
     def __init__(self, 
-                 logger: Optional[ExperimentLogger] = None,
-                 target_precision: float = TARGET_PRECISION,
-                 target_recall: float = TARGET_RECALL,
-                 precision_weight: float = PRECISION_WEIGHT,
-                 hyperparam_spec: Dict = HYPERPARAM_SPEC):
+                logger: Optional[ExperimentLogger] = None,
+                target_precision: float = TARGET_PRECISION,
+                target_recall: float = TARGET_RECALL,
+                precision_weight: float = PRECISION_WEIGHT,
+                hyperparam_spec: Dict = HYPERPARAM_SPEC):
         self.logger = logger or ExperimentLogger()
         self.target_precision = target_precision
         self.target_recall = target_recall
@@ -166,11 +166,8 @@ class GlobalHypertuner:
         """
         try:
             # --- Always start from the base dataset ---
-
             original_X_train = features_train.copy()
             original_y_train = target_train.copy()
-
-
             # --- Tune CatBoost parameters using trial suggestions ---
             cat_params = {
                 'loss_function': 'Logloss',
@@ -190,8 +187,6 @@ class GlobalHypertuner:
                 'verbose': False
                 # 'random_seed': 42
             }
-            
-           
             # --- Create and Train the CatBoost model on oversampled data ---
             model = CatBoostClassifier(**cat_params)
             model.fit(
@@ -211,7 +206,6 @@ class GlobalHypertuner:
             trial.set_user_attr('threshold', metrics['threshold'])
             trial.set_user_attr('precision', metrics['precision'])
             trial.set_user_attr('recall', metrics['recall'])
-
             trial.set_user_attr('f1', metrics['f1'])
             
             self.logger.info(

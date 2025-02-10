@@ -104,7 +104,7 @@ def load_pretrained_model(run_id: str, model_type: str = "xgboost"):
 
 def build_base_models(selected_features, calibrate: bool = False, calibration_method: str = "isotonic"):
     """Build base models with fallback to new models if pretrained not found"""
-    pretrained_xgb_run_id = "0d72e99ade854c939e497a03cbf6e313"
+    pretrained_xgb_run_id = "cd82a16976744025a9793e57d9917368"
     pretrained_cat_run_id = "32"
     pretrained_lgbm_run_id = "53"
     pretrained_rf_run_id = "1234567890"  # Replace with actual run ID
@@ -157,24 +157,24 @@ class ModelTrainingFeatures:
         self.feature_sets = self._load_default_features()
         self.training_params = {
             'xgb': {
-                'learning_rate': 0.03712270070523545,
-                'early_stopping_rounds': 138,
-                'min_child_weight': 150,
-                'gamma': 0.07885447021911686,
-                'subsample': 0.37211323836617827,
-                'colsample_bytree': 0.9605627321007261,
-                'scale_pos_weight': 2.1916382456627153,
-                'reg_alpha': 0.00011387133610121963,
-                'reg_lambda': 1.1226490017501514,
+                'learning_rate': 0.08311627856474942,
+                'early_stopping_rounds': 184,
+                'min_child_weight': 157,
+                'gamma': 0.026573915810307977,
+                'subsample': 0.3985764276456313,
+                'colsample_bytree': 0.9696188198654059,
+                'scale_pos_weight': 2.7864672907283436,
+                'reg_alpha': 0.00044056052563292266,
+                'reg_lambda': 1.1040302522259011,
                 'max_depth': 5,
-                'n_estimators': 1765,
+                'n_estimators': 793,
                 'objective': 'binary:logistic',
                 'tree_method': 'hist',
                 'device': 'cpu',
                 'eval_metric': ['error', 'auc', 'aucpr'],
                 'verbosity': 0,
                 'nthread': -1,
-                'random_state': 42,
+                'random_state': 138,
             },
             'cat': {
                 'loss_function': 'Logloss',
@@ -205,11 +205,11 @@ class ModelTrainingFeatures:
                 'n_estimators': 3577,
                 'num_leaves': 67,
                 'early_stopping_rounds': 291,
-                'subsample': 0.7718378995036574,
-                'colsample_bytree': 0.9996212749980057,
-                'min_child_samples': 28,
                 'feature_fraction': 0.8037822667865142,
-                'bagging_freq': 2
+                'bagging_freq': 2,
+                'min_child_samples': 28,
+                'bagging_fraction': 0.7718378995036574,
+                'feature_fraction_bynode': 0.9996212749980057  # Note: feature_fraction takes precedence over colsample_bytree
             },
             'rf': {
                 'n_estimators': 784,
@@ -223,10 +223,10 @@ class ModelTrainingFeatures:
                 'class_weight': {0: 1, 1: 2.19}
             },
             'knn': {
-                'n_neighbors': 50,
+                'n_neighbors': 2,
                 'weights': 'distance',
-                'algorithm': 'brute',
-                'leaf_size': 20,
+                'algorithm': 'ball_tree',
+                'leaf_size': 14,
                 'p': 1,
                 'n_jobs': -1
             },
@@ -260,25 +260,25 @@ class ModelTrainingFeatures:
                 error_code=DataProcessingError.FILE_CORRUPTED
             )
             return {}
-            
+
     def get_features(self, model_type: str) -> list:
         """Get feature set for specific model type"""
         return self.feature_sets.get(model_type, [])
-        
+
     def get_training_params(self, model_type: str) -> dict:
         """Get training parameters for specific model type"""
         return self.training_params.get(model_type, {})
-        
+
     def update_features(self, model_type: str, features: list):
         """Update feature set for specific model type"""
         if model_type in self.feature_sets:
             self.feature_sets[model_type] = features
-            
+
     def update_training_params(self, model_type: str, params: dict):
         """Update training parameters for specific model type"""
         if model_type in self.training_params:
             self.training_params[model_type].update(params)
-         
+
     def save_training_params(self, file_path: str = 'utils/training_params.json'):
         """Save current training parameters to JSON file"""
         try:
@@ -289,7 +289,6 @@ class ModelTrainingFeatures:
                 f"Error saving training parameters: {str(e)}",
                 error_code=DataProcessingError.FILE_CORRUPTED
             )
-
 
 class EnsembleModel:
     """
@@ -524,7 +523,7 @@ class EnsembleModel:
             predictions[top_indices] = 1
         
         return predictions
-    
+
     def predict_proba(self, X):
         """Modified prediction with feature alignment"""
         predictions = []
@@ -545,7 +544,7 @@ class EnsembleModel:
             predictions.append(preds * self.weights[name])  # Explicitly use numerical weights from model registry
         
         return np.mean(predictions, axis=0)
-    
+
     def _meta_predict(self, X_subset):
         # Generate meta features from base models and use meta learner for final prediction
         meta_features = []
@@ -570,12 +569,11 @@ class EnsembleModel:
         # Check dimensions for all features
         if len(all_required) != X.shape[1]:
             raise ValueError(f"Feature count mismatch: "
-                           f"Expected {len(all_required)}, got {X.shape[1]}")
+                            f"Expected {len(all_required)}, got {X.shape[1]}")
 
 if __name__ == "__main__":
     # Load data using your existing utility functions
     selected_features = import_selected_features_ensemble('all')
-
     X_train, y_train, X_test, y_test = import_training_data_ensemble()
     X_val, y_val = create_ensemble_evaluation_set()
     X_train = X_train[selected_features]
@@ -587,7 +585,6 @@ if __name__ == "__main__":
     print(f"X_val.shape: {X_val.shape}")
     
     # Initialize ensemble model 
-
     ensemble_model = EnsembleModel(
         logger=logger,
         selected_features=selected_features,
@@ -595,7 +592,7 @@ if __name__ == "__main__":
         calibration_method="sigmoid"
     )
 
-     # Set MLflow experiment and start run
+    # Set MLflow experiment and start run
     with mlflow.start_run(run_name="ensemble_training") as run:
         # Fit the ensemble model
         ensemble_model.train(X_train, y_train, X_test, y_test)

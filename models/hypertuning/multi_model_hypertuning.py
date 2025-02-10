@@ -101,7 +101,6 @@ class MultiModelHypertuner:
             self.logger.info(f"CatBoost precision: {precision}, recall: {recall}")
             # Early prune if recall is too low
             if recall < 0.2:
-
                 raise optuna.exceptions.TrialPruned()
                 
             return 0.7 * precision + 0.3 * recall
