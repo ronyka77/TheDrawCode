@@ -486,16 +486,13 @@ def merge_and_append(updated_data, data_eval):
     return merged_data
 
 #  FOR API
-def get_selected_api_columns_draws() -> List[str]:
+def get_selected_api_columns_draws() -> List[str]: 
     """Get selected feature columns for API-based draw prediction model.
-
     This function returns a curated list of feature columns that have been
     selected based on feature importance analysis and domain knowledge.
     The features are ordered by their importance score from highest to lowest.
-
     Returns:
         List[str]: List of selected feature column names, ordered by importance.
-
     Example:
         >>> columns = get_selected_api_columns_draws()
         >>> logger.info(f"Number of features: {len(columns)}")
@@ -723,11 +720,9 @@ def import_feature_select_draws_api():
     """Import training data for draw predictions."""
     data_path = "data/api_training_final.xlsx"
     data = pd.read_excel(data_path)
-
     # Create target variable
     data['is_draw'] = (data['match_outcome'] == 2).astype(int)
-
-     # Select features and target
+    # Select features and target
     columns_to_drop = [
         'match_outcome',
         'home_goals',
@@ -806,20 +801,16 @@ def import_feature_select_draws_api():
 @retry_on_error(max_retries=3, delay=1.0)
 def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
     """Load data from an Excel file and create evaluation sets for training.
-
     This function loads match data from the API prediction evaluation file and creates
     evaluation sets for draw prediction training. It handles data cleaning, type conversion,
     and feature selection.
-
     Args:
         use_selected_columns (bool): If True, restricts data to selected columns. 
             If False, uses all available columns. Default is True.
-
     Returns:
         Tuple[pd.DataFrame, pd.Series]: A tuple containing:
             - X (pd.DataFrame): Features for evaluation
             - y (pd.Series): Target variable (1 for draw, 0 for non-draw)
-
     Raises:
         FileNotFoundError: If the data file cannot be found
         ValueError: If data validation fails
@@ -960,16 +951,13 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
 @retry_on_error(max_retries=3, delay=1.0)
 def create_prediction_set_api() -> pd.DataFrame:
     """Load and preprocess data for API-based predictions.
-
     This function loads match data from api_prediction_data_new.xlsx and preprocesses
     it for prediction. It handles data cleaning, type conversion, and feature selection
     based on the API model requirements.
-
     Returns:
         pd.DataFrame: Preprocessed features ready for prediction.
             The DataFrame contains all selected features in the correct format
             for the API prediction model.
-
     Raises:
         FileNotFoundError: If the data file cannot be found
         ValueError: If data validation fails

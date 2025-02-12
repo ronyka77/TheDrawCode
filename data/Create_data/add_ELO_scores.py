@@ -112,7 +112,7 @@ class ELOCalculator:
                     self.current_season = row['season_encoded']
                     league_teams = matches[matches['league_encoded'] == row['league_encoded']]
                     league_teams = pd.concat([league_teams['home_encoded'], 
-                                           league_teams['away_encoded']]).unique()
+                                            league_teams['away_encoded']]).unique()
                     self.reset_season_ratings(league_teams)
 
                 home_team = row['home_encoded']

@@ -7,8 +7,8 @@ This module implements an ensemble model that combines:
     • Dynamic Weighting: Base model probabilities are combined by weighting each model based on its validation performance.
     • Probability Calibration: Base model probabilities can be calibrated using Platt scaling or isotonic regression.
     • Threshold Tuning and Balanced Data handling: The final probability is tuned using a grid search
-      to achieve high precision while enforcing a minimum recall of 20%. Training is performed on
-      balanced data using ADASYN oversampling.
+        to achieve high precision while enforcing a minimum recall of 20%. Training is performed on
+        balanced data using ADASYN oversampling.
 
 Workflow:
 1. Data Balancing: Use ADASYN to balance the training data.
@@ -20,7 +20,7 @@ Workflow:
     • Stacking: Train a meta-learner on the base predictions.
     • Final Probability: Average the soft voting (with dynamic weights) and stacking probabilities.
 6. Threshold Tuning: Use a grid search on the validation set to select the best threshold,
-   ensuring recall is at least 15%.
+    ensuring recall is at least 15%.
 """
 
 import numpy as np
@@ -137,22 +137,25 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         )
         self.model_lgb = LGBMClassifier(
             objective='binary',
-            metric='binary_logloss',
+            metric=['binary_logloss', 'auc'],
             boosting_type='gbdt',
             device_type='cpu',
             verbose=-1,
-            learning_rate=0.00375,
-            max_depth=6,
-            reg_lambda=0.41035,
-            n_estimators=3577,
-            num_leaves=67,
-            early_stopping_rounds=291,
-            feature_fraction=0.80378,
-            bagging_freq=2,
-            min_child_samples=28,
-            bagging_fraction=0.77184,
-            feature_fraction_bynode=0.99962,
-            random_state=19
+            learning_rate=0.006225134508905533,
+            max_depth=7,
+            reg_lambda=0.4136861259036423,
+            n_estimators=3902,
+            num_leaves=55,
+            early_stopping_rounds=382,
+            feature_fraction=0.8438720741641329,
+            bagging_freq=1,
+            min_child_samples=35,
+            bagging_fraction=0.8491638385070807,
+            feature_fraction_bynode=0.9963248890782458,
+            colsample_bytree=0.8641354771809475,
+            min_child_weight=29,
+            scale_pos_weight=2.118498238482285,
+            random_state=229
         )
         # Set up meta-learner based on the chosen type
         self.meta_learner_type = meta_learner_type
@@ -175,7 +178,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
     def _tune_individual_threshold(self, probs: np.ndarray, targets: pd.Series, 
                                     grid_start: float = 0.4, grid_stop: float = 0.7, grid_step: float = 0.01, 
-                                    min_recall: float = 0.20) -> float:
+                                    min_recall: float = 0.50) -> float:
         """
         Tune threshold for a single model's probabilities by iterating over a grid and selecting the value
         that maximizes precision while ensuring recall is at least min_recall.
@@ -193,7 +196,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
     def _tune_threshold(self, probs: np.ndarray, targets: pd.Series, 
                         grid_start: float = 0.0, grid_stop: float = 1.0, grid_step: float = 0.01,
-                        required_recall: float = 0.20, target_precision: float = 0.50) -> (float, dict):
+                        required_recall: float = 0.50, target_precision: float = 0.50) -> (float, dict):
         """
         Tune the global threshold by scanning a grid.
         In addition to ensuring a minimum recall, also try to select a threshold
@@ -296,7 +299,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                     precision = precision_score(y_val, preds, zero_division=0)
                     recall = recall_score(y_val, preds, zero_division=0)
                     # Check if recall is above the minimum threshold, and precision improves.
-                    if recall >= 0.20 and precision > best_precision:
+                    if recall >= 0.50 and precision > best_precision:
                         best_precision = precision
                         best_weights = norm_weights
         return best_weights
@@ -342,6 +345,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # Prepare data with required features
         X_train = self._prepare_data(X_train)
         X_val = self._prepare_data(X_val)
+        X_test = self._prepare_data(X_test)
         
         # Optionally balance the training data
         X_train_bal, y_train_bal = X_train, y_train
@@ -353,13 +357,28 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.logger.info("Training CatBoost...")
         self.model_cat.fit(X_train_bal, y_train_bal, eval_set=(X_test, y_test))
         self.logger.info("Training LightGBM...")
-        self.model_lgb.fit(X_train_bal, y_train_bal, eval_set=(X_test, y_test))
+        # Native LightGBM training with early stopping  
+        self.model_lgb.fit(
+            X_train_bal, y_train_bal,
+            eval_set=(X_test, y_test)
+        )
+        
+        # Enhanced version with automatic ensemble calibration
+        self.calibrated_model = CalibratedClassifierCV(
+            estimator=FrozenEstimator(self.model_lgb),
+            method='sigmoid',
+            ensemble='auto',  # Automatically select best calibration method
+            n_jobs=-1
+        ).fit(
+            X_train_bal,  # Use separate validation set for calibration
+            y_train_bal, eval_set=(X_test, y_test)
+        )
         self.logger.info("Base models trained successfully.")
         
         # Get base predictions on validation set.
         p_xgb = self.model_xgb.predict_proba(X_val)[:, 1]
         p_cat = self.model_cat.predict_proba(X_val)[:, 1]
-        p_lgb = self.model_lgb.predict_proba(X_val)[:, 1]
+        p_lgb = self.calibrated_model.predict_proba(X_val)[:, 1]
         
         # Form the meta-feature array.
         meta_features = np.column_stack((p_xgb, p_cat, p_lgb))
@@ -402,7 +421,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         X = self._prepare_data(X)
         p_xgb = self.model_xgb.predict_proba(X)[:, 1]
         p_cat = self.model_cat.predict_proba(X)[:, 1]
-        p_lgb = self.model_lgb.predict_proba(X)[:, 1]
+        p_lgb = self.calibrated_model.predict_proba(X)[:, 1]
         
         if self.dynamic_weighting and not self.individual_thresholding:
             p_soft = (self.dynamic_weights['xgb'] * p_xgb +
@@ -425,7 +444,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         X = self._prepare_data(X)
         p_xgb = self.model_xgb.predict_proba(X)[:, 1]
         p_cat = self.model_cat.predict_proba(X)[:, 1]
-        p_lgb = self.model_lgb.predict_proba(X)[:, 1]
+        p_lgb = self.calibrated_model.predict_proba(X)[:, 1]
         
         if self.individual_thresholding and hasattr(self, 'tuned_thresholds'):
             preds_xgb = (p_xgb >= self.tuned_thresholds['xgb']).astype(int)
@@ -471,7 +490,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.logger.info("AUC computation failed.", extra={"error": str(e)})
         
         # Check if recall meets the required threshold.
-        required_recall = 0.20
+        required_recall = 0.50
         recall_flag = recall >= required_recall
         
         # Log evaluation metrics.

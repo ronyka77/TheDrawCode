@@ -108,7 +108,7 @@ class DrawPredictor:
                 # Calculate metrics
                 recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
                 # Only consider thresholds that meet minimum recall
-                if recall >= 0.14:
+                if recall >= 0.20:
                     precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
                     f1 = f1_score(target_val, preds)
                     # Modified scoring to prioritize precision
@@ -125,7 +125,7 @@ class DrawPredictor:
             self.threshold = best_metrics['threshold']
             print(f"Optimal threshold set to {self.threshold}")        
             
-            if best_metrics['recall'] < 0.14:
+            if best_metrics['recall'] < 0.20:
                 print(
                     f"Could not find threshold meeting recall requirement. "
                     f"Best recall: {best_metrics['recall']:.4f}"
@@ -221,10 +221,6 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                                         (valid_matches['is_draw'] == 1)).sum()
                         
                         print(f"\nDetailed Metrics:")
-                        # print(f"True Positives: {true_positives}")
-                        # print(f"False Positives: {false_positives}")
-                        # print(f"True Negatives: {true_negatives}")
-                        # print(f"False Negatives: {false_negatives}")
                         print(f"Actual Draws: {valid_matches['is_draw'].sum()}")
                         print(f"Predicted Draws: {valid_matches['draw_predicted'].sum()}")
                         
@@ -260,7 +256,7 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        '03dd42ab60bb471c9f65ccc31663e6fa'
+        '61a6219de55047da96199c20c9db0a45'
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
@@ -286,7 +282,7 @@ def main():
                 print(f"Skipping invalid predictions from model {uri}")
                 continue
                 
-            if precision > best_precision and draws_recall > 0.1:
+            if precision > best_precision and draws_recall > 0.20:
                 best_precision = precision
                 best_model_uri = uri
                 best_predictions = predicted_df.copy()

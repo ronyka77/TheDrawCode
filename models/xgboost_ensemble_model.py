@@ -19,6 +19,7 @@ import time
 # Third-party imports
 import numpy as np
 import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
 import xgboost as xgb
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.metrics import (
@@ -84,17 +85,17 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             'eval_metric': ['aucpr', 'auc'],
             'verbosity': 0,
             'nthread': -1,
-            'learning_rate': 0.016703863627364954,
-            'early_stopping_rounds': 137,
-            'min_child_weight': 187,
-            'gamma': 0.13527290558556818,
-            'subsample': 0.49058356077354437,
-            'colsample_bytree': 0.7621514423782901,
-            'scale_pos_weight': 2.381564122157001,
-            'reg_alpha': 0.00804619801508912,
-            'reg_lambda': 1.4097268616755003,
-            'max_depth': 4,
-            'n_estimators': 382,
+            'learning_rate': 0.012420437315803619,
+            'early_stopping_rounds': 306,
+            'min_child_weight': 141,
+            'gamma': 0.04,
+            'subsample': 0.30000000000000004,
+            'colsample_bytree': 0.6799999999999999,
+            'scale_pos_weight': 2.3,
+            'reg_alpha': 0.050100000000000006,
+            'reg_lambda': 9.1,
+            'max_depth': 2,
+            'n_estimators': 579,
             'random_state': random_seed
         }
         # Initialize other attributes
@@ -252,23 +253,26 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
         target_val: Optional[Union[pd.Series, np.ndarray]] = None) -> None:
         """Train the XGBoost model."""
         try:
-            # Initialize and train the XGBoost model with early stopping
-            self.model = None
-            self.threshold = 0.50
+            # Initialize base model with early stopping
             self.model = xgb.XGBClassifier(**self.global_params)
-            if features_test is not None and target_test is not None:
-                self.logger.info("Training XGBoost model with early stopping")
-                self.model.fit(
-                    features_train, target_train,
-                    eval_set=[(features_test, target_test)],
-                    verbose=100
-                )
-            else:
-                self.model.fit(features_train, target_train)
             
-            threshold, metrics = self._find_optimal_threshold(self.model, features_val, target_val)
-            self.threshold = threshold
+            # Native XGBoost training with early stopping
+            self.model.fit(
+                features_train, 
+                target_train,
+                eval_set=[(features_test, target_test)],
+                verbose=False
+            )
+            
+            # Threshold optimization uses validation data
+            threshold, metrics = self._find_optimal_threshold(
+                self.model, 
+                features_val, 
+                target_val
+            )
+            
             return metrics['precision']
+            
         except Exception as e:
             self.logger.error(f"Training error: {str(e)}")
             raise
@@ -461,21 +465,12 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
                     logger.error(f"Error logging validation metrics: {str(e)}")
                     raise
                 # Create MLflow signature with float64 types
-                input_example = X_train.head(1)
+                input_example = X_train.head(1).astype('float64')  # Convert to float64 to handle potential missing values
                 try:
                     signature = infer_signature(X_train, xgb_model.model.predict(X_train))
                 except MlflowException as e:
                     logger.warning(f"Could not infer MLflow signature: {str(e)}")
                     signature = None
-                
-                # # Save model with explicit format
-                # model_path = os.path.join(
-                #     project_root, 
-                #     "models", 
-                #     "saved", 
-                #     f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
-                # )
-                # xgb_model.save_model(model_path)
                 
                 # Log model to MLflow with signature
                 if signature:

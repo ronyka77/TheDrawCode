@@ -43,7 +43,7 @@ class PoissonXGCalculator:
         ]
         
         self.all_features = (self.form_features + self.team_quality_features + 
-                           self.historical_features)
+                            self.historical_features)
         
         self.scaler = StandardScaler()
         self.home_model = None

@@ -9,7 +9,7 @@ SELECTCOLUMNS(
             future_matches[Home],
             future_matches[Away],
             future_matches[venue_encoded],
-            future_matches[venue_capacity],
+            future_matches[venue_capacity], 
             future_matches[venue_grass],
             future_matches[venue_name], 
             future_matches[league_encoded],

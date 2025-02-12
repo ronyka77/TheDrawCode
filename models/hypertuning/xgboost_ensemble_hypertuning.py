@@ -19,6 +19,7 @@ import xgboost as xgb
 import mlflow
 import warnings
 from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.calibration import CalibratedClassifierCV
 from imblearn.over_sampling import ADASYN
 from optuna.trial import FrozenTrial
 
@@ -218,21 +219,22 @@ class GlobalHypertuner:
                 ]),
                 'verbose': 0,
                 'nthread': -1,
-                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.03),  # Best results in 0.02-0.06 range
-                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 100, 400),
-                'min_child_weight': trial.suggest_int('min_child_weight', 150, 250),  # Wider range for stability
-                'gamma': trial.suggest_float('gamma', 0.02, 0.12, step=0.01),  # Regularization sweet spot
-                'subsample': trial.suggest_float('subsample', 0.3, 0.8, step=0.03),  # Lower values helped precision
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.8, 0.95, step=0.01),  # Higher values improved recall
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 2.5, step=0.02),  # Class imbalance adjustment
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.0001, 0.01, step=0.0005),  # Lower bounds from best trials
-                'reg_lambda': trial.suggest_float('reg_lambda', 0.5, 4.0, step=0.1),  # Wider range for regularization
-                'max_depth': trial.suggest_int('max_depth', 3, 6),  # Optimal for soccer prediction
-
-                'n_estimators': trial.suggest_int('n_estimators', 1000, 3000),  # Let early stopping handle this
+                'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.02),  # Szűkebb tartomány a magasabb precízióért
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 200, 500),  # Nagyobb intervallum a stabilabb tanuláshoz
+                'min_child_weight': trial.suggest_int('min_child_weight', 100, 300),  # Bővített tartomány a komplexitás csökkentésére
+                'gamma': trial.suggest_float('gamma', 0.01, 0.2, step=0.01),  # Erősebb regularizáció a túlilleszkedés ellen
+                'subsample': trial.suggest_float('subsample', 0.2, 0.8, step=0.05),  # Alacsonyabb értékek a precízió javítására
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 0.9, step=0.02),  # Szélesebb tartomány a fontosabb jellemzők kiválasztásához
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 1.5, 3.0, step=0.1),  # Nagyobb súly a pozitív osztályhoz
+                'reg_alpha': trial.suggest_float('reg_alpha', 0.0001, 0.1, step=0.001),  # Erősebb L1 regularizáció
+                'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0, step=0.2),  # Szélesebb tartományú L2 regularizáció
+                'max_depth': trial.suggest_int('max_depth', 2, 6),  # Sekélyebb fák a túlilleszkedés megelőzésére
+                'n_estimators': trial.suggest_int('n_estimators', 500, 4000),  # Bővített tartomány az early stopping-hoz
                 'random_state': trial.suggest_categorical('random_state', self.random_seeds)
             }
             # --- Create and Train the XGBoost model on oversampled data ---
+            # model = xgb.XGBClassifier(**param)
+            # model.fit(features_train, target_train, eval_set=[(features_test, target_test)], verbose=False)
             model = xgb.XGBClassifier(**param)
             model.fit(features_train, target_train, eval_set=[(features_test, target_test)], verbose=False)
             # --- Find optimal threshold and evaluate model performance ---
@@ -284,7 +286,6 @@ class GlobalHypertuner:
                 direction=self.hyperparam_spec['direction']
             )
             self.logger.info(f"Created Optuna study with sampler: {self.hyperparam_spec['sampler']}")
-            
             study.optimize(
                 lambda trial: self.objective(
                     trial,
@@ -427,7 +428,7 @@ def tune_global_model():
             
             # Tune model
             best_params = hypertuner.tune_model(
-                X_train, y_train, X_val, y_val, X_test, y_test, n_trials=1000
+                X_train, y_train, X_val, y_val, X_test, y_test, n_trials=2000
             )
             
             # Log best parameters
