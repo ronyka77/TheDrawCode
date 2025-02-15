@@ -124,7 +124,7 @@ SELECTCOLUMNS(
     "league_name", Model_data[league_name],
     "league_season", Model_data[league_season],
     "match_outcome", Model_data[match_outcome],
-    "referee", Model_data[referee],
+    "referee", Model_data[referee], 
     "referee_encoded", ROUNDUP(Model_data[referee_encoded], 0),
     "away_attack_strength", ROUNDUP(Model_data[away_attack_strength], 2),
     "away_average_points", ROUNDUP(Model_data[away_average_points], 2),

@@ -1,0 +1,67 @@
+model:
+  name: xgboost
+  version: "2.0.0"
+  experiment_name: tree_based_xgboost
+  description: "XGBoost model optimized for CPU execution"
+  
+  # CPU-specific configurations
+  cpu_config:
+    device: "cpu"
+    thread_count: -1
+    tree_learner: "serial"
+    force_row_wise: true
+  
+  # Core model parameters
+  params:
+    objective: "binary:logistic"
+    tree_method: "hist"  # CPU-optimized histogram-based tree method
+    grow_policy: "depthwise"
+    max_bin: 256  # Reduced for CPU optimization
+    random_state: 42
+    n_jobs: -1  # Use all available CPU cores
+    
+  # Training configuration
+  training:
+    early_stopping_rounds: 300
+    verbose_eval: 50
+    eval_metric: ["logloss", "auc"]
+    
+  # Resource constraints
+  resources:
+    device: "cpu"
+    memory_limit: "8G"
+    
+  # Validation settings
+  validation:
+    cv_folds: 5
+    inner_cv_folds: 3
+    stratify: true
+    shuffle: true
+    
+  # Threshold optimization
+  threshold:
+    min_recall: 0.20
+    precision_weight: 0.7
+    recall_weight: 0.3
+    
+  # Feature handling
+  features:
+    categorical:
+      enable: true
+      max_categories: 100
+    missing:
+      strategy: "auto"
+    importance:
+      types: ["weight", "gain", "cover", "total_gain", "total_cover"]
+
+  logging:
+    log_dir: logs/xgboost
+    metrics_tracking:
+      - precision
+      - recall
+      - f1_score
+      - auc_pr
+      - training_time
+      - memory_usage
+      
+  description: "XGBoost model optimized for CPU execution" 

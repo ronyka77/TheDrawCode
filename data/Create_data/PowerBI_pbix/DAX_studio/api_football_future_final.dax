@@ -155,7 +155,7 @@ SELECTCOLUMNS(
     "team_strength_diff", ROUNDUP(future_matches[team_strength_diff], 2),
     "venue_capacity", ROUNDUP(future_matches[venue_capacity], 2),
     "venue_draw_rate", ROUNDUP(future_matches[venue_draw_rate], 2),
-    "venue_draws", ROUNDUP(future_matches[venue_draws], 2),
+    "venue_draws", ROUNDUP(future_matches[venue_draws], 2), 
     "venue_encoded", ROUNDUP(future_matches[venue_encoded], 2),
     "venue_grass", ROUNDUP(future_matches[venue_grass], 2),
     "venue_match_count", ROUNDUP(future_matches[venue_match_count], 2),

@@ -400,17 +400,20 @@ def update_api_data_for_draws():
         # Concatenate the filtered dataframes
         updated_data = pd.concat([api_prediction_eval, api_prediction_data], ignore_index=True)
         
-        # Export df_before_2024_11_01 to data/api_training_final.xlsx
+        # Export df_before_2024_11_01 to data/api_training_final.xlsx and .parquet
         api_training_data.to_excel("data/api_training_final.xlsx", index=False)
-        logger.info(f"api_training_final.xlsx updated")
+        create_parquet_files(api_training_data, "data/api_training_final.parquet")
+        logger.info(f"api_training_final.xlsx and .parquet updated")
         
-        # Export df_after_2024_11_01_not_blank to data/prediction/api_predictions_eval.xlsx
+        # Export df_after_2024_11_01_not_blank to data/prediction/api_predictions_eval.xlsx and .parquet
         api_prediction_eval.to_excel("data/prediction/api_prediction_eval.xlsx", index=False)
-        logger.info(f"api_prediction_eval.xlsx updated")
+        create_parquet_files(api_prediction_eval, "data/prediction/api_prediction_eval.parquet")
+        logger.info(f"api_prediction_eval.xlsx and .parquet updated")
         
-        # Export df_after_2024_11_01_blank to data/prediction/api_predictions_data.xlsx
+        # Export df_after_2024_11_01_blank to data/prediction/api_predictions_data.xlsx and .parquet
         api_prediction_data.to_excel("data/prediction/api_predictions_data.xlsx", index=False)
-        logger.info(f"api_predictions_data.xlsx updated")
+        create_parquet_files(api_prediction_data, "data/prediction/api_predictions_data.parquet")
+        logger.info(f"api_predictions_data.xlsx and .parquet updated")
 
         # Save updated data back to Excel
         updated_data.to_excel(data_path_new, index=False)
@@ -1143,7 +1146,7 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
     """
     try:
         # Load training data
-        data_path = "data/prediction/api_prediction_eval.xlsx"
+        data_path = os.path.join(project_root, "data", "prediction", "api_prediction_eval.xlsx")
         logger.info(f"Loading training data from: {data_path}")
         data = pd.read_excel(data_path)
 
@@ -1233,8 +1236,8 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
 
 def import_training_data_ensemble():
     """Import training data for draw predictions."""
-    parquet_path = "data/api_training_final.parquet"
-    data_path = "data/api_training_final.xlsx"
+    parquet_path = os.path.join(project_root, "data", "api_training_final.parquet")
+    data_path = os.path.join(project_root, "data", "api_training_final.xlsx")
     
     # Check if parquet file exists and is valid
     if os.path.exists(parquet_path):
@@ -1328,7 +1331,7 @@ def import_training_data_ensemble():
 @retry_on_error(max_retries=3, delay=1.0)
 def create_prediction_set_ensemble() -> pd.DataFrame:
     """Optimized data loading and preprocessing for predictions."""
-    file_path = "data/prediction/api_prediction_data_new.xlsx"
+    file_path = os.path.join(project_root, "data", "prediction", "api_prediction_data_new.xlsx")
     logger.info(f"Loading prediction data from: {file_path}")
     selected_columns = import_selected_features_ensemble('all')
     try:
@@ -1416,7 +1419,7 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
         ValueError: If data validation fails
         Exception: For other processing errors
     """
-    file_path = Path("./data/prediction/api_prediction_eval.xlsx")
+    file_path = os.path.join(project_root, "data", "prediction", "api_prediction_eval.xlsx")
     logger.info(f"Loading match results from: {file_path}")
     try:
         # Load Excel file

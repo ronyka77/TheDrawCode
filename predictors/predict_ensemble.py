@@ -256,7 +256,12 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        '61a6219de55047da96199c20c9db0a45'
+        '61a6219de55047da96199c20c9db0a45',
+        '65bc8b162a3b4e17965c8e0cb32d0767',
+        '36e58c2a25924a928f542b16f1f6304d',
+        'da6fad44f048477e984f0dffe22f53c9',
+        '271228e9f1fe4264b864b849210bdd91'
+        
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
@@ -282,6 +287,15 @@ def main():
                 print(f"Skipping invalid predictions from model {uri}")
                 continue
                 
+            # Save individual model predictions
+            model_output_path = Path(f"./data/prediction/predictions_model_{uri}.xlsx")
+            # Reorder columns to place draw_predicted and draw_probability last
+            cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
+            cols.extend(['draw_predicted', 'draw_probability'])
+            predicted_df = predicted_df[cols]
+            predicted_df.to_excel(model_output_path, index=False)
+            print(f"Predictions for model {uri} saved to: {model_output_path}")
+                
             if precision > best_precision and draws_recall > 0.20:
                 best_precision = precision
                 best_model_uri = uri
@@ -305,10 +319,10 @@ def main():
         cols.extend(['draw_predicted', 'draw_probability'])
         predicted_df = predicted_df[cols]
     
-    # Save results
-    output_path = Path("./data/prediction/predictions_ensemble.xlsx")
+    # Save best model results
+    output_path = Path("./data/prediction/predictions_ensemble_best.xlsx")
     predicted_df.to_excel(output_path, index=False)
-    print(f"\nPredictions saved to: {output_path}")
+    print(f"\nBest model predictions saved to: {output_path}")
 
 if __name__ == "__main__":
     main()

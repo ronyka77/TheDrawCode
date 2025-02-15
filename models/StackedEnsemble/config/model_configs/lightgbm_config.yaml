@@ -1,0 +1,34 @@
+model:
+  name: lightgbm
+  version: "1.0.0"
+  experiment_name: tree_based_lightgbm
+  description: "LightGBM model optimized for CPU execution"
+  
+  cpu_config:
+    device: cpu
+    num_threads: -1
+    tree_learner: serial
+    force_row_wise: true
+    
+  training:
+    early_stopping_rounds: 100
+    verbose_eval: 50
+    
+  logging:
+    log_dir: logs/lightgbm
+    metrics_tracking:
+      - precision
+      - recall
+      - f1_score
+      - auc_pr
+      - training_time
+      - memory_usage
+      
+  validation:
+    cv_folds: 5
+    stratified: true
+    metrics:
+      precision:
+        min_threshold: 0.35
+      recall:
+        min_threshold: 0.20 

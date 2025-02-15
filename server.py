@@ -17,20 +17,22 @@ import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
-
-# Import FastMCP from the mcp package
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP, Context, Resource, Tool
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("EnhancedMCPServer")
 
 # Create an MCP server instance with a descriptive name
-mcp = FastMCP("EnhancedLocalFileContextServer")
+mcp = FastMCP(
+    name="EnhancedLocalFileContextServer",
+    description="Provides local file context and documentation for enhanced AI responses.",
+    version="1.0.0"
+)
 
 # MCP Resource: Read file contents from the local filesystem.
 @mcp.resource("file:///{file_path}")
-def read_file(file_path: str) -> str:
+async def read_file(file_path: str, ctx: Context) -> Resource:
     """
     Reads the contents of a specified file.
     """
@@ -38,10 +40,10 @@ def read_file(file_path: str) -> str:
     try:
         with open(file_path, 'r') as f:
             data = f.read()
-        return data
+        return Resource(data=data, mime_type="text/plain")
     except Exception as e:
         logger.error(f"Error reading file {file_path}: {e}")
-        return f"Error reading file: {str(e)}"
+        return Resource(data=f"Error reading file: {str(e)}", mime_type="text/plain")
 
 # MCP Resource: List all files in a given directory.
 @mcp.resource("list:///{directory}")

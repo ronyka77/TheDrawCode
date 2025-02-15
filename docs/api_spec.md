@@ -1,8 +1,8 @@
-# Model Context Protocol Server (MCPS) API Specification
+# Model Context Protocol Server API Specification v2.1
 
 ## Overview
 
-The Model Context Protocol Server (MCPS) provides a RESTful API for managing the lifecycle of soccer prediction models. This document details the available endpoints, their request/response formats, and usage examples.
+This document describes the API endpoints provided by the Model Context Protocol (MCP) server. The server provides real-time context management, file monitoring, and MLflow integration through REST and SSE endpoints.
 
 ## Base URL
 
@@ -12,297 +12,254 @@ http://localhost:8000
 
 ## Authentication
 
-Currently, the API does not require authentication for local development. Production deployments should implement appropriate authentication mechanisms.
-
-## Common Headers
-
-All requests should include:
-```http
-Content-Type: application/json
-Accept: application/json
-```
-
-## Error Responses
-
-All endpoints may return the following error responses:
-
-```json
-{
-    "detail": "Error message describing what went wrong"
-}
-```
-
-HTTP Status codes:
-- `400`: Bad Request - Invalid input
-- `404`: Not Found - Resource doesn't exist
-- `500`: Internal Server Error - Server-side error
+Currently, the API does not require authentication. CORS is enabled for cross-origin requests.
 
 ## Endpoints
 
-### Training Management
+### Tools Endpoint
 
-#### Start Training Run
+#### GET /tools
 
-Start a new model training run.
+Returns the list of available tools and their specifications.
 
-```http
-POST /train
-```
-
-Request body:
+**Response Format:**
 ```json
 {
-    "model_type": "xgboost",
-    "experiment_name": "soccer_prediction_v1",
-    "hyperparameters": {
-        "learning_rate": 0.02,
-        "max_depth": 5,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "tree_method": "hist",
-        "objective": "binary:logistic"
-    }
-}
-```
-
-Response:
-```json
-{
-    "run_id": "abcd1234",
-    "status": "STARTING",
-    "start_time": "2024-01-31T22:12:34.567Z"
-}
-```
-
-#### Get Training Status
-
-Get the current status of a training run.
-
-```http
-GET /status/{run_id}
-```
-
-Response:
-```json
-{
-    "status": "RUNNING",
-    "metrics": {
-        "precision": 0.82,
-        "recall": 0.76,
-        "f1": 0.79,
-        "best_threshold": 0.58
+  "schema_version": "1.0",
+  "transport": {
+    "type": "sse",
+    "endpoint": "/sse",
+    "protocol": "json-rpc"
+  },
+  "tools": [
+    {
+      "name": "get_context",
+      "description": "Get semantic context information for a file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the file to analyze"
+          }
+        },
+        "required": ["file_path"]
+      }
     },
-    "start_time": "2024-01-31T22:12:34.567Z",
-    "last_updated": "2024-01-31T22:15:45.678Z"
+    // ... other tools ...
+  ]
 }
 ```
 
-#### Stop Training Run
+### Context Management
 
-Stop an active training run.
+#### GET /api/v1/context/{file_path}
 
-```http
-POST /stop/{run_id}
-```
+Get context information for a specific file.
 
-Response:
+**Parameters:**
+- `file_path`: Path to the file (URL-encoded)
+
+**Response:**
 ```json
 {
-    "status": "Training stopped successfully"
+  "file_info": {
+    "path": "string",
+    "size": "integer",
+    "modified": "string (ISO 8601)",
+    "created": "string (ISO 8601)",
+    "type": "string"
+  },
+  "semantic_info": {
+    "language": "string",
+    "imports": ["string"],
+    "functions": ["string"],
+    "classes": ["string"]
+  },
+  "related_files": ["string"],
+  "mlflow_context": {
+    "experiments": [],
+    "recent_runs": []
+  }
 }
 ```
 
-### Model Predictions
+#### GET /api/v1/structure
 
-#### Make Predictions
+Get the current project structure.
 
-Make predictions using a trained model.
-
-```http
-POST /predict
-```
-
-Request body:
+**Response:**
 ```json
 {
-    "model_uri": "runs:/abcd1234/model",
-    "data": {
-        "feature1": [1.0, 2.0, 3.0],
-        "feature2": [0.1, 0.2, 0.3],
-        "feature3": [10, 20, 30]
-    }
+  "timestamp": "string (ISO 8601)",
+  "root": {
+    "name": "string",
+    "type": "directory",
+    "children": [
+      {
+        "name": "string",
+        "type": "file|directory",
+        "info": {
+          "path": "string",
+          "size": "integer",
+          "modified": "string",
+          "created": "string",
+          "type": "string"
+        }
+      }
+    ]
+  }
 }
 ```
 
-Response:
+#### POST /api/v1/refresh
+
+Force refresh of the context cache.
+
+**Response:**
 ```json
 {
-    "predictions": [0, 1, 0],
-    "model_uri": "runs:/abcd1234/model"
+  "status": "success",
+  "message": "Context cache refreshed"
 }
 ```
 
-### Experiment Management
+### Event Streaming
 
-#### List Experiments
+#### GET /sse
 
-Get all MLflow experiments.
+Server-Sent Events endpoint for real-time updates.
 
-```http
-GET /experiments
+**Event Types:**
+- `message`: Tool response
+- `ping`: Keep-alive
+- `error`: Error event
+
+**Event Format:**
+```json
+{
+  "event": "message",
+  "id": "string",
+  "data": {
+    "jsonrpc": "2.0",
+    "result": {}
+  }
+}
 ```
 
-Response:
+### MLflow Integration
+
+#### GET /api/v1/mlflow/experiments
+
+List all MLflow experiments.
+
+**Response:**
 ```json
 [
-    {
-        "experiment_id": "1",
-        "name": "soccer_prediction_v1",
-        "artifact_location": "mlruns/1",
-        "lifecycle_stage": "active"
-    }
+  {
+    "experiment_id": "string",
+    "name": "string",
+    "artifact_location": "string",
+    "lifecycle_stage": "string"
+  }
 ]
 ```
 
-#### List Runs
+#### GET /api/v1/mlflow/runs/{run_id}
 
-Get all runs for an experiment.
+Get information for a specific MLflow run.
 
-```http
-GET /runs/{experiment_id}
-```
+**Parameters:**
+- `run_id`: MLflow run ID
 
-Response:
+**Response:**
 ```json
-[
-    {
-        "run_id": "abcd1234",
-        "status": "COMPLETED",
-        "start_time": "2024-01-31T22:12:34.567Z",
-        "end_time": "2024-01-31T22:30:12.345Z",
-        "metrics": {
-            "precision": 0.82,
-            "recall": 0.76,
-            "f1": 0.79
-        }
-    }
-]
+{
+  "run_id": "string",
+  "status": "string",
+  "start_time": "integer",
+  "end_time": "integer",
+  "metrics": {},
+  "parameters": {},
+  "tags": {}
+}
 ```
 
-## Error Monitoring
+### System Management
 
-### Get Active Errors
+#### GET /api/v1/health
 
-Get all active errors above a severity threshold.
+Get health status of server components.
 
-```http
-GET /errors/active?min_severity=WARNING
-```
-
-Response:
+**Response:**
 ```json
-[
-    {
-        "error_id": "ef789012",
-        "error_type": "DataValidationError",
-        "message": "Missing required features",
-        "component": "data_ingestion",
-        "severity": "ERROR",
-        "timestamp": "2024-01-31T22:14:23.456Z",
-        "recovery_suggestion": "Check input data completeness"
-    }
-]
+{
+  "server": "string",
+  "file_monitor": "boolean",
+  "event_processor": "boolean",
+  "context_manager": "boolean",
+  "mlflow": "boolean"
+}
 ```
 
-### Get Error Patterns
+#### GET /api/v1/stats
 
-Get error patterns for analysis.
+Get server statistics.
 
-```http
-GET /errors/patterns?component=training&min_count=2
-```
-
-Response:
+**Response:**
 ```json
-[
-    {
-        "component": "training",
-        "error_type": "ConvergenceWarning",
-        "count": 3
-    }
-]
+{
+  "event_processor": {
+    "processed_count": "integer",
+    "error_count": "integer",
+    "is_running": "boolean",
+    "uptime": "float"
+  },
+  "context_manager": {
+    "processed_files": "integer",
+    "cache_hits": "integer",
+    "cache_misses": "integer",
+    "cache_size": "integer",
+    "uptime": "float"
+  },
+  "file_monitor": {
+    "is_running": "boolean",
+    "watched_paths": ["string"],
+    "monitor_count": "integer",
+    "uptime": "float"
+  }
+}
 ```
 
-## Usage Examples
+## Error Handling
 
-### Complete Training Workflow
+All endpoints follow a consistent error response format:
 
-1. Start a training run:
-```bash
-curl -X POST http://localhost:8000/train \
-    -H "Content-Type: application/json" \
-    -d '{
-        "model_type": "xgboost",
-        "experiment_name": "soccer_prediction_v1",
-        "hyperparameters": {
-            "learning_rate": 0.02,
-            "max_depth": 5
-        }
-    }'
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": "integer",
+    "message": "string"
+  }
+}
 ```
 
-2. Monitor training status:
-```bash
-curl http://localhost:8000/status/abcd1234
-```
+Common error codes:
+- `-32600`: Invalid Request
+- `-32601`: Method not found
+- `-32000`: Server error
 
-3. Make predictions with trained model:
-```bash
-curl -X POST http://localhost:8000/predict \
-    -H "Content-Type: application/json" \
-    -d '{
-        "model_uri": "runs:/abcd1234/model",
-        "data": {
-            "feature1": [1.0, 2.0, 3.0]
-        }
-    }'
-```
+## Rate Limiting
 
-## Implementation Notes
+Currently, no rate limiting is implemented. However, the server includes event debouncing for file system events (100ms) and SSE retry intervals (1000ms).
 
-1. **CPU-Only Training**: All model training is configured for CPU-only operation:
-   - XGBoost uses `tree_method='hist'`
-   - CatBoost uses `task_type='CPU'`
+## CORS Configuration
 
-2. **Logging**: All operations are logged using structured JSON format with:
-   - ISO 8601 timestamps
-   - Component identification
-   - Error tracking
-   - MLflow integration
-
-3. **State Management**:
-   - Training context is persisted to disk
-   - Error history is maintained
-   - MLflow tracks all experiments and runs
-
-4. **Error Handling**:
-   - Comprehensive error tracking
-   - Pattern detection
-   - Recovery suggestions
-   - Severity-based filtering
-
-## Future Enhancements
-
-1. Authentication and authorization
-2. Rate limiting
-3. Batch prediction endpoints
-4. Real-time training metrics via WebSocket
-5. Model versioning and deployment
-6. A/B testing support
-
-## References
-
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [MLflow Documentation](https://www.mlflow.org/docs/latest/index.html)
-- [Project Documentation](../docs/plan.md)
-- [Error Handling Guide](../docs/error_handling.md) 
+CORS is enabled with the following settings:
+- `allow_origins=["*"]`
+- `allow_credentials=True`
+- `allow_methods=["*"]`
+- `allow_headers=["*"]`
+- `expose_headers=["*"]`
+- `max_age=3600` 

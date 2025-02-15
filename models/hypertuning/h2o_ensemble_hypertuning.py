@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime
+import time
 
 # Third-party imports
 import numpy as np
@@ -119,10 +120,10 @@ class H2OAutoMLTrainer(BaseEstimator, ClassifierMixin):
         """Initialize H2O cluster with CPU-only configuration."""
         try:
             h2o.init(
-                nthreads=-1,  # Use all CPU cores
+                nthreads=8,  # Use all CPU cores
                 max_mem_size="12G",  # Adjust based on your system
                 name=f"h2o_automl_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                port=54321 + np.random.randint(1000), enable_assertions=True  # Random port to avoid conflicts
+                port=54321 + np.random.randint(100), enable_assertions=True  # Random port to avoid conflicts
             )
             self.logger.info("H2O cluster initialized successfully")
         except Exception as e:
@@ -354,7 +355,6 @@ class H2OAutoMLTrainer(BaseEstimator, ClassifierMixin):
                 force=True
             )
             self.logger.info(f"Saved leader model to: {leader_model_path}")
-            
             # Save all models in leaderboard with proper type handling
             leaderboard_df = aml.leaderboard.as_data_frame()
             for model_row in leaderboard_df.itertuples(index=False):
@@ -379,20 +379,30 @@ class H2OAutoMLTrainer(BaseEstimator, ClassifierMixin):
                     self.logger.warning(f"Error saving model {model_id}: {str(e)}")
                     self.logger.debug(f"Model details: {model_row}")
                     continue
+            
             # Get best model and find optimal threshold
             self.best_model = aml.leader
-            self.threshold, val_metrics = self._find_optimal_threshold_builtin(
-                self.best_model,
-                valid_frame
-            )
+            if self.best_model is not None:
+                self.threshold, val_metrics = self._find_optimal_threshold_builtin(
+                    self.best_model,
+                    valid_frame
+                )
+            else:
+                raise ValueError("No best model found in AutoML leaderboard")
             
             # Evaluate on test set
             self.logger.info("Evaluating model on test set...")
-            test_metrics = self._evaluate_model(valid_frame)
+            if valid_frame is not None:
+                test_metrics = self._evaluate_model(valid_frame)
+            else:
+                raise ValueError("Validation frame is None")
             
             # Log metrics and model info
             self.logger.info("Logging training results...")
-            self._log_training_results(aml, valid_frame, target_val, val_metrics, test_metrics)
+            if aml is not None and valid_frame is not None:
+                self._log_training_results(leaderboard_df, valid_frame, target_val, val_metrics, test_metrics)
+            else:
+                raise ValueError("AutoML object or validation frame is None")
             
             return {
                 'best_model': self.best_model,
@@ -435,7 +445,7 @@ class H2OAutoMLTrainer(BaseEstimator, ClassifierMixin):
 
     def _log_training_results(
         self,
-        aml: h2o.automl.H2OAutoML,
+        leaderboard_df: pd.DataFrame,
         X_val: pd.DataFrame,
         y_val: pd.Series,
         val_metrics: Dict[str, float],
@@ -462,40 +472,54 @@ class H2OAutoMLTrainer(BaseEstimator, ClassifierMixin):
             "max_runtime_secs": self.max_runtime_secs,
             "max_models": self.max_models,
             "seed": self.seed,
-            "n_models_trained": len(aml.leaderboard),
-            "best_model_type": aml.leader.model_id,
+            # "n_models_trained": len(aml.leaderboard),
+            # "best_model_type": aml.leader.model_id,
             "optimal_threshold": self.threshold
         })
         
-        # Log leaderboard with recall metrics
-        leaderboard_df = aml.leaderboard.as_data_frame
         
         # Calculate recall for each model in leaderboard
         recall_scores = []
-        for model_id in leaderboard_df['model_id']:
-            model = h2o.get_model(model_id)
-            preds = model.predict(h2o.H2OFrame(X_val))
-            recall = recall_score(y_val, (preds['p1'].as_data_frame() >= self.threshold).astype(int))
-            recall_scores.append(recall)
-        
+        precision_scores = []
+        leaderboard_data = leaderboard_df 
+        for model_id in leaderboard_data['model_id']:
+            try:
+                model = h2o.get_model(model_id)
+                preds = model.predict(h2o.H2OFrame(X_val))
+                recall = recall_score(
+                    y_val, 
+                    (preds['p1'].as_data_frame() >= self.threshold).astype(int),
+                    zero_division=0
+                )
+                precision = precision_score(
+                    y_val, 
+                    (preds['p1'].as_data_frame() >= self.threshold).astype(int),
+                    zero_division=0
+                )
+                recall_scores.append(recall)
+                precision_scores.append(precision)
+            except Exception as e:
+                recall_scores.append(0.0)  # Use 0 as fallback value
+                precision_scores.append(0.0)  # Use 0 as fallback value
         # Add recall column to leaderboard
         leaderboard_df['recall'] = recall_scores
+        leaderboard_df['precision'] = precision_scores
         
         # Save and log leaderboard
         leaderboard_path = os.path.join(mlruns_dir, "leaderboard.csv")
         leaderboard_df.to_csv(os.path.join(project_root, "leaderboard.csv"), index=False)
         mlflow.log_artifact(leaderboard_path, "leaderboard.csv")
 
-    def grid_search_tuning(self, X_train, y_train, X_val, y_val):
+    def grid_search_tuning(self, X_train, y_train, X_test, y_test, X_val, y_val):
         """
         Perform grid search tuning using H2OGridSearch.
         """
         # Reinitialize the H2O cluster unconditionally to ensure an active connection.
         try:
             self.logger.info("Reinitializing H2O cluster for grid search tuning...")
-            h2o.init(nthreads=-1, max_mem_size="12G", enable_assertions=True,
+            h2o.init(nthreads=8, max_mem_size="12G", enable_assertions=True,
                     name=f"h2o_automl_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                    port=54321 + np.random.randint(1000))
+                    port=54321 + np.random.randint(100))
         except Exception as e:
             self.logger.error(f"Failed to initialize H2O cluster for grid search tuning: {e}")
             raise
@@ -503,10 +527,17 @@ class H2OAutoMLTrainer(BaseEstimator, ClassifierMixin):
         # Convert input data to H2OFrames
         train_frame = h2o.H2OFrame(pd.concat([X_train, y_train], axis=1))
         valid_frame = h2o.H2OFrame(pd.concat([X_val, y_val], axis=1))
+        test_frame = h2o.H2OFrame(pd.concat([X_test, y_test], axis=1))
         
+        # IMPORTANT: Convert the target column to a factor for classification
+        train_frame["is_draw"] = train_frame["is_draw"].asfactor()
+        valid_frame["is_draw"] = valid_frame["is_draw"].asfactor()
+        test_frame["is_draw"] = test_frame["is_draw"].asfactor()    
+
         # Get predictor and response column names
         predictors = X_train.columns.tolist()
         response = 'is_draw'
+        
         # Expanded hyperparameter grid for improved precision tuning
         hyper_params = {
             "max_depth": [3, 5, 7, 9],
@@ -516,78 +547,170 @@ class H2OAutoMLTrainer(BaseEstimator, ClassifierMixin):
             "sample_rate": [0.7, 0.8, 0.9],
             "col_sample_rate": [0.6, 0.8, 1.0]
         }
-        # Improved search criteria focused on precision
+        
+        # Improved search criteria focused on AUC
         search_criteria = {
             "strategy": "RandomDiscrete",
             "max_models": 30,
             "seed": 42,
-            "sort_by": "auc",  # Using AUCPR as proxy for precision
-            "sort_order": "desc",
-            "stopping_metric": "auc",  # AUCPR is closest to precision
+            "stopping_metric": "AUC",  # Now valid since the task is classification
             "stopping_tolerance": 0.005,
             "stopping_rounds": 5
         }
-        # Set up a base estimator for grid search focused on precision
-        base_model = H2OGradientBoostingEstimator(
-            stopping_metric="precision",
+        
+        # Set up a base estimator for grid search focused on AUC
+        gbm_model = H2OGradientBoostingEstimator(
+            stopping_metric="AUC",
             stopping_rounds=5,
             seed=42,
             balance_classes=True,
-            nfolds=5,
+            score_tree_interval=10,           # Score every 10 trees for more granular AUC monitoring
+            min_split_improvement=1e-4,         # Only allow splits if they improve the model by a small threshold
+            nfolds=3,
+            keep_cross_validation_predictions=True,
+            keep_cross_validation_models=True
+        )
+
+        # Initialize H2O Deep Learning estimator with precision-focused configuration
+        deep_learning_model = H2ODeepLearningEstimator(
+            hidden=[64, 32],  # Deeper architecture with more capacity
+            epochs=100,       # Increased training epochs
+            activation='RectifierWithDropout',  # Add dropout for regularization
+            stopping_metric='aucpr',  # Focus directly on precision
+            stopping_rounds=10,      # More patience for precision improvement
+            stopping_tolerance=0.0005,  # Tighter precision threshold
+            nfolds=5,                # Increased cross-validation folds
+            seed=42,                 # Random seed for reproducibility
+            balance_classes=True,    # Balance class weights for imbalanced data
+            variable_importances=True,  # Calculate feature importance
+            export_weights_and_biases=True,  # Export model weights
             keep_cross_validation_predictions=True,
             keep_cross_validation_models=True,
-            verbosity='info'
+            input_dropout_ratio=0.1,  # Add input layer dropout
+            hidden_dropout_ratios=[0.2, 0.1],  # Layer-specific dropout
+            l1=1e-4,  # L1 regularization
+            l2=1e-4,  # L2 regularization
+            max_w2=10.0  # Constrain weights to prevent overfitting
         )
-        
         # Initialize Grid Search with the expanded hyperparameter grid and improved search criteria
-        grid = H2OGridSearch(
-            model=base_model,
+        grid_gbm = H2OGridSearch(
+            model=gbm_model,
             hyper_params=hyper_params,
             search_criteria=search_criteria
         )
+        grid_deep_learning = H2OGridSearch(
+            model=deep_learning_model,
+            hyper_params=hyper_params,
+            search_criteria=search_criteria
+        )
+        # Start grid search training asynchronously
+        grid_gbm.train(x=predictors, y=response, training_frame=train_frame, validation_frame=valid_frame)
         
-        # Train grid search models
-        grid.train(x=predictors, y=response, training_frame=train_frame, validation_frame=valid_frame)
-        
-        # Retrieve leaderboard sorted by precision
-        grid_leaderboard = grid.get_grid(sort_by="precision", decreasing=True)
-        
-        best_model = grid_leaderboard.models[0]
+        # Once complete, get the sorted leaderboard as usual
+        grid_leaderboard_gbm = grid_gbm.get_grid(sort_by="precision", decreasing=True)
+        # self.logger.info(grid_leaderboard)
+        self._log_grid_search_results(grid_leaderboard_gbm, X_val, y_val, "GBM")        
+        # Train Deep Learning model
+        grid_deep_learning.train(x=predictors, y=response, training_frame=train_frame, validation_frame=valid_frame)
+        # Retrieve leaderboard sorted by AUC
+        try:
+            # Since deep_learning_model is not obtained via grid search, get_grid is unavailable.
+            # Fallback: create a manual leaderboard using the model's own performance.
+            deep_learning_leaderboard = pd.DataFrame([{
+                "model_id": deep_learning_model.model_id,
+                "auc": deep_learning_model.auc(),
+                "logloss": deep_learning_model.logloss()
+            }])
+            self.logger.info("Deep Learning leaderboard created manually.")
+            # self.logger.info(deep_learning_leaderboard)
+            self._log_grid_search_results(deep_learning_leaderboard, X_val, y_val, "Deep Learning")
+        except Exception as e:
+            self.logger.error(f"Error while creating deep learning leaderboard: {e}")
         
         self.logger.info("Grid search completed. Best model parameters:")
-        self.logger.info(best_model.params)
         
-        return best_model, grid_leaderboard
+        return grid_leaderboard
 
-    def _log_grid_search_results(self, grid_leaderboard: h2o.grid.H2OGridSearch) -> None:
+    def _log_grid_search_results(self, grid_leaderboard, X_val: pd.DataFrame, y_val: pd.Series, model_type: str) -> None:
         """Log grid search results and save leaderboard to CSV.
         
         Args:
-            grid_leaderboard: H2O grid search leaderboard object
-            
+            grid_leaderboard: The leaderboard from H2O grid search (expected as an H2OFrame).
+            X_val: Validation features
+            y_val: Validation targets
+            model_type: A string identifier for the model type used in logging.
+        
         Returns:
             None
         """
         try:
-            # Convert leaderboard to pandas DataFrame
-            leaderboard_df = grid_leaderboard.as_data_frame()
+            # Convert leaderboard to pandas DataFrame if not already one.
+            if isinstance(grid_leaderboard, h2o.H2OFrame):
+                leaderboard_df = grid_leaderboard.as_data_frame(use_multi_threading=True)
+            elif isinstance(grid_leaderboard, list):
+                # If it's a list of models, build a DataFrame manually.
+                leaderboard_data = [{"model_id": model.model_id} for model in grid_leaderboard]
+                leaderboard_df = pd.DataFrame(leaderboard_data)
+            else:
+                self.logger.info("grid_leaderboard is already a DataFrame")
+                leaderboard_df = grid_leaderboard  # already a DataFrame
+
+            precision_scores = []
+            recall_scores = []
             
-            # Log top 5 models
-            self.logger.info("Grid Search Leaderboard (Top 5 Models):")
-            for i, row in leaderboard_df.head().iterrows():
-                self.logger.info(
-                    f"Model {i+1}: Precision={row['precision']:.4f}, "
-                    f"Recall={row['recall']:.4f}, "
-                    f"F1={row['f1']:.4f}"
-                )
+            # Validate leaderboard structure and ensure model_id column exists
+            if not isinstance(leaderboard_df, pd.DataFrame):
+                self.logger.error(f"Invalid leaderboard type: {type(leaderboard_df)}. Expected pandas DataFrame")
+                return
+            
+            if 'model_id' not in leaderboard_df.columns:
+                self.logger.error("Leaderboard DataFrame missing required 'model_id' column")
+                return
                 
-            # Save leaderboard to CSV
-            leaderboard_df.to_csv("grid_leaderboard.csv", index=False)
-            self.logger.info("Saved grid search leaderboard to grid_leaderboard.csv")
-            
+            for model_id in leaderboard_df['model_id']:
+                try:
+                        model = h2o.get_model(model_id)
+                        preds = model.predict(h2o.H2OFrame(X_val))
+                        preds_df = preds.as_data_frame()
+                        
+                        recall = recall_score(
+                            y_val, 
+                            (preds_df['p1'] >= self.threshold).astype(int),
+                            zero_division=0
+                        )
+                        precision = precision_score(
+                            y_val, 
+                            (preds_df['p1'] >= self.threshold).astype(int),
+                            zero_division=0
+                        )
+                        precision_scores.append(precision)
+                        recall_scores.append(recall)
+                        
+                except Exception as e:
+                    self.logger.warning(f"Error evaluating model {model_id}: {str(e)}")
+                    precision_scores.append(0)
+                    recall_scores.append(0)
+                    continue
+                
+                leaderboard_df['precision'] = precision_scores
+                leaderboard_df['recall'] = recall_scores
+
+                # Log top 5 models.
+                self.logger.info("Grid Search Leaderboard (Top 5 Models):")
+                for i, row in leaderboard_df.head().iterrows():
+                    self.logger.info(
+                        f"Model {i+1}: Precision={row['precision']:.4f}, "
+                        f"Recall={row['recall']:.4f}"
+                    )
+
+                leaderboard_path = os.path.join(project_root, f"grid_leaderboard_{model_type}.csv")
+                leaderboard_df.to_csv(leaderboard_path, index=False)
+                self.logger.info(f"Saved grid search leaderboard to {leaderboard_path}")
+            else:
+                self.logger.warning("Leaderboard DataFrame missing required 'model_id' column")
+
         except Exception as e:
             self.logger.error(f"Error logging grid search results: {str(e)}")
-            raise
 
 def h2o_to_polars(h2o_frame):
     """
@@ -619,7 +742,7 @@ def train_automl_model():
         trainer = H2OAutoMLTrainer(
             logger=logger,
             max_runtime_secs=3600,
-            max_models=10
+            max_models=50
         )
         
         # Load data
@@ -648,43 +771,43 @@ def train_automl_model():
             })
             
             # Train model
-            results = trainer.train(
-                X_train, y_train,
-                X_val, y_val,
-                X_test, y_test
-            )
-            # Close current trainer session
-            trainer.logger.info("Closing current H2O AutoML session...")
-            h2o.cluster().shutdown()
+            # results = trainer.train(
+            #     X_train, y_train,
+            #     X_val, y_val,
+            #     X_test, y_test
+            # )
+            # # Close current trainer session
+            # trainer.logger.info("Closing current H2O AutoML session...")
+            # h2o.cluster().shutdown()
+            # Print performance summary
+            # print("\nModel Performance Summary:")
+            # print("-" * 80)
+            # print("Validation Set Metrics:")
+            # for k, v in results['validation_metrics'].items():
+            #     if isinstance(v, (int, float)):
+            #         print(f"{k:20}: {v:.4f}")
+            
+            # print("\nTest Set Metrics:")
+            # for k, v in results['test_metrics'].items():
+            #     if isinstance(v, (int, float)):
+            #         print(f"{k:20}: {v:.4f}")
+            
             
             # Initialize new trainer with same parameters
             trainer = H2OAutoMLTrainer(
                 logger=logger,
                 max_runtime_secs=3600,
-                max_models=10
+                max_models=10,
+                seed=42
             )
             trainer.logger.info("Initialized new H2O AutoML trainer instance")
             # Perform grid search
-            best_model, grid_leaderboard = trainer.grid_search_tuning(
+            grid_leaderboard = trainer.grid_search_tuning(
                 X_train, y_train,
+                X_test, y_test,
                 X_val, y_val
             )
             
-            # Log grid search results
-            trainer._log_grid_search_results(grid_leaderboard)
-            
-            # Print performance summary
-            print("\nModel Performance Summary:")
-            print("-" * 80)
-            print("Validation Set Metrics:")
-            for k, v in results['validation_metrics'].items():
-                if isinstance(v, (int, float)):
-                    print(f"{k:20}: {v:.4f}")
-            
-            print("\nTest Set Metrics:")
-            for k, v in results['test_metrics'].items():
-                if isinstance(v, (int, float)):
-                    print(f"{k:20}: {v:.4f}")
             
             return results
             
