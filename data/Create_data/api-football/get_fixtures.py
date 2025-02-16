@@ -38,7 +38,7 @@ class ApiFootball:
             'x-rapidapi-host': "v3.football.api-sports.io"
         }
         self.project_root = project_root
-        self.data_dir = os.path.join(self.project_root, "data", "api-football")
+        self.data_dir = os.path.join(self.project_root, "data", "create_data", "api-football")
         os.makedirs(self.data_dir, exist_ok=True)
 
         # MongoDB setup

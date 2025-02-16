@@ -275,6 +275,227 @@
    - [ ] Set up performance tracking
    - [ ] Create monitoring dashboards
 
+### Week 2: Hyperparameter Optimization Framework
+
+1. Configuration System
+   ```yaml
+   # config/hyperparameter_spaces/lightgbm_space.yaml
+   hyperparameters:
+     learning_rate:
+       distribution: log_uniform
+       min: 0.001
+       max: 0.1
+     num_leaves:
+       distribution: int_uniform
+       min: 20
+       max: 100
+     # ... other parameters ...
+
+   search_strategy:
+     name: bayesian
+     settings:
+       max_trials: 40
+       metric: precision
+       mode: max
+       early_stopping:
+         type: asha
+         grace_period: 500
+   ```
+
+2. Nested Cross-Validation Framework
+   ```python
+   # shared/validation.py
+   class NestedCVValidator:
+       def __init__(self, outer_splits=3, inner_splits=2):
+           self.outer_splits = outer_splits
+           self.inner_splits = inner_splits
+           self.best_score = 0
+           self.best_params = {}
+
+       def optimize_hyperparameters(self, model, X, y, X_val, y_val, X_test, y_test, param_space):
+           """Run nested cross-validation for hyperparameter optimization."""
+           # Initialize outer CV
+           outer_cv = StratifiedKFold(
+               n_splits=self.outer_splits,
+               shuffle=True,
+               random_state=19
+           )
+           
+           # Run inner optimization
+           best_params, metrics = self._optimize_inner_cv(
+               X, y, X_val, y_val, X_test, y_test,
+               model, param_space
+           )
+           
+           return best_params, metrics
+
+       def _optimize_inner_cv(self, X_train, y_train, X_val, y_val, X_test, y_test, model, param_space):
+           """Run inner cross-validation with Ray Tune."""
+           # Configure Ray storage and resources
+           storage_path = Path.cwd() / "ray_results"
+           ray.init(
+               num_cpus=os.cpu_count(),
+               _temp_dir=str(storage_path / "tmp"),
+               include_dashboard=False,
+               log_to_driver=True
+           )
+
+           # Configure ASHA scheduler
+           scheduler = tune.schedulers.ASHAScheduler(
+               time_attr="training_iteration",
+               metric="precision",
+               mode="max",
+               max_t=3000,
+               grace_period=500
+           )
+
+           # Configure Bayesian optimization
+           bayesopt = BayesOptSearch(
+               metric="precision",
+               mode="max",
+               utility_kwargs={
+                   "kind": "ucb",
+                   "kappa": 2.5,
+                   "xi": 0.0
+               }
+           )
+
+           # Run optimization
+           analysis = tune.run(
+               self.objective,
+               scheduler=scheduler,
+               search_alg=bayesopt,
+               num_samples=40,
+               config=param_space,
+               resources_per_trial={"cpu": 1, "gpu": 0}
+           )
+
+           return analysis.best_config
+   ```
+
+3. Model-Specific Hyperparameter Optimization
+   ```python
+   # base/tree_based/lightgbm_model.py
+   class LightGBMModel(BaseModel):
+       def optimize_hyperparameters(self, X, y, X_val, y_val, X_test, y_test):
+           """Optimize hyperparameters using nested cross-validation."""
+           # Initialize validator
+           self.cv_validator = NestedCVValidator(logger=self.logger)
+           
+           # Prepare parameter space
+           param_space = {}
+           param_ranges = {}  # For logging
+           
+           for param, config in self.hyperparameter_space['hyperparameters'].items():
+               if isinstance(config, dict) and 'distribution' in config:
+                   if config['distribution'] == 'log_uniform':
+                       min_val = max(config['min'], 1e-8)
+                       max_val = max(config['max'], min_val + 1e-8)
+                       param_space[param] = tune.uniform(min_val, max_val)
+                   elif config['distribution'] == 'uniform':
+                       param_space[param] = tune.uniform(config['min'], config['max'])
+                   elif config['distribution'] == 'int_uniform':
+                       min_val = max(1, int(config['min']))
+                       max_val = max(min_val + 1, int(config['max']))
+                       param_space[param] = tune.randint(min_val, max_val)
+           
+           # Add CPU-specific parameters
+           param_space.update({
+               'device': 'cpu',
+               'force_row_wise': True,
+               'deterministic': True
+           })
+           
+           # Run optimization
+           best_params, metrics = self.cv_validator.optimize_hyperparameters(
+               self, X, y, X_val, y_val, X_test, y_test,
+               param_space,
+               self.hyperparameter_space.get('search_strategy', {})
+           )
+           
+           return best_params, metrics
+   ```
+
+4. Threshold Optimization
+   ```python
+   def _optimize_threshold(self, X_val, y_val):
+       """Optimize decision threshold based on precision-recall trade-off."""
+       probas = self.predict_proba(X_val)
+       thresholds = np.linspace(0.25, 0.8, 56)
+       best_threshold = 0.3
+       best_score = 0.0
+       
+       for threshold in thresholds:
+           preds = (probas >= threshold).astype(int)
+           metrics = calculate_metrics(y_val, preds, probas)
+           
+           if metrics['recall'] >= 0.15 and metrics['recall'] < 0.9 and metrics['precision'] > 0.30:
+               score = metrics['precision']
+               if score > best_score:
+                   best_score = score
+                   best_threshold = threshold
+       
+       return best_threshold
+   ```
+
+## Key Changes from Original Plan
+
+1. Hyperparameter Optimization:
+   - Switched from Population Based Training to Bayesian Optimization with ASHA scheduler
+   - Added explicit CPU optimization constraints
+   - Implemented proper parameter space conversion for Ray Tune
+   - Added comprehensive logging of parameter ranges and results
+
+2. Cross-Validation:
+   - Implemented nested CV with outer (3 folds) and inner (2 folds) loops
+   - Added proper handling of parameter types (int, float, categorical)
+   - Improved error handling and resource cleanup
+
+3. Threshold Optimization:
+   - Added specific precision-recall trade-off constraints
+   - Implemented fine-grained threshold search
+   - Added proper metric calculation and validation
+
+4. Configuration:
+   - Added YAML-based configuration for both model and hyperparameter spaces
+   - Implemented strict validation of configuration structure
+   - Added CPU-specific parameter constraints
+
+## Resource Management
+
+1. Ray Tune Configuration:
+   - Single CPU per trial
+   - Disabled GPU usage
+   - Proper cleanup of Ray resources
+   - Shorter temporary directories for Windows compatibility
+
+2. Memory Management:
+   - Added proper cleanup in finally blocks
+   - Implemented resource limits per trial
+   - Added logging of resource usage
+
+3. Error Handling:
+   - Added comprehensive error catching and logging
+   - Implemented fallback to default parameters
+   - Added proper cleanup on errors
+
+## Monitoring & Logging
+
+1. Parameter Space Logging:
+   - Added human-readable parameter ranges
+   - Logged actual parameter values used
+   - Added conversion of numpy types for JSON serialization
+
+2. Results Logging:
+   - Added comprehensive metrics tracking
+   - Implemented proper MLflow integration
+   - Added timing information for optimization process
+
+3. Resource Monitoring:
+   - Added CPU usage tracking
+   - Implemented memory usage monitoring
+   - Added disk space monitoring for Ray results
+
 ## Sprint 2: Base Model Implementation (3 weeks)
 
 ### Week 3-5: Model Implementations

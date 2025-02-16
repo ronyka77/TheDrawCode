@@ -15,9 +15,7 @@ model:
   params:
     objective: "binary:logistic"
     tree_method: "hist"  # CPU-optimized histogram-based tree method
-    grow_policy: "depthwise"
-    max_bin: 256  # Reduced for CPU optimization
-    random_state: 42
+    random_state: 19
     n_jobs: -1  # Use all available CPU cores
     
   # Training configuration

@@ -70,7 +70,7 @@ def run_xgboost_hypertuning() -> Dict[str, Any]:
         if not ray.is_initialized():
             ray.init(
                 num_cpus=os.cpu_count(),  # Use all available CPUs
-                _temp_dir=str(storage_path / "ray_temp"),
+                _temp_dir=str(storage_path / "tmp"),  # Shorter temp directory
                 ignore_reinit_error=True,
                 include_dashboard=False,  # Disable dashboard for reduced overhead
                 log_to_driver=True,  # Enable logging to driver for better debugging
@@ -81,23 +81,65 @@ def run_xgboost_hypertuning() -> Dict[str, Any]:
             best_params = model.optimize_hyperparameters(X_train, y_train, X_val, y_val, X_test, y_test)
             optimization_time = time.time() - start_time
             exp_logger.info(f"Hyperparameter optimization completed in {optimization_time:.2f} seconds")
-            exp_logger.info(f"Best parameters found: {json.dumps({k: float(v) if isinstance(v, np.float32) else v for k, v in best_params.items()}, indent=2)}")
-            if "max_depth" in best_params:
-                best_params["max_depth"] = int(round(best_params["max_depth"]))
-            # Repeat for any other parameters that need to be integers:
-            for key in ['seed', 'n_estimators', 'random_seed','early_stopping_rounds','min_child_weight']:
+            
+            try:
+                # Handle Ray ObjectRef by getting the actual value
+                if hasattr(best_params, '_object_ref'):
+                    exp_logger.info("Best parameters is a Ray ObjectRef")
+                    best_params = ray.get(best_params)
+                
+                # Convert tuple to dict if needed
+                if isinstance(best_params, tuple):
+                    # Get parameter names from model config
+                    model_config = model.config_loader.load_model_config('xgboost')
+                    param_names = list(model_config.get('params', {}).keys())
+                    
+                    # Create dict with available parameters
+                    best_params = dict(zip(param_names[:len(best_params)], best_params))
+                    exp_logger.info(f"Converted tuple to dict with {len(best_params)} parameters")
+                
+                # Convert other non-dict types if possible
+                elif not isinstance(best_params, dict):
+                    if hasattr(best_params, '_asdict'):
+                        exp_logger.info("Best parameters is a namedtuple")
+                        best_params = best_params._asdict()
+                    else:
+                        error_msg = f"Cannot convert best_params of type {type(best_params)} to dict"
+                        exp_logger.error(error_msg)
+                        raise ValueError(error_msg)
+                
+                # Convert numpy types to Python types for JSON serialization
+                best_params_log = {
+                    k: v.item() if isinstance(v, (np.generic, np.number)) else v
+                    for k, v in best_params.items() if not k.startswith('_')
+                }
+                exp_logger.info(f"Best parameters found: {json.dumps(best_params_log, indent=2)}")
+            
+            except Exception as e:
+                error_msg = f"Error processing best parameters: {str(e)}"
+                exp_logger.error(error_msg)
+                raise ValueError(error_msg) from e
+            
+            # Convert integer parameters
+            for key in ['seed', 'n_estimators', 'random_seed', 'early_stopping_rounds', 'min_child_weight', 'max_depth']:
                 if key in best_params:
                     best_params[key] = int(round(best_params[key]))
-            # Train model with best parameters
+            
+            # Train final model with best parameters
             exp_logger.info(f"Training model with best parameters: {best_params}")
             train_start = time.time()
-            metrics = model.fit(X_train, y_train, X_val, y_val, X_test, y_test, **best_params)
+            final_model = XGBoostModel(
+                experiment_name="xgboost_hypertuning_final",
+                model_type="xgboost",
+                logger=exp_logger
+            )
+            metrics = final_model.fit(X_train, y_train, X_val, y_val, X_test, y_test, **best_params)
             training_time = time.time() - train_start
             exp_logger.info(f"Model training completed in {training_time:.2f} seconds")
             
             # Evaluate on validation set
             exp_logger.info("Evaluating model on validation set")
-            val_metrics = model.evaluate(X_val, y_val)
+            val_metrics = final_model.evaluate(X_val, y_val)
             exp_logger.info("Model evaluation completed")
             
             # Store all results
@@ -121,6 +163,7 @@ def run_xgboost_hypertuning() -> Dict[str, Any]:
                     }
                 }
             }
+            
         finally:
             # Clean up Ray resources
             if ray.is_initialized():
@@ -132,6 +175,7 @@ def run_xgboost_hypertuning() -> Dict[str, Any]:
         results_path.mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         results_file = results_path / f"xgboost_hypertuning_{timestamp}.json"
+        
         with open(results_file, 'w') as f:
             # Convert numpy types to native Python types for JSON serialization
             def convert_types(obj):
@@ -154,6 +198,7 @@ def run_xgboost_hypertuning() -> Dict[str, Any]:
         
     except Exception as e:
         exp_logger.error(f"Error during hyperparameter tuning: {str(e)}")
+        traceback.print_exc()
         
         # Save error information
         results['error'] = {
@@ -190,7 +235,6 @@ def run_xgboost_hypertuning() -> Dict[str, Any]:
 
 if __name__ == '__main__':
     try:
-        exp_logger = ExperimentLogger(experiment_name="xgboost_hypertuning")
         exp_logger.info("Starting hyperparameter tuning script...")
         results = run_xgboost_hypertuning()
         

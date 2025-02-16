@@ -1,0 +1,72 @@
+hyperparameters:
+  # Model architecture parameters
+  hidden_dropout_prob:
+    distribution: uniform
+    min: 0.1
+    max: 0.5
+  
+  attention_probs_dropout_prob:
+    distribution: uniform
+    min: 0.1
+    max: 0.5
+  
+  # Training parameters
+  learning_rate:
+    distribution: log_uniform
+    min: 1.0e-5
+    max: 5.0e-5
+  
+  per_device_train_batch_size:
+    distribution: int_uniform
+    min: 8
+    max: 32
+  
+  gradient_accumulation_steps:
+    distribution: int_uniform
+    min: 1
+    max: 4
+  
+  num_train_epochs:
+    distribution: int_uniform
+    min: 2
+    max: 5
+  
+  warmup_ratio:
+    distribution: uniform
+    min: 0.0
+    max: 0.2
+  
+  weight_decay:
+    distribution: log_uniform
+    min: 0.01
+    max: 0.1
+  
+  # Sequence parameters
+  max_seq_length:
+    distribution: int_uniform
+    min: 128
+    max: 512
+  
+  # CPU-specific parameters (fixed)
+  device: cpu
+  fp16: False
+  fp16_opt_level: O1
+  max_grad_norm: 1.0
+  
+  # Fixed parameters
+  model_name: bert-base-uncased
+  num_labels: 2
+  problem_type: single_label_classification
+
+search_strategy:
+  name: bayesian
+  settings:
+    max_trials: 30
+    metric: precision
+    mode: max
+    early_stopping:
+      type: asha
+      grace_period: 1
+      reduction_factor: 2
+      max_t: 5
+      brackets: 1 

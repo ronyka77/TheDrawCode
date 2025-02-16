@@ -41,7 +41,7 @@ class BaseModel(ABC):
         self.mlruns_dir = self.mlflow_manager.setup_model_experiment(model_type)
         
         # Load configurations
-        self.config_loader = ConfigurationLoader(self.experiment_name)
+        self.config_loader = ConfigurationLoader(logger=self.logger, experiment_name=self.experiment_name)
         
         # Set up configuration paths
         if config_path is None:
@@ -156,7 +156,12 @@ class BaseModel(ABC):
     def optimize_hyperparameters(
         self,
         X_train: pd.DataFrame,
-        y_train: pd.Series) -> Dict[str, Any]:
+        y_train: pd.Series,
+        X_val: pd.DataFrame,
+        y_val: pd.Series,
+        X_test: pd.DataFrame,
+        y_test: pd.Series
+        ) -> Dict[str, Any]:
         """Optimize hyperparameters using nested cross-validation.
         
         Args:
@@ -170,8 +175,6 @@ class BaseModel(ABC):
         
         # Initialize nested CV
         validator = NestedCVValidator(
-            outer_splits=self.model_config['model']['validation']['cv_folds'],
-            inner_splits=3,
             experiment_name=f"{self.experiment_name}_cv"
         )
         

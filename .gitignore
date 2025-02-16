@@ -4,8 +4,11 @@ mlruns/
 context/
 catboost_info/
 logs/
+ray_results/
 models/base/backup/
 models/saved/
+results/
+models/hyperparameter_tuning/ray_results/
 data/Create_data/pipeline/models/
 data/raw/model_data_training_newPoisson.xlsx
 data/raw/preprocessed_data.parquet

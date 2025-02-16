@@ -17,7 +17,7 @@ SELECTCOLUMNS(
             future_matches[referee],
             future_matches[referee_encoded],
             future_matches[Last_home_match],
-            future_matches[Last_away_match],
+            future_matches[Last_away_match],  
             future_matches[away_attack_strength],
             future_matches[away_average_points],
             future_matches[away_corners_mean],

@@ -9,13 +9,13 @@ from utils.logger import ExperimentLogger
 class ConfigurationLoader:
     """Handles loading and validation of model configurations."""
     
-    def __init__(self, experiment_name: str):
+    def __init__(self, logger=None, experiment_name: str = "config_loader"):
         """Initialize the configuration loader.
         
         Args:
             experiment_name: Name of the experiment for logging
         """
-        self.logger = ExperimentLogger(experiment_name=experiment_name)
+        self.logger = logger or ExperimentLogger(experiment_name=experiment_name)
         self.project_root = Path(__file__).parent.parent.parent.parent
         self.base_config_path = Path(os.path.join(
             self.project_root,
@@ -28,7 +28,7 @@ class ConfigurationLoader:
         """Load model-specific configuration.
         
         Args:
-            model_type: Type of model (e.g., 'xgboost', 'lightgbm')
+            model_type: Type of model (e.g., 'catboost', 'bert', 'lightgbm', 'xgboost')
             
         Returns:
             Dictionary containing model configuration

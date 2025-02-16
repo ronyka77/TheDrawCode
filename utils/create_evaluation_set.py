@@ -381,7 +381,9 @@ def update_api_data_for_draws():
         
         # Filter data for dates before 2024-11-01
         api_training_data = updated_data[updated_data['Date'] < '2024-11-01']
-
+        # Add is_draw column for training data
+        api_training_data['is_draw'] = (api_training_data['match_outcome'] == 2).astype(int)
+        logger.info("Added is_draw column to training data")
         # Filter data for dates after 2024-11-01 where match_outcome is not blank
         api_prediction_eval = updated_data[
             (updated_data['Date'] >= '2024-11-01') &

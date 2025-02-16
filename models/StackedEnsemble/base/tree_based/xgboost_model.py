@@ -12,6 +12,7 @@ import ray.tune as tune
 import mlflow
 import sys
 import ray
+import time
 os.environ["ARROW_S3_DISABLE"] = "1"
 os.environ["RAY_DEDUP_LOGS"] = "0"
 
@@ -22,10 +23,115 @@ from models.StackedEnsemble.utils.metrics import calculate_metrics
 from models.StackedEnsemble.shared.validation import NestedCVValidator
 from models.StackedEnsemble.shared.mlflow_utils import MLFlowManager
 
+# Global validator actor name
+VALIDATOR_ACTOR_NAME = "global_validator"
+
+@ray.remote
+class ValidatorActor:
+    """Ray actor for validation that ensures single instance."""
+    
+    def __init__(self, logger=None, model_type='xgboost'):
+        """Initialize validator actor.
+        
+        Args:
+            logger: Logger instance
+            model_type: Model type
+        """
+        # Create a new logger instance for the actor
+        self.logger = logger or ExperimentLogger('xgboost_hypertuning')
+        self.validator = NestedCVValidator(logger=self.logger, model_type=model_type)
+        self.logger.info("Created new validator instance")
+        
+    def optimize_hyperparameters(self, model, X, y, X_val, y_val, X_test, y_test, param_space, search_strategy):
+        """Run hyperparameter optimization."""
+        try:
+            # Ensure logger is available
+            if not hasattr(self, 'logger') or self.logger is None:
+                self.logger = ExperimentLogger('xgboost_hypertuning')
+                self.validator.logger = self.logger
+            
+            self.logger.info("Starting hyperparameter optimization in validator actor")
+            result = self.validator.optimize_hyperparameters(
+                model, X, y, X_val, y_val, X_test, y_test, param_space, search_strategy
+            )
+            self.logger.info("Completed hyperparameter optimization in validator actor")
+            return result
+        except Exception as e:
+            if hasattr(self, 'logger') and self.logger is not None:
+                self.logger.error(f"Error in optimize_hyperparameters: {str(e)}")
+            return self._get_default_params(param_space)
+    
+    def _get_default_params(self, param_space):
+        """Get default parameters if optimization fails."""
+        try:
+            # Ensure logger is available
+            if not hasattr(self, 'logger') or self.logger is None:
+                self.logger = ExperimentLogger('xgboost_hypertuning')
+                self.validator.logger = self.logger
+            
+            self.logger.info("Getting default parameters")
+            params = self.validator._get_default_params(param_space)
+            self.logger.info(f"Retrieved default parameters: {params}")
+            return params
+        except Exception as e:
+            if hasattr(self, 'logger') and self.logger is not None:
+                self.logger.error(f"Error getting default parameters: {str(e)}")
+            return {
+                'tree_method': 'hist',
+                'n_jobs': -1,
+                'objective': 'binary:logistic',
+                'eval_metric': ['error', 'aucpr', 'logloss'],
+                'random_state': 19,
+                'learning_rate': 0.01,
+                'max_depth': 6,
+                'min_child_weight': 1,
+                'subsample': 0.8,
+                'colsample_bytree': 0.8,
+                'early_stopping_rounds': 100
+            }
+    
+    def get_info(self):
+        """Get validator info."""
+        return "Validator is set up"
 
 class XGBoostModel(BaseModel):
     """XGBoost model implementation with CPU optimization."""
     
+    _validator_actor = None  # Class-level validator actor reference
+    
+    @classmethod
+    def get_validator_actor(cls, logger=None):
+        """Get or create the validator actor."""
+        if cls._validator_actor is None:
+            max_retries = 3
+            retry_count = 0
+            
+            while retry_count < max_retries:
+                try:
+                    # Try to get existing actor
+                    cls._validator_actor = ray.get_actor(VALIDATOR_ACTOR_NAME)
+                    logger.info("Retrieved existing validator actor")
+                    break
+                except ValueError:
+                    try:
+                        # Create new actor with proper options
+                        cls._validator_actor = ValidatorActor.options(
+                            name=VALIDATOR_ACTOR_NAME,
+                            lifetime="detached",  # Keep actor alive across failures
+                            max_restarts=-1,  # Unlimited restarts
+                            max_task_retries=3  # Retry failed tasks
+                        ).remote(logger)
+                        logger.info("Created new validator actor")
+                        break
+                    except Exception as e:
+                        retry_count += 1
+                        logger.warning(f"Attempt {retry_count} to create validator actor failed: {str(e)}")
+                        if retry_count == max_retries:
+                            raise RuntimeError("Failed to create validator actor after maximum retries")
+                        time.sleep(1)  # Wait before retrying
+        
+        return cls._validator_actor
+
     def __init__(self, experiment_name: str = "xgboost_experiment", model_type: str = "xgboost", logger: ExperimentLogger = ExperimentLogger("xgboost_experiment")):
         """Initialize XGBoost model.
         
@@ -52,6 +158,19 @@ class XGBoostModel(BaseModel):
         self.mlflow = MLFlowManager(experiment_name)
         self.model = None
         self.best_threshold = 0.3
+        
+        # Initialize Ray if not already initialized
+        if not ray.is_initialized():
+            ray.init(
+                num_cpus=os.cpu_count(),
+                ignore_reinit_error=True,
+                include_dashboard=False,
+                log_to_driver=True
+            )
+            self.logger.info("Ray initialized for hyperparameter tuning")
+        
+        # Get or create validator actor
+        self.validator = self.get_validator_actor(self.logger)
         
         # Load model configuration
         self.model_config = self.config_loader.load_model_config(model_type)
@@ -103,7 +222,7 @@ class XGBoostModel(BaseModel):
         
         return X, y
     
-    def _train_model(
+    def _train_model(   
         self,
         X: Any,
         y: Any,
@@ -241,11 +360,74 @@ class XGBoostModel(BaseModel):
             Dictionary of best hyperparameters
         """
         self.logger.info("Starting hyperparameter optimization")
-        self.cv_validator = NestedCVValidator(logger=self.logger)
-        # Initialize base model with CPU optimization before tuning
-        self.model = self._create_model()
         
-        # Prepare hyperparameter space for Ray Tune with CPU-optimized ranges
+        # Prepare hyperparameter space
+        param_space = self._prepare_parameter_space()
+        self.logger.info("Parameter space prepared for optimization")
+        
+        try:
+            # Get optimization results from the Ray actor
+            self.logger.info("Starting hyperparameter optimization with Ray actor")
+            
+            # Log data shapes for debugging
+            self.logger.info(
+                f"Data shapes for optimization:"
+                f"\n - Training: {X.shape}"
+                f"\n - Validation: {X_val.shape}"
+                f"\n - Test: {X_test.shape}"
+            )
+            
+            # Start optimization with timeout
+            self.logger.info("Submitting optimization task to Ray actor")
+            optimization_future = self.validator.optimize_hyperparameters.remote(
+                self, X, y, X_val, y_val, X_test, y_test,
+                param_space, self.hyperparameter_space.get('search_strategy', {})
+            )
+            
+            # Wait for results with timeout and logging
+            try:
+                self.logger.info("Waiting for optimization results...")
+                best_params = ray.get(optimization_future, timeout=3600)  # 1 hour timeout
+                self.logger.info("Received optimization results from Ray actor")
+            except ray.exceptions.GetTimeoutError:
+                self.logger.error("Optimization timed out after 1 hour")
+                return self._get_default_params(param_space)
+            except Exception as e:
+                self.logger.error(f"Error getting optimization results: {str(e)}")
+                return self._get_default_params(param_space)
+            
+            # Log successful completion
+            self.logger.info("Hyperparameter optimization completed successfully")
+            self.logger.info(f"Best parameters found: {best_params}")
+            return best_params
+                
+        except Exception as e:
+            self.logger.error(f"Error in hyperparameter optimization: {str(e)}")
+            # Get default parameters
+            try:
+                self.logger.info("Attempting to get default parameters")
+                default_params = ray.get(self.validator._get_default_params.remote(param_space))
+                self.logger.info(f"Using default parameters: {default_params}")
+                return default_params
+            except Exception as inner_e:
+                self.logger.error(f"Error getting default parameters: {str(inner_e)}")
+                return {
+                    'tree_method': 'hist',
+                    'n_jobs': -1,
+                    'objective': 'binary:logistic',
+                    'eval_metric': ['error', 'aucpr', 'logloss'],
+                    'random_state': 19,
+                    'learning_rate': 0.01,
+                    'max_depth': 6,
+                    'min_child_weight': 1,
+                    'subsample': 0.8,
+                    'colsample_bytree': 0.8,
+                    'early_stopping_rounds': 100
+                }
+
+    def _prepare_parameter_space(self) -> Dict[str, Any]:
+        """Prepare hyperparameter space for optimization."""
+        self.logger.info("Preparing parameter space for optimization")
         param_space = {}
         param_ranges = {}  # Store human-readable ranges for logging
         
@@ -255,33 +437,33 @@ class XGBoostModel(BaseModel):
                 if isinstance(config, (int, float)):
                     param_space[param] = config
                     param_ranges[param] = f"fixed({config})"
+                    self.logger.debug(f"Added fixed parameter {param}: {config}")
                 # Handle string values
                 elif isinstance(config, str):
                     param_space[param] = config
                     param_ranges[param] = f"fixed({config})"
+                    self.logger.debug(f"Added fixed parameter {param}: {config}")
                 # Handle distribution dictionaries
                 elif isinstance(config, dict) and 'distribution' in config:
                     if config['distribution'] == 'log_uniform':
-                        # Remove log_uniform since BayesOpt doesn't support it
                         min_val = max(config['min'], 1e-8)
                         max_val = max(config['max'], min_val + 1e-8)
-                        param_space[param] = tune.uniform(min_val, max_val)  # Use uniform instead
+                        param_space[param] = tune.uniform(min_val, max_val)
                         param_ranges[param] = f"uniform({min_val:.2e}, {max_val:.2e})"
+                        self.logger.debug(f"Added log_uniform parameter {param}")
                     elif config['distribution'] == 'uniform':
                         param_space[param] = tune.uniform(config['min'], config['max'])
                         param_ranges[param] = f"uniform({config['min']:.3f}, {config['max']:.3f})"
+                        self.logger.debug(f"Added uniform parameter {param}")
                     elif config['distribution'] == 'int_uniform':
                         min_val = max(1, int(config['min']))
                         max_val = max(min_val + 1, int(config['max']))
                         param_space[param] = tune.randint(min_val, max_val)
                         param_ranges[param] = f"int_uniform({min_val}, {max_val})"
-                # Handle other cases
-                else:
-                    param_space[param] = config
-                    param_ranges[param] = f"fixed({config})"
+                        self.logger.debug(f"Added int_uniform parameter {param}")
             except Exception as e:
                 self.logger.error(f"Error processing parameter {param}: {str(e)}")
-                param_space[param] = config  # Fallback to original value
+                param_space[param] = config
                 param_ranges[param] = f"default({config})"
 
         # Add CPU-specific parameters
@@ -292,33 +474,15 @@ class XGBoostModel(BaseModel):
             'device': 'cpu',
             'n_jobs': 1  # Single CPU per trial
         }
-        # param_space.update(cpu_params)
-        # param_ranges.update({k: f"fixed({v})" for k, v in cpu_params.items()})
+        param_space.update(cpu_params)
+        self.logger.info("Added CPU-specific parameters")
         
-        # Log the final parameter space with human-readable ranges
+        # Log the final parameter space
         self.logger.info("Final parameter space for optimization:")
         for param, range_str in param_ranges.items():
             self.logger.info(f"{param}: {range_str}")
-        
-        # Run optimization
-        best_params = self.cv_validator.optimize_hyperparameters(
-            self,
-            X,
-            y,
-            X_val,
-            y_val,
-            X_test,
-            y_test,
-            param_space,
-            self.hyperparameter_space.get('search_strategy', {})
-        )
-        
-        # Log the best parameters with their actual values
-        self.logger.info("Best parameters found:")
-        for param, value in self.best_params.items():
-            self.logger.info(f"{param}: {value}")
-        
-        return self.best_params
+            
+        return param_space
 
     def fit(
         self,
@@ -350,9 +514,6 @@ class XGBoostModel(BaseModel):
         
         # Log metrics
         self.mlflow.log_metrics(train_metrics)
-        
-        # Log feature importance
-        # self._log_feature_importance()
         
         return train_metrics
     

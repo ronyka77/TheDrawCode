@@ -13,6 +13,8 @@ import sys
 os.environ["ARROW_S3_DISABLE"] = "1"
 # Disable Ray log deduplication to ensure all logs are captured
 os.environ["RAY_DEDUP_LOGS"] = "0"
+# Configure environment variables
+os.environ["GIT_PYTHON_GIT_EXECUTABLE"] = "git"
 
 # Add project root to Python path
 project_root = str(Path(__file__).parent.parent.parent.parent)
@@ -21,32 +23,55 @@ if project_root not in sys.path:
 os.environ["PYTHONPATH"] = project_root + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 from utils.logger import ExperimentLogger
+from models.StackedEnsemble.shared.config_loader import ConfigurationLoader
 
 class NestedCVValidator:
     """Nested cross-validation for hyperparameter optimization."""
+    
+    _instance = None  # Singleton instance
+    
+    def __new__(cls, *args, **kwargs):
+        """Ensure singleton instance."""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(
         self,
         outer_splits: int = 3,
         inner_splits: int = 2,
-        logger: ExperimentLogger = ExperimentLogger("nested_cv_validator")):
+        model_type: str = None,
+        logger: ExperimentLogger = None):
         """Initialize nested CV validator.
         
         Args:
             outer_splits: Number of outer CV folds
             inner_splits: Number of inner CV folds
+            model_type: Model type
+            logger: Logger instance
         """
-        self.outer_splits = outer_splits
-        self.inner_splits = inner_splits
-        self.logger = logger
-        self.best_score = 0
-        self.best_params = {}
-        self.X_train = None
-        self.y_train = None
-        self.X_val = None
-        self.y_val = None
-        self.X_test = None
-        self.y_test = None
+        # Only initialize if not already initialized
+        if not hasattr(self, 'initialized'):
+            self.outer_splits = outer_splits
+            self.inner_splits = inner_splits
+            self.logger = logger or ExperimentLogger(f"{model_type}_hypertuning")
+            self.best_score = 0
+            self.best_params = {}
+            self.X_train = None
+            self.y_train = None
+            self.X_val = None
+            self.y_val = None
+            self.X_test = None
+            self.y_test = None
+            self.actual_folds = 1
+            self.initialized = True
+            self.model_type = model_type
+            self.config_loader = ConfigurationLoader(self.model_type)
+            
+            if ray.is_initialized():
+                self.logger.info("NestedCVValidator initialized in Ray context")
+            else:
+                self.logger.info("NestedCVValidator initialized in standalone context")
 
     def optimize_hyperparameters(
         self,
@@ -79,16 +104,11 @@ class NestedCVValidator:
         self.X_test = X_test
         self.y_test = y_test
         self.model = model
-        # Initialize outer CV
-        outer_cv = StratifiedKFold(
-            n_splits=self.outer_splits,
-            shuffle=True,
-            random_state=19
-        )
+        self.best_precision = 0
         
         # Store results from each fold
         fold_results = []
-            
+        
         # Inner CV for hyperparameter tuning
         best_params = self._optimize_inner_cv(
             X,
@@ -100,19 +120,14 @@ class NestedCVValidator:
             model,
             param_space
         )
-        if "max_depth" in best_params:
-            best_params["max_depth"] = int(round(best_params["max_depth"]))
         
         # Repeat for any other parameters that need to be integers:
-        for key in ['seed', 'n_estimators', 'random_seed','early_stopping_rounds','min_child_weight']:
+        for key in ['seed', 'n_estimators', 'iterations', 'random_seed', 'early_stopping_rounds', 'min_child_weight', 'num_leaves', 'min_data_in_leaf', 'bagging_freq', 'max_depth']:
             if key in best_params:
                 best_params[key] = int(round(best_params[key]))
         # Train model with best parameters
         self.logger.info(f"Training model with best parameters: {str(best_params)}")
         metrics = model.fit(X, y, X_val, y_val, X_test, y_test, **best_params)
-        
-        # Evaluate on validation set
-        # metrics = model.evaluate(X_val, y_val)
         
         # Store results
         fold_results.append({
@@ -131,28 +146,96 @@ class NestedCVValidator:
         self.logger.info(f"Best parameters selected: {str(best_params)}")
         
         return best_params, metrics
-    # Define objective function for hyperparameter tuning
-    def objective(self, config):
-        # Convert continuous candidates to integers where needed.
-        # For example, if max_depth is sampled using tune.uniform,
-        # we convert it to an integer here.
-        if "max_depth" in config:
-            config["max_depth"] = int(round(config["max_depth"]))
+
+    def objective(self, config, X_train, y_train, X_val, y_val, X_test, y_test, model, logger):
+        """Ray Tune objective function."""
+        try:
+            # Debug log at start of objective function
+            if hasattr(self, 'logger') and self.logger is not None:
+                self.logger.debug("Starting objective function evaluation")
+                for handler in self.logger.handlers:
+                    handler.flush()
+
+            # Initialize logger if not already set up
+            if not hasattr(self, 'logger') or self.logger is None:
+                self.logger = logger
+                from utils.logger import ExperimentLogger
+                if not self.logger.handlers:
+                    self.logger = ExperimentLogger(
+                        experiment_name=f"{self.model_type}_hypertuning",
+                        log_dir=f"logs/{self.model_type}_hypertuning"
+                    )
+                self.logger.propagate = True
+                self.logger.debug("Logger initialized in objective function")
+                for handler in self.logger.handlers:
+                    handler.flush()
+
+            # Convert parameters and log configuration
+            config = self._convert_params_to_correct_types(config)
+            self.logger.info(f"Evaluating configuration: {config}")
+            for handler in self.logger.handlers:
+                handler.flush()
+            
+            # Perform cross-validation
+            precision = self.cross_validate_model(
+                config, 
+                X_train, 
+                y_train, 
+                X_val, 
+                y_val,
+                X_test, 
+                y_test, 
+                model
+            )
+            
+            # Handle invalid precision values
+            if not isinstance(precision, (int, float)) or np.isnan(precision):
+                self.logger.warning("Invalid precision value, setting to -inf")
+                precision = float('-inf')
+            else:
+                self.logger.info(f"Trial completed with precision: {precision:.4f}")
+            
+            # Ensure logs are flushed after precision check
+            for handler in self.logger.handlers:
+                handler.flush()
+            
+            # Log additional metrics with immediate flush
+            self.logger.debug("Logging trial metrics")
+            self.logger.info(
+                "Trial metrics logged",
+                error_code=None,
+                extra={
+                    'precision': precision,
+                    'config': config,
+                    'training_iteration': 1
+                }
+            )
+            for handler in self.logger.handlers:
+                handler.flush()
+            
+            # Report results to Ray Tune
+            tune.report({"precision": precision, "training_iteration": 1})
+            
+        except Exception as e:
+            if hasattr(self, 'logger') and self.logger is not None:
+                self.logger.error(f"Error in objective function: {str(e)}")
+                for handler in self.logger.handlers:
+                    handler.flush()
+            tune.report({"precision": float('-inf'), "training_iteration": 1})
+
+    def _convert_params_to_correct_types(self, config):
+        """Convert parameters to their correct types."""
+        integer_params = [
+            'seed', 'n_estimators', 'iterations', 'random_seed', 
+            'early_stopping_rounds', 'min_child_weight', 'num_leaves', 
+            'min_data_in_leaf', 'bagging_freq', 'max_depth'
+        ]
         
-        # Repeat for any other parameters that need to be integers:
-        for key in ['seed', 'n_estimators', 'random_seed','early_stopping_rounds','min_child_weight']:
+        for key in integer_params:
             if key in config:
                 config[key] = int(round(config[key]))
         
-        # Proceed with your cross-validation and model evaluation logic.
-        self.logger.info(f"Cross-validating model with config: {config}")
-        precision = self.cross_validate_model(
-            config, self.X_train, self.y_train, self.X_val, self.y_val, self.X_test, self.y_test, self.model
-        )
-        if not isinstance(precision, (int, float)) or np.isnan(precision):
-            precision = float('-inf')
-        
-        tune.report({"precision": precision, "training_iteration": 1})
+        return config
 
     def _optimize_inner_cv(
         self,
@@ -164,20 +247,15 @@ class NestedCVValidator:
         y_test: Any,
         model: Any,
         param_space: Dict[str, Any],
-        num_trials: int = 40) -> Dict[str, Any]:
-        """Run inner cross-validation for hyperparameter tuning.
-        
-        Args:
-            X_train: Training features
-            y_train: Training labels
-            model: Model instance to optimize
-            param_space: Hyperparameter search space
-            num_trials: Number of trials to run
+        num_trials: int = 10) -> Dict[str, Any]:
+        """Run inner cross-validation for hyperparameter tuning."""
+        # Ensure logger is available
+        if not hasattr(self, 'logger') or self.logger is None:
+            self.logger = ExperimentLogger(f"{model.model_type}_hypertuning")
             
-        Returns:
-            Dictionary of best hyperparameters
-        """
-        # Set up storage path for Ray Tune with shorter base path
+        self.logger.info("Starting inner CV optimization")
+        
+        # Set up storage path for Ray Tune
         storage_path = Path.cwd() / "ray_results"
         storage_path.mkdir(parents=True, exist_ok=True)
         
@@ -189,156 +267,145 @@ class NestedCVValidator:
         # Initialize Ray with proper resource limits and error handling
         if not ray.is_initialized():
             ray.init(
-                num_cpus=os.cpu_count(),  # Use all available CPUs
-                _temp_dir=str(storage_path / "tmp"),  # Shorter temp directory
+                num_cpus=os.cpu_count(),
+                _temp_dir=str(storage_path / "tmp"),
                 ignore_reinit_error=True,
-                include_dashboard=False,  # Disable dashboard for reduced overhead
-                log_to_driver=True,  # Enable logging to driver for better debugging
+                include_dashboard=False,
+                log_to_driver=True,
+                logging_level="WARNING"  # Reduce Ray's logging
             )
-        # Convert param_space to concrete values for Ray Tune
-        concrete_param_space = {}
+            self.logger.info("Ray initialized for hyperparameter tuning")
+            
+        # Configure BayesOpt search space with proper type handling
+        bayesopt_space = {}
         for k, v in param_space.items():
             try:
-                # Handle numeric values first
-                if isinstance(v, (int, float)):
-                    concrete_param_space[k] = v
-                # Handle string values
+                # Handle numeric ranges with explicit type conversion
+                if isinstance(v, dict) and 'min' in v and 'max' in v:
+                    min_val = float(v['min']) if not isinstance(v['min'], str) else 0
+                    max_val = float(v['max']) if not isinstance(v['max'], str) else 1
+                    bayesopt_space[k] = tune.uniform(min_val, max_val)
+                    self.logger.info(f"Parameter {k}: uniform({min_val}, {max_val})")
+                # Handle CPU-specific parameters (enforce CPU-only training)
+                elif isinstance(v, str) and v.lower() == 'cpu':
+                    bayesopt_space[k] = 'cpu'
+                    self.logger.info(f"Parameter {k}: fixed(cpu)")
+                # Skip string parameters that aren't CPU-related
                 elif isinstance(v, str):
-                    concrete_param_space[k] = v
-                # Handle Ray Tune search objects with explicit conversion
+                    continue
+                # Handle Integer parameters with explicit float conversion for BayesOpt
                 elif isinstance(v, tune.search.sample.Integer):
-                    # Convert Integer sample to concrete value
-                    concrete_param_space[k] = tune.randint(v.lower, v.upper + 1)
-                elif isinstance(v, tune.search.sample.Float):
-                    # Convert Float sample to concrete value
-                    concrete_param_space[k] = tune.uniform(v.lower, v.upper)
-                # Handle dictionaries with distribution configs
-                elif isinstance(v, dict) and 'distribution' in v:
-                    if v['distribution'] == 'log_uniform':
-                        min_val = max(v['min'], 1e-8)
-                        max_val = max(v['max'], min_val + 1e-8)
-                        concrete_param_space[k] = tune.loguniform(min_val, max_val)
-                    elif v['distribution'] == 'uniform':
-                        concrete_param_space[k] = tune.uniform(v['min'], v['max'])
-                    elif v['distribution'] == 'int_uniform':
-                        min_val = int(v['min'])
-                        max_val = int(v['max']) + 1  # ray.randint upper-bound is exclusive
-                        concrete_param_space[k] = tune.randint(min_val, max_val)
+                    bayesopt_space[k] = tune.uniform(float(v.lower), float(v.upper))
+                    self.logger.info(f"Parameter {k}: int_uniform({v.lower}, {v.upper})")
+                # Handle other parameter types with fallback
                 else:
-                    self.logger.warning(f"Unhandled parameter type for {k}: {type(v)}")
-                    concrete_param_space[k] = v
+                    bayesopt_space[k] = v
+                    self.logger.info(f"Parameter {k}: {v}")
             except Exception as e:
-                self.logger.error(f"Error processing parameter {k}: {str(e)}")
-                concrete_param_space[k] = v  # Fallback to original value
+                self.logger.warning(f"Error processing parameter {k}: {str(e)}")
+                bayesopt_space[k] = v  # Fallback to original value
         
-        # Run hyperparameter optimization with improved error handling
+        self.logger.info("Configured parameter space for optimization")
+        
+        # Set up search algorithm
+        search_alg = BayesOptSearch(
+            metric="precision",
+            mode="max",
+            random_search_steps=20,
+            utility_kwargs={
+                "kind": "ucb",
+                "kappa": 2.5,
+                "xi": 0.0
+            }
+        )
+        self.logger.info("Initialized BayesOpt search algorithm")
+        
+        # Set up scheduler
+        scheduler = tune.schedulers.ASHAScheduler(
+            metric="precision",
+            mode="max",
+            max_t=1000,
+            grace_period=100,
+            reduction_factor=2
+        )
+        self.logger.info("Initialized ASHA scheduler")
+        
+        # Configure tuning
+        tune_config = tune.TuneConfig(
+            num_samples=num_trials,
+            search_alg=search_alg,
+            scheduler=scheduler,
+            trial_dirname_creator=trial_dirname_creator
+        )
+        
+        # Set up run configuration
+        run_config = tune.RunConfig(
+            name=f"{self.model_type}_tuning",
+            storage_path=str(storage_path),
+            log_to_file=True,
+            checkpoint_config=tune.CheckpointConfig(
+                num_to_keep=2,
+                checkpoint_score_attribute="precision"
+            ),
+            verbose=2 
+        )
+        
         try:
-            
-            # Configure BayesOpt search space with proper type handling
-            bayesopt_space = {}
-            for k, v in param_space.items():
-                try:
-                    # Handle numeric ranges with explicit type conversion
-                    if isinstance(v, dict) and 'min' in v and 'max' in v:
-                        min_val = float(v['min']) if not isinstance(v['min'], str) else 0
-                        max_val = float(v['max']) if not isinstance(v['max'], str) else 1
-                        bayesopt_space[k] = tune.uniform(min_val, max_val)
-                    # Handle CPU-specific parameters (enforce CPU-only training)
-                    elif isinstance(v, str) and v.lower() == 'cpu':
-                        bayesopt_space[k] = 'cpu'
-                    # Skip string parameters that aren't CPU-related
-                    elif isinstance(v, str):
-                        continue
-                    # Handle Integer parameters with explicit float conversion for BayesOpt
-                    elif isinstance(v, tune.search.sample.Integer):
-                        bayesopt_space[k] = tune.uniform(float(v.lower), float(v.upper))
-                    # Handle other parameter types with fallback
-                    else:
-                        bayesopt_space[k] = v
-                except Exception as e:
-                    self.logger.warning(f"Error processing parameter {k}: {str(e)}")
-                    bayesopt_space[k] = v  # Fallback to original value
-            
-            # Configure ASHA scheduler for better CPU utilization
-            metric_name = "precision"  # Optimize for maximum precision
-            scheduler = tune.schedulers.ASHAScheduler(
-                time_attr="training_iteration",
-                metric=metric_name,
-                mode="max",
-                max_t=3000,  # Maximum number of training iterations
-                grace_period=500,  # Minimum training iterations before pruning
-                reduction_factor=2,
-                brackets=1
-            )
-            # Initialize BayesOpt search algorithm with proper space handling
-            bayesopt = BayesOptSearch(
-                metric="precision",
-                mode="max",
-                utility_kwargs={
-                    "kind": "ucb",
-                    "kappa": 2.5,
-                    "xi": 0.0
-                }
+            self.logger.info("Starting hyperparameter search with Ray Tune")
+            # Run hyperparameter search
+            tuner = tune.Tuner(
+                tune.with_parameters(
+                    self.objective,
+                    X_train=X_train,
+                    y_train=y_train,
+                    X_val=X_val,
+                    y_val=y_val,
+                    X_test=X_test,
+                    y_test=y_test,
+                    model=model,
+                    logger=self.logger
+                ),
+                param_space=bayesopt_space,
+                tune_config=tune_config,
+                run_config=run_config
             )
             
-            # Run tuning with parameter space passed directly to tune.run
-            analysis = tune.run(
-                lambda config: self.objective(config),
-                name="xgb_tune",  # Shorter experiment name
-                trial_dirname_creator=trial_dirname_creator,  # Custom trial directory names
-                scheduler=scheduler,
-                search_alg=bayesopt,
-                num_samples=num_trials,
-                config=bayesopt_space,  # Use pre-converted concrete parameter space
-                resources_per_trial={
-                    "cpu": 1,  # Single CPU per trial for better resource management
-                    "gpu": 0  # Explicitly set GPU to 0 as per project requirements
-                },
-                verbose=0, 
-                raise_on_failed_trial=False,  # Don't raise on failed trials
-                max_failures=3,  # Allow some failures before stopping
-                storage_path=str(storage_path.absolute()),
-                log_to_file=True,
-                checkpoint_freq=0  # Disable checkpointing to reduce overhead
-            )
-
-            # Get best parameters with proper error handling
+            self.logger.info("Running hyperparameter optimization...")
+            results = tuner.fit()
+            self.logger.info("Hyperparameter optimization completed")
+            
+            # Get best trial and parameters
             try:
-                best_trial = analysis.get_best_trial(metric=metric_name, mode="max")
-                if best_trial is None or best_trial.last_result is None:
-                    raise ValueError("No successful trials found")
+                best_result = results.get_best_result(metric="precision", mode="max")
+                if best_result is None:
+                    self.logger.warning("No successful trials completed")
+                    return self._get_default_params(param_space)
                 
-                best_local_params = best_trial.config
-                best_local_score = best_trial.last_result.get(metric_name, 0.0)
-                if best_local_score > self.best_score:
-                    self.best_score = best_local_score
-                    self.best_params = best_local_params
-                    self.logger.info(
-                        f"Best parameters found with {metric_name} {self.best_score:.4f}: {self.best_params}"
-                    )
-                return self.best_params
-                
-            except Exception as e:
-                self.logger.error(f"Error getting best trial(validation.py): {str(e)}")
+                best_params = best_result.config
+                best_precision = best_result.metrics.get("precision", 0.0)
+            except AttributeError as e:
+                self.logger.error(f"Error getting best result: {str(e)}")
                 return self._get_default_params(param_space)
-
+            
+            # Convert integer parameters
+            for key in ['iterations', 'depth', 'min_data_in_leaf', 'early_stopping_rounds']:
+                if key in best_params:
+                    best_params[key] = int(round(best_params[key]))
+            
+            self.logger.info(f"Best trial precision: {best_precision:.4f}")
+            self.logger.info(f"Best parameters: {best_params}")
+            
+            return best_params
+            
         except Exception as e:
-            self.logger.error(f"Error in hyperparameter optimization(validation.py): {str(e)}")
+            self.logger.error(f"Error in hyperparameter optimization: {str(e)}")
             return self._get_default_params(param_space)
+            
         finally:
-            # Clean up Ray and S3 resources
+            # Clean up Ray resources
             if ray.is_initialized():
-                try:
-                    # Shutdown Ray first
-                    ray.shutdown()
-                    
-                    # Clean up S3 resources if pyarrow is available
-                    if 'pyarrow' in sys.modules:
-                        import pyarrow as pa
-                        if hasattr(pa, 'finalize_s3'):
-                            pa.finalize_s3()
-                except Exception as e:
-                    self.logger.error(f"Error during resource cleanup: {str(e)}")
+                ray.shutdown()
+                self.logger.info("Ray resources cleaned up")
 
     def _get_default_params(self, param_space: Dict[str, Any]) -> Dict[str, Any]:
         """Get default parameters when optimization fails.
@@ -365,11 +432,17 @@ class NestedCVValidator:
                     default_params[param] = int(config['min'])
             # Process already-converted Ray Tune objects (using 'lower' and 'upper')
             elif hasattr(config, "lower") and hasattr(config, "upper"):
-                lower = config.lower() if callable(config.lower) else config.lower
-                upper = config.upper() if callable(config.upper) else config.upper
-                
-                # Ensure numeric types before arithmetic operations
                 try:
+                    # Get lower/upper bounds, handling both callable and non-callable cases
+                    lower = config.lower() if callable(config.lower) else config.lower
+                    upper = config.upper() if callable(config.upper) else config.upper
+                    
+                    # Handle string values by using lower bound
+                    if isinstance(lower, str) or isinstance(upper, str):
+                        default_params[param] = lower
+                        continue
+                        
+                    # Convert to float if not already numeric
                     lower = float(lower) if not isinstance(lower, (int, float)) else lower
                     upper = float(upper) if not isinstance(upper, (int, float)) else upper
                     
@@ -377,20 +450,85 @@ class NestedCVValidator:
                         default_params[param] = int(lower)
                     else:
                         default_params[param] = float((lower + upper) / 2)
-                except (TypeError, ValueError) as e:
-                    # self.logger.warning(f"Failed to convert bounds for {param}: {str(e)}. Using lower bound.")
+                except (TypeError, ValueError, AttributeError):
+                    # If any conversion fails, use lower bound
                     default_params[param] = lower
             else:
                 default_params[param] = config
                 
-        # Add CPU-specific defaults
-        default_params.update({
-            'tree_method': 'hist',
-            'device': 'cpu',
-            'n_jobs': 1,
-            'eval_metric': ['error', 'aucpr', 'logloss'],
-            'objective': 'binary:logistic'
-        })
+        # Get model-specific defaults from config
+        model_config = self.config_loader.load_model_config(self.model_type)
+        if model_config:
+            # Update with CPU-specific configs from YAML
+            default_params.update(model_config.get('cpu_config', {}))
+            # Update with core model parameters from YAML
+            default_params.update(model_config.get('params', {}))
+        
+        # Add model-type specific defaults based on configs
+        if self.model_type == 'xgboost':
+            default_params.update({
+                'tree_method': 'hist',  # CPU-optimized histogram-based tree method
+                'device': 'cpu',
+                'n_jobs': -1,  # Use all available CPU cores
+                'tree_learner': 'serial',
+                'force_row_wise': True,
+                'eval_metric': ['logloss', 'auc'],  # From xgboost_config.yaml
+                'objective': 'binary:logistic',
+                'random_state': 19,  # From xgboost_config.yaml
+                'early_stopping_rounds': 300  # From xgboost_config.yaml
+            })
+        elif self.model_type == 'lightgbm':
+            default_params.update({
+                'device': 'cpu',
+                'num_threads': -1,
+                'verbosity': -1,
+                'objective': 'binary',
+                'metric': ['binary_logloss', 'auc'],
+                'boosting_type': 'gbdt',
+                'random_state': 19,
+                'early_stopping_rounds': 100,
+                'first_metric_only': True
+            })
+        elif self.model_type == 'catboost':
+            default_params.update({
+                'task_type': 'CPU',
+                'thread_count': -1,
+                'bootstrap_type': 'Bernoulli',
+                'grow_policy': 'SymmetricTree',
+                'loss_function': 'Logloss',
+                'eval_metric': 'AUC',
+                'random_seed': 19,
+                'early_stopping_rounds': 100,
+                'boosting_type': 'Plain',
+                'use_best_model': True,
+                'verbose': 0
+            })
+        elif self.model_type == 'bert':
+            default_params.update({
+                'device': 'cpu',
+                'fp16': False,
+                'fp16_opt_level': 'O1',
+                'max_grad_norm': 1.0,
+                'num_workers': 4,
+                'model_name': 'bert-base-uncased',
+                'num_labels': 2,
+                'problem_type': 'single_label_classification',
+                'max_seq_length': 256,
+                'per_device_train_batch_size': 16,
+                'gradient_accumulation_steps': 2,
+                'learning_rate': 2e-5,
+                'num_train_epochs': 3,
+                'warmup_ratio': 0.1,
+                'weight_decay': 0.01,
+                'hidden_dropout_prob': 0.1,
+                'attention_probs_dropout_prob': 0.1,
+                'seed': 19,
+                'use_early_stopping': True,
+                'early_stopping_patience': 3,
+                'early_stopping_threshold': 0.01,
+                'eval_metric': ['accuracy', 'f1', 'precision', 'auc', 'average_precision', 'brier_score'],
+                'objective': 'binary_classification'
+            })
         
         self.logger.info(f"Default parameters: {default_params}")
         return default_params
@@ -450,23 +588,11 @@ class NestedCVValidator:
         X_test: Any,
         y_test: Any,
         model: Any) -> float:
-        """Perform cross-validation evaluation of model with given configuration.
+        """Perform cross-validation evaluation of model with given configuration."""
+        # Ensure logger is available
+        if not hasattr(self, 'logger') or self.logger is None:
+            self.logger = ExperimentLogger(f"{model.model_type}_hypertuning")
         
-        Args:
-            config: Dictionary of hyperparameters to evaluate
-            X_train: Training features
-            y_train: Training labels
-            X_val: Validation features
-            y_val: Validation labels
-            X_test: Test features
-            y_test: Test labels
-            model: Model instance to evaluate
-            
-        Returns:
-            float: Mean precision score across CV folds
-        """
-        # self.logger.info(f"Cross-validating model with config: {str(config)}")
-
         # Inner CV
         inner_cv = StratifiedKFold(
             n_splits=self.inner_splits,
@@ -474,16 +600,20 @@ class NestedCVValidator:
             random_state=19
         )
         cv_scores = []
-        # Train and evaluate
+        
+        # Train and evaluate in each fold
         for fold_idx, (train_idx, val_idx) in enumerate(inner_cv.split(X_train, y_train)):
             try:
-                self.logger.info(f"Fold {fold_idx + 1}")
+                self.actual_folds += 1
+                self.logger.info(f"Starting fold {self.actual_folds}")
+                
+                # Prepare data for this fold
                 X_train_inner = X_train.iloc[train_idx] if hasattr(X_train, 'iloc') else X_train[train_idx]
                 X_test_inner = X_train.iloc[val_idx] if hasattr(X_train, 'iloc') else X_train[val_idx]
                 y_train_inner = y_train.iloc[train_idx] if hasattr(y_train, 'iloc') else y_train[train_idx]
                 y_test_inner = y_train.iloc[val_idx] if hasattr(y_train, 'iloc') else y_train[val_idx]
                 
-                # Train with early stopping using validation set
+                self.logger.info(f"Training model for fold {self.actual_folds}")
                 metrics = model.fit(
                     X_train_inner,
                     y_train_inner,
@@ -498,18 +628,34 @@ class NestedCVValidator:
                 precision = metrics.get('precision', 0.0)
                 recall = metrics.get('recall', 0.0)
                 
-                # Only consider precision if recall threshold is met (20%)
+                # Only consider precision if recall meets threshold requirements
                 if recall >= 0.15 and recall < 0.9 and precision > 0.30:
                     cv_scores.append(precision)
-                    self.logger.info(f"Fold {fold_idx + 1}: Precision {precision:.4f}, Recall {recall:.4f}")
+                    self.logger.info(
+                        f"Fold {self.actual_folds} completed - "
+                        f"Precision: {precision:.4f}, Recall: {recall:.4f}"
+                    )
                 else:
                     cv_scores.append(0.0)  # Penalize models that don't meet recall threshold
-                    self.logger.info(f"Fold {fold_idx + 1}: Recall {recall:.4f} Precision {precision:.4f} outside threshold range, assigning score 0.0")
-            
+                    self.logger.info(
+                        f"Fold {self.actual_folds} metrics outside thresholds - "
+                        f"Precision: {precision:.4f}, Recall: {recall:.4f}"
+                    )
             except Exception as e:
-                self.logger.error(f"Error in fold {fold_idx + 1}: {str(e)}")
+                self.logger.error(f"Error in fold {self.actual_folds}: {str(e)}")
                 cv_scores.append(0.0)  # Penalize failed evaluations
-        # Return the mean score
-        best_score = np.max(cv_scores) if len(cv_scores) > 0 else 0.0
-        self.logger.info(f"Cross-validation complete - Best precision: {best_score:.4f}")
+        
+        best_score = np.max(cv_scores) if cv_scores else 0.0
+        if best_score > self.best_precision:
+            self.best_precision = best_score
+            self.logger.info(
+                f"New best precision found: {best_score:.4f} "
+                f"(previous best: {self.best_precision:.4f})"
+            )
+        
+        self.logger.info(
+            f"Cross-validation complete - "
+            f"Best precision: {best_score:.4f}, "
+            f"Overall best precision: {self.best_precision:.4f}"
+        )
         return best_score 

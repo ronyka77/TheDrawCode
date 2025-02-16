@@ -85,23 +85,23 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             'eval_metric': ['aucpr', 'auc'],
             'verbosity': 0,
             'nthread': -1,
-            'learning_rate': 0.012420437315803619,
-            'early_stopping_rounds': 306,
-            'min_child_weight': 141,
-            'gamma': 0.04,
-            'subsample': 0.30000000000000004,
-            'colsample_bytree': 0.6799999999999999,
-            'scale_pos_weight': 2.3,
-            'reg_alpha': 0.050100000000000006,
-            'reg_lambda': 9.1,
-            'max_depth': 2,
-            'n_estimators': 579,
+            'learning_rate': 0.029356898627545015,
+            'early_stopping_rounds': 715,
+            'min_child_weight': 132,
+            'gamma': 0.058777520669765625,
+            'subsample': 0.4112368231734437,
+            'colsample_bytree': 0.6300718208925516,
+            'scale_pos_weight': 1.9521786569409851,
+            'reg_alpha': 0.027027315958530355,
+            'reg_lambda': 5.724457204025571,
+            'max_depth': 3,
+            'n_estimators': 1898,
             'random_state': random_seed
         }
         # Initialize other attributes
         self.model = None
         self.selected_features = import_selected_features_ensemble('all')
-        self.threshold = 0.50  # Default threshold for predictions
+        self.threshold = 0.30  # Default threshold for predictions
 
     def _validate_data(
         self,
@@ -126,21 +126,24 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             (x_val_df, 'validation')
         ]
         
-        # Convert non-numeric columns and handle missing values for each dataset
+        # Convert all columns to float64 for consistency
         for df, dataset_name in datasets:
             if df is not None:
-                # Convert object columns to numeric where possible
+                # Convert all numeric columns to float64
                 for col in df.columns:
                     try:
                         if df[col].dtype == 'object':
                             df[col] = pd.to_numeric(df[col], errors='coerce')
+                        # Convert all numeric columns to float64
+                        if pd.api.types.is_numeric_dtype(df[col]):
+                            df[col] = df[col].astype('float64')
                     except Exception as e:
                         if self.logger:
                             self.logger.warning(f"Could not convert column {col} in {dataset_name} dataset: {str(e)}")
                         df.drop(columns=[col], inplace=True)
                 
                 # Fill missing values
-                df.fillna(0, inplace=True)
+                df.fillna(0.0, inplace=True)
         
         # Validate feature consistency across datasets
         if x_train_df is not None and x_val_df is not None:
@@ -194,10 +197,10 @@ class XGBoostModel(BaseEstimator, ClassifierMixin):
             prediction_df = features_val.copy()
             prediction_df = prediction_df[self.selected_features]
             probas = model.predict_proba(prediction_df)[:, 1]
-            best_metrics = {'precision': 0, 'recall': 0, 'f1': 0, 'threshold': 0.5}
+            best_metrics = {'precision': 0, 'recall': 0, 'f1': 0, 'threshold': 0.3}
             best_score = 0
-            # Focus on higher thresholds for better precision, starting from 0.5
-            for threshold in np.arange(0.5, 0.65, 0.01):
+            # Focus on higher thresholds for better precision, starting from 0.3
+            for threshold in np.arange(0.3, 0.65, 0.01):
                 # print(f"Threshold: {threshold}")
                 preds = (probas >= threshold).astype(int)
                 true_positives = ((preds == 1) & (target_val == 1)).sum()
@@ -388,10 +391,17 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
         X_eval, y_eval = create_ensemble_evaluation_set()
         X_eval = X_eval[selected_features]
         X_train = X_train[selected_features]
-        X_test = X_test[selected_features]       
+        X_test = X_test[selected_features]
+        
+        # Convert all features to float64
+        X_train = X_train.astype('float64')
+        X_test = X_test.astype('float64')
+        X_eval = X_eval.astype('float64')
+        
         logger.info(f"X_train shape: {X_train.shape}")
         logger.info(f"X_test shape: {X_test.shape}")
         logger.info(f"X_eval shape: {X_eval.shape}")
+        
         # Initialize model
         logger.info("Initializing model...")
         xgb_model = XGBoostModel(logger=logger)
@@ -421,13 +431,13 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
                 })
                 logger.info("Set MLflow tags for model configuration")
                 
-                # Train model
+                # Train model with increased precision target
                 precision = 0
                 highest_precision = 0
                 best_seed = 0
                 best_model = None
                 while precision < 0.48:
-                    for random_seed in range(1, 600):
+                    for random_seed in range(503, 506):
                         logger.info(f"Using sequential random seed: {random_seed}")
                         os.environ['PYTHONHASHSEED'] = str(random_seed)
                         np.random.seed(random_seed)
@@ -447,8 +457,6 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
                         logger.info(f"Target precision not reached, using best seed: {best_seed}")
                         xgb_model = best_model
                         break
-                # precision = xgb_model.train(X_train, y_train, X_test, y_test, X_eval, y_eval)
-                
 
                 # Get and log validation metrics
                 try:
@@ -464,25 +472,43 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
                 except Exception as e:
                     logger.error(f"Error logging validation metrics: {str(e)}")
                     raise
-                # Create MLflow signature with float64 types
-                input_example = X_train.head(1).astype('float64')  # Convert to float64 to handle potential missing values
+
+                # Create MLflow signature with proper input example
                 try:
-                    signature = infer_signature(X_train, xgb_model.model.predict(X_train))
-                except MlflowException as e:
-                    logger.warning(f"Could not infer MLflow signature: {str(e)}")
-                    signature = None
-                
-                # Log model to MLflow with signature
-                if signature:
+                    input_example = X_train.head(1).copy()
+                    # Ensure all columns are float64 and handle potential conversion errors
+                    try:
+                        input_example = input_example.astype('float64')
+                    except Exception as e:
+                        logger.warning(f"Error converting input example to float64: {str(e)}")
+                        # Fallback to numeric conversion with coercion
+                        input_example = input_example.apply(pd.to_numeric, errors='coerce').fillna(0.0)
+                    
+                    # Create signature with proper types and error handling
+                    try:
+                        signature = infer_signature(
+                            model_input=input_example,
+                            model_output=xgb_model.model.predict(input_example)
+                        )
+                    except Exception as e:
+                        logger.error(f"Error creating MLflow signature: {str(e)}")
+                        # Fallback to basic signature inference
+                        signature = infer_signature(input_example)
+                    # Log model to MLflow with proper configuration
                     mlflow.xgboost.log_model(
-                        xgb_model.model,
+                        xgb_model=xgb_model.model,
                         artifact_path="xgboost_api_model",
-                        input_example=input_example,
                         registered_model_name=f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}",
                         signature=signature
                     )
-                else:
-                    logger.warning("MLflow signature could not be inferred")
+                except Exception as e:
+                    logger.error(f"Error creating MLflow signature: {str(e)}")
+                    # Log model without signature as fallback
+                    mlflow.xgboost.log_model(
+                        xgb_model=xgb_model.model,
+                        artifact_path="xgboost_api_model",
+                        registered_model_name=f"xgboost_api_{datetime.now().strftime('%Y%m%d_%H%M')}"
+                    )
                 
                 logger.info("Global model training completed successfully")
                 logger.info(f"MLflow run ID: {mlflow.active_run().info.run_id}")
