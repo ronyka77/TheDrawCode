@@ -6,27 +6,36 @@ import pandas as pd
 from pathlib import Path
 import torch
 from torch.utils.data import Dataset, DataLoader
-from transformers import (
-    BertForSequenceClassification,
-    BertTokenizer,
-    AdamW,
-    get_linear_schedule_with_warmup
-)
-import joblib
-import json
-import os
-import ray.tune as tune
-import mlflow
-import sys
-import ray
-import time
-from sklearn.metrics import precision_recall_curve
 
-# Disable problematic tensorflow imports and environment variables
+# Disable TensorFlow warnings and prevent TF from being loaded
+import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Suppress tensorflow warnings
 os.environ["ARROW_S3_DISABLE"] = "1"
 os.environ["RAY_DEDUP_LOGS"] = "0"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Disable oneDNN custom operations
+os.environ["USE_TORCH"] = "TRUE"  # Force PyTorch for transformers
+os.environ["USE_TF"] = "FALSE"  # Disable TensorFlow for transformers
+
+# Import only PyTorch-based transformers components
+from transformers.models.bert import BertForSequenceClassification
+from transformers import (
+    BertTokenizer,
+    TrainingArguments,
+    Trainer,
+    EarlyStoppingCallback,
+    AdamW,
+    get_linear_schedule_with_warmup
+)
+
+import joblib
+import json
+import sys
+import ray
+import time
+import ray.tune as tune
+import mlflow
+from sklearn.metrics import precision_recall_curve
+from tqdm import tqdm
 
 from utils.logger import ExperimentLogger
 from models.StackedEnsemble.base.model_interface import BaseModel
@@ -258,7 +267,8 @@ class BertModel(BaseModel):
         # Initialize tokenizer
         self.tokenizer = BertTokenizer.from_pretrained(params['model_name'])
         
-        # Initialize model
+        # Initialize model: this loads the base encoder from the checkpoint
+        # and initializes a new classification head because of num_labels.
         model = BertForSequenceClassification.from_pretrained(
             params['model_name'],
             num_labels=params['num_labels'],
@@ -323,42 +333,162 @@ class BertModel(BaseModel):
         Returns:
             Dictionary of training metrics
         """
+        # Create output directory if it doesn't exist
+        output_dir = Path('./results/bert_model')
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Calculate optimal training settings
+        num_examples = len(X)
+        batch_size = kwargs.get('per_device_train_batch_size', 16)
+        grad_acc_steps = kwargs.get('gradient_accumulation_steps', 4)
+        effective_batch_size = batch_size * grad_acc_steps
+        num_train_epochs = kwargs.get('num_train_epochs', 3)
+        
+        # Compute steps per epoch and base unit
+        steps_per_epoch = max(1, num_examples // effective_batch_size)
+        base_step = max(1, steps_per_epoch // 8)  # Base unit for step calculations
+        
+        # Set evaluation and saving steps based on the base step
+        eval_steps = base_step
+        save_steps = base_step  # initial computed value
+        
+        # If a custom save_steps is provided via kwargs, use it
+        if 'save_steps' in kwargs:
+            save_steps = kwargs['save_steps']
+        
+        # Enforce that save_steps is a multiple of eval_steps when load_best_model_at_end is True.
+        # This avoids the ValueError: "--load_best_model_at_end requires the saving steps to be a round multiple of the evaluation steps"
+        if save_steps % eval_steps != 0:
+            adjusted_save_steps = eval_steps * round(save_steps / eval_steps)
+            self.logger.info(
+                f"Adjusting save_steps from {save_steps} to {adjusted_save_steps} "
+                f"to be a multiple of eval_steps ({eval_steps})"
+            )
+            save_steps = adjusted_save_steps
+        
+        logging_steps = base_step
+        max_steps = int(num_train_epochs * steps_per_epoch)
+        warmup_steps = int(max_steps * kwargs.get('warmup_ratio', 0.1))
+        
+        self.logger.info(f"Training configuration:")
+        self.logger.info(f"- Number of examples: {num_examples}")
+        self.logger.info(f"- Batch size: {batch_size}")
+        self.logger.info(f"- Gradient accumulation steps: {grad_acc_steps}")
+        self.logger.info(f"- Effective batch size: {effective_batch_size}")
+        self.logger.info(f"- Steps per epoch: {steps_per_epoch}")
+        self.logger.info(f"- Base step unit: {base_step}")
+        self.logger.info(f"- Eval/save/logging steps: {eval_steps}")
+        self.logger.info(f"- Max steps: {max_steps}")
+        self.logger.info(f"- Warmup steps: {warmup_steps}")
+        
         # Set training arguments
         training_args = TrainingArguments(
-            output_dir='./results',
-            num_train_epochs=kwargs.get('num_train_epochs', 3),
-            per_device_train_batch_size=kwargs.get('per_device_train_batch_size', 16),
-            per_device_eval_batch_size=kwargs.get('per_device_train_batch_size', 16),
-            warmup_ratio=kwargs.get('warmup_ratio', 0.1),
+            output_dir=str(output_dir),
+            num_train_epochs=num_train_epochs,
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size * 2,  # Larger eval batch size
+            gradient_accumulation_steps=grad_acc_steps,
+            warmup_steps=warmup_steps,
+            max_steps=max_steps,
             weight_decay=kwargs.get('weight_decay', 0.01),
-            logging_dir='./logs',
-            logging_steps=10,
-            evaluation_strategy="steps",
-            save_strategy="steps",
+            logging_dir=str(output_dir / 'logs'),
+            logging_steps=logging_steps,
+            eval_steps=eval_steps,
+            save_steps=save_steps,
+            save_total_limit=2,
             load_best_model_at_end=True,
             metric_for_best_model="precision",
-            greater_is_better=True
+            greater_is_better=True,
+            save_strategy="steps",
+            eval_strategy="steps",
+            remove_unused_columns=False,
+            dataloader_num_workers=0,
+            gradient_checkpointing=False,  # Gradient checkpointing disabled
+            max_grad_norm=kwargs.get('max_grad_norm', 1.0),
+            learning_rate=kwargs.get('learning_rate', 2e-5),
+            fp16=False,
+            report_to="none",
+            # Additional settings for stability
+            ddp_find_unused_parameters=False,
+            seed=42,
+            data_seed=42,
+            group_by_length=True,
+            optim="adamw_torch",  # Use PyTorch's AdamW
+            lr_scheduler_type="linear",
+            disable_tqdm=True,  # Disable progress bars for cleaner logs
+            # Handle numerical stability
+            bf16=False,
+            half_precision_backend="auto",
+            local_rank=-1
         )
         
         # Convert data to datasets
         train_dataset = self._convert_to_model_format(X, y, kwargs.get('max_seq_length', 256))
         val_dataset = self._convert_to_model_format(X_val, y_val, kwargs.get('max_seq_length', 256))
+        test_dataset = self._convert_to_model_format(X_test, y_test, kwargs.get('max_seq_length', 256))
         
         # Initialize trainer
         trainer = Trainer(
             model=self.model,
             args=training_args,
             train_dataset=train_dataset,
-            eval_dataset=val_dataset,
-            compute_metrics=self._compute_metrics
+            eval_dataset=test_dataset,
+            compute_metrics=self._compute_metrics,
+            callbacks=[
+                EarlyStoppingCallback(
+                    early_stopping_patience=3,
+                    early_stopping_threshold=0.01
+                )
+            ],
+            # Add data collator for dynamic padding
+            data_collator=None  # Let Trainer use default collator
         )
         
         # Train model
-        trainer.train()
-        
-        # Evaluate on validation set
-        metrics = trainer.evaluate()
-        return metrics
+        try:
+            self.logger.info("Starting model training...")
+            train_result = trainer.train()
+            self.logger.info(f"Training completed. Metrics: {train_result.metrics}")
+            
+            # Evaluate on both validation and test sets
+            self.logger.info("Evaluating on validation set...")
+            val_metrics = trainer.evaluate(eval_dataset=val_dataset)
+            
+            self.logger.info("Evaluating on test set...")
+            test_metrics = trainer.evaluate(eval_dataset=test_dataset)
+            
+            # Combine metrics
+            metrics = {
+                'val_' + k: v for k, v in val_metrics.items()
+            }
+            metrics.update({
+                'test_' + k: v for k, v in test_metrics.items()
+            })
+            metrics.update({
+                'train_' + k: v for k, v in train_result.metrics.items()
+            })
+            
+            # Clean up checkpoints
+            for checkpoint_dir in output_dir.glob('checkpoint-*'):
+                if checkpoint_dir.is_dir():
+                    try:
+                        import shutil
+                        shutil.rmtree(checkpoint_dir)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to remove checkpoint directory {checkpoint_dir}: {e}")
+            
+            self.logger.info("Training completed successfully")
+            return metrics
+            
+        except Exception as e:
+            self.logger.error(f"Error during training: {str(e)}")
+            return {
+                'precision': 0.0,
+                'recall': 0.0,
+                'f1': 0.0,
+                'auc': 0.0,
+                'brier_score': 1.0
+            }
 
     def _compute_metrics(self, pred):
         """Compute metrics for evaluation."""

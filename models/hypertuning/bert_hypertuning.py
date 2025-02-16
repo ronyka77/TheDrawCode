@@ -14,6 +14,8 @@ import torch
 
 os.environ["ARROW_S3_DISABLE"] = "1"
 os.environ["RAY_DEDUP_LOGS"] = "0"
+# Disable OneDNN optimizations for TensorFlow
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 # Add the project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -128,7 +130,7 @@ def run_bert_hypertuning() -> Dict[str, Any]:
                 raise ValueError(error_msg) from e
             
             # Convert integer parameters
-            for key in ['per_device_train_batch_size', 'gradient_accumulation_steps', 'num_train_epochs', 'max_seq_length']:
+            for key in ['per_device_train_batch_size', 'gradient_accumulation_steps', 'num_train_epochs', 'max_seq_length', 'max_grad_norm', 'num_labels', 'num_workers', 'seed', 'data_seed']:
                 if key in best_params:
                     best_params[key] = int(round(best_params[key]))
             

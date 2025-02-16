@@ -24,6 +24,7 @@ os.environ["PYTHONPATH"] = project_root + os.pathsep + os.environ.get("PYTHONPAT
 
 from utils.logger import ExperimentLogger
 from models.StackedEnsemble.shared.config_loader import ConfigurationLoader
+from tqdm import tqdm
 
 class NestedCVValidator:
     """Nested cross-validation for hyperparameter optimization."""
@@ -122,7 +123,9 @@ class NestedCVValidator:
         )
         
         # Repeat for any other parameters that need to be integers:
-        for key in ['seed', 'n_estimators', 'iterations', 'random_seed', 'early_stopping_rounds', 'min_child_weight', 'num_leaves', 'min_data_in_leaf', 'bagging_freq', 'max_depth']:
+        for key in ['seed', 'n_estimators', 'iterations', 'random_seed', 'early_stopping_rounds', 'min_child_weight', 'num_leaves',
+                'min_data_in_leaf', 'bagging_freq', 'max_depth', 'num_train_epochs', 'per_device_train_batch_size', 
+                'gradient_accumulation_steps', 'max_seq_length', 'num_labels', 'num_workers', 'data_seed']:
             if key in best_params:
                 best_params[key] = int(round(best_params[key]))
         # Train model with best parameters
@@ -155,7 +158,6 @@ class NestedCVValidator:
                 self.logger.debug("Starting objective function evaluation")
                 for handler in self.logger.handlers:
                     handler.flush()
-
             # Initialize logger if not already set up
             if not hasattr(self, 'logger') or self.logger is None:
                 self.logger = logger
@@ -374,21 +376,23 @@ class NestedCVValidator:
             results = tuner.fit()
             self.logger.info("Hyperparameter optimization completed")
             
-            # Get best trial and parameters
+            # Get best trial and parameters (choose the best precision from any iteration)
             try:
-                best_result = results.get_best_result(metric="precision", mode="max")
+                best_result = results.get_best_result(metric="precision", mode="max", scope="all")
                 if best_result is None:
                     self.logger.warning("No successful trials completed")
                     return self._get_default_params(param_space)
                 
                 best_params = best_result.config
                 best_precision = best_result.metrics.get("precision", 0.0)
+                self.logger.info(f"Best trial parameters: {best_params} with precision: {best_precision:.4f}")
             except AttributeError as e:
                 self.logger.error(f"Error getting best result: {str(e)}")
                 return self._get_default_params(param_space)
             
             # Convert integer parameters
-            for key in ['iterations', 'depth', 'min_data_in_leaf', 'early_stopping_rounds']:
+            for key in ['iterations', 'min_data_in_leaf', 'early_stopping_rounds', 'num_train_epochs', 'per_device_train_batch_size', 
+                    'gradient_accumulation_steps', 'max_seq_length', 'num_labels', 'num_workers', 'seed', 'data_seed']:
                 if key in best_params:
                     best_params[key] = int(round(best_params[key]))
             
@@ -421,39 +425,44 @@ class NestedCVValidator:
         
         # Process configuration from YAML (using 'min' and 'max')
         for param, config in param_space.items():
-            if isinstance(config, dict) and 'distribution' in config:
-                if config['distribution'] == 'log_uniform':
-                    default_params[param] = np.exp(
-                        (np.log(config['min']) + np.log(config['max'])) / 2
-                    )
-                elif config['distribution'] == 'uniform':
-                    default_params[param] = (config['min'] + config['max']) / 2
-                elif config['distribution'] == 'int_uniform':
-                    default_params[param] = int(config['min'])
-            # Process already-converted Ray Tune objects (using 'lower' and 'upper')
-            elif hasattr(config, "lower") and hasattr(config, "upper"):
-                try:
-                    # Get lower/upper bounds, handling both callable and non-callable cases
-                    lower = config.lower() if callable(config.lower) else config.lower
-                    upper = config.upper() if callable(config.upper) else config.upper
-                    
-                    # Handle string values by using lower bound
-                    if isinstance(lower, str) or isinstance(upper, str):
-                        default_params[param] = lower
-                        continue
+            try:
+                if isinstance(config, dict) and 'distribution' in config:
+                    if config['distribution'] == 'log_uniform':
+                        default_params[param] = np.exp(
+                            (np.log(config['min']) + np.log(config['max'])) / 2
+                        )
+                    elif config['distribution'] == 'uniform':
+                        default_params[param] = (config['min'] + config['max']) / 2
+                    elif config['distribution'] == 'int_uniform':
+                        default_params[param] = int(config['min'])
+                # Process already-converted Ray Tune objects (using 'lower' and 'upper')
+                elif hasattr(config, "lower") and hasattr(config, "upper"):
+                    try:
+                        # Get lower/upper bounds, handling both callable and non-callable cases
+                        lower = config.lower() if callable(config.lower) else config.lower
+                        upper = config.upper() if callable(config.upper) else config.upper
                         
-                    # Convert to float if not already numeric
-                    lower = float(lower) if not isinstance(lower, (int, float)) else lower
-                    upper = float(upper) if not isinstance(upper, (int, float)) else upper
+                        # Handle string values by using lower bound
+                        if isinstance(lower, str) or isinstance(upper, str):
+                            default_params[param] = lower
+                            continue
+                            
+                        # Convert to float if not already numeric
+                        lower = float(lower) if not isinstance(lower, (int, float)) else lower
+                        upper = float(upper) if not isinstance(upper, (int, float)) else upper
+                        
+                        if isinstance(lower, int) and isinstance(upper, int):
+                            default_params[param] = int(lower)
+                        else:
+                            default_params[param] = float((lower + upper) / 2)
+                    except (TypeError, ValueError, AttributeError):
+                        # If any conversion fails, use lower bound
+                        default_params[param] = lower
+                else:
+                    default_params[param] = config
                     
-                    if isinstance(lower, int) and isinstance(upper, int):
-                        default_params[param] = int(lower)
-                    else:
-                        default_params[param] = float((lower + upper) / 2)
-                except (TypeError, ValueError, AttributeError):
-                    # If any conversion fails, use lower bound
-                    default_params[param] = lower
-            else:
+            except Exception as e:
+                self.logger.error(f"Error processing parameter {param}: {str(e)}")
                 default_params[param] = config
                 
         # Get model-specific defaults from config
@@ -507,27 +516,42 @@ class NestedCVValidator:
             default_params.update({
                 'device': 'cpu',
                 'fp16': False,
-                'fp16_opt_level': 'O1',
+                'fp16_opt_level': 'O1', 
                 'max_grad_norm': 1.0,
                 'num_workers': 4,
+                'model_type': 'bert',
                 'model_name': 'bert-base-uncased',
                 'num_labels': 2,
                 'problem_type': 'single_label_classification',
+                'hidden_dropout_prob': 0.1,
+                'attention_probs_dropout_prob': 0.1,
                 'max_seq_length': 256,
                 'per_device_train_batch_size': 16,
-                'gradient_accumulation_steps': 2,
-                'learning_rate': 2e-5,
+                'gradient_accumulation_steps': 4,
                 'num_train_epochs': 3,
                 'warmup_ratio': 0.1,
                 'weight_decay': 0.01,
-                'hidden_dropout_prob': 0.1,
-                'attention_probs_dropout_prob': 0.1,
-                'seed': 19,
-                'use_early_stopping': True,
+                'learning_rate': 2e-5,
+                'optim': 'adamw_torch',
+                'lr_scheduler_type': 'linear',
                 'early_stopping_patience': 3,
                 'early_stopping_threshold': 0.01,
-                'eval_metric': ['accuracy', 'f1', 'precision', 'auc', 'average_precision', 'brier_score'],
-                'objective': 'binary_classification'
+                'eval_strategy': 'steps',
+                'save_strategy': 'steps',
+                'metric_for_best_model': 'precision',
+                'greater_is_better': True,
+                'load_best_model_at_end': True,
+                'dataloader_num_workers': 0,
+                'gradient_checkpointing': True,
+                'group_by_length': True,
+                'bf16': False,
+                'disable_tqdm': True,
+                'report_to': 'none',
+                'remove_unused_columns': False,
+                'seed': 42,
+                'data_seed': 42,
+                'ignore_mismatched_sizes': True,
+                'label_names': ['labels']
             })
         
         self.logger.info(f"Default parameters: {default_params}")
@@ -593,7 +617,7 @@ class NestedCVValidator:
         if not hasattr(self, 'logger') or self.logger is None:
             self.logger = ExperimentLogger(f"{model.model_type}_hypertuning")
         
-        # Inner CV
+        # Inner CV: Wrap the cross-validation split with tqdm to display progress
         inner_cv = StratifiedKFold(
             n_splits=self.inner_splits,
             shuffle=True,
@@ -601,49 +625,109 @@ class NestedCVValidator:
         )
         cv_scores = []
         
-        # Train and evaluate in each fold
-        for fold_idx, (train_idx, val_idx) in enumerate(inner_cv.split(X_train, y_train)):
+        # Special handling for BERT models
+        is_bert = model.model_type == 'bert'
+        if is_bert:
             try:
-                self.actual_folds += 1
-                self.logger.info(f"Starting fold {self.actual_folds}")
+                self.logger.info("BERT model detected - using single fold evaluation")
                 
-                # Prepare data for this fold
-                X_train_inner = X_train.iloc[train_idx] if hasattr(X_train, 'iloc') else X_train[train_idx]
-                X_test_inner = X_train.iloc[val_idx] if hasattr(X_train, 'iloc') else X_train[val_idx]
-                y_train_inner = y_train.iloc[train_idx] if hasattr(y_train, 'iloc') else y_train[train_idx]
-                y_test_inner = y_train.iloc[val_idx] if hasattr(y_train, 'iloc') else y_train[val_idx]
+                # Set model initialization parameters
+                config['model_init_params'] = {
+                    'pretrained_model_name_or_path': config.get('model_name', 'bert-base-uncased'),
+                    'num_labels': config.get('num_labels', 2),
+                    'problem_type': 'single_label_classification',
+                    'ignore_mismatched_sizes': True
+                }
                 
-                self.logger.info(f"Training model for fold {self.actual_folds}")
+                # Log model configuration
+                self.logger.info(f"BERT model configuration: {config}")
+                # Ensure integer parameters are properly converted
+                int_params = ['max_seq_length', 'per_device_train_batch_size', 'gradient_accumulation_steps']
+                for param in int_params:
+                    if param in config:
+                        config[param] = int(round(config[param]))
+                        self.logger.debug(f"Converted {param} to int: {config[param]}")
+                # Log the final configuration
+                self.logger.info("Final configuration for BERT model:")
+                for key, value in config.items():
+                    self.logger.info(f"{key}: {value}")
                 metrics = model.fit(
-                    X_train_inner,
-                    y_train_inner,
-                    X_val,
-                    y_val,
-                    X_test_inner,
-                    y_test_inner,
+                    X_train, y_train,
+                    X_val, y_val,
+                    X_test, y_test,
                     **config
                 )
                 
                 # Get precision score, defaulting to 0.0 if undefined
-                precision = metrics.get('precision', 0.0)
-                recall = metrics.get('recall', 0.0)
+                precision = metrics.get('val_eval_precision', 0.0)
+                recall = metrics.get('val_eval_recall', 0.0)
                 
                 # Only consider precision if recall meets threshold requirements
                 if recall >= 0.15 and recall < 0.9 and precision > 0.30:
                     cv_scores.append(precision)
                     self.logger.info(
-                        f"Fold {self.actual_folds} completed - "
-                        f"Precision: {precision:.4f}, Recall: {recall:.4f}"
+                        f"BERT evaluation completed - "
+                        f"Precision: {precision:.4f}, "
+                        f"Recall: {recall:.4f}"
                     )
                 else:
-                    cv_scores.append(0.0)  # Penalize models that don't meet recall threshold
+                    cv_scores.append(0.0)
                     self.logger.info(
-                        f"Fold {self.actual_folds} metrics outside thresholds - "
-                        f"Precision: {precision:.4f}, Recall: {recall:.4f}"
+                        f"BERT metrics outside thresholds - "
+                        f"Precision: {precision:.4f}, "
+                        f"Recall: {recall:.4f}"
                     )
             except Exception as e:
-                self.logger.error(f"Error in fold {self.actual_folds}: {str(e)}")
-                cv_scores.append(0.0)  # Penalize failed evaluations
+                self.logger.error(f"Error in BERT evaluation: {str(e)}")
+                cv_scores.append(0.0)
+        else:
+            # Use tqdm to monitor progress of cross-validation folds for non-BERT models
+            for fold_idx, (train_idx, val_idx) in enumerate(
+                    tqdm(inner_cv.split(X_train, y_train), total=self.inner_splits, desc="CV Folds", ascii=True)
+                ):
+                try:
+                    self.actual_folds += 1
+                    self.logger.info(f"Starting fold {self.actual_folds}")
+                    
+                    # Prepare data for this fold
+                    X_train_inner = X_train.iloc[train_idx] if hasattr(X_train, 'iloc') else X_train[train_idx]
+                    X_test_inner = X_train.iloc[val_idx] if hasattr(X_train, 'iloc') else X_train[val_idx]
+                    y_train_inner = y_train.iloc[train_idx] if hasattr(y_train, 'iloc') else y_train[train_idx]
+                    y_test_inner = y_train.iloc[val_idx] if hasattr(y_train, 'iloc') else y_train[val_idx]
+                    
+                    self.logger.info(f"Training model for fold {self.actual_folds}")
+                    metrics = model.fit(
+                        X_train_inner,
+                        y_train_inner,
+                        X_val,
+                        y_val,
+                        X_test_inner,
+                        y_test_inner,
+                        **config
+                    )
+                    
+                    # Get precision score, defaulting to 0.0 if undefined
+                    precision = metrics.get('precision', 0.0)
+                    recall = metrics.get('recall', 0.0)
+                    
+                    # Only consider precision if recall meets threshold requirements
+                    if recall >= 0.15 and recall < 0.9 and precision > 0.30:
+                        cv_scores.append(precision)
+                        self.logger.info(
+                            f"Fold {self.actual_folds} completed - "
+                            f"Precision: {precision:.4f}, "
+                            f"Recall: {recall:.4f}"
+                        )
+                    else:
+                        cv_scores.append(0.0)
+                        self.logger.info(
+                            f"Fold {self.actual_folds} metrics outside thresholds - "
+                            f"Precision: {precision:.4f}, "
+                            f"Recall: {recall:.4f}"
+                        )
+                except Exception as e:
+                    self.logger.error(f"Error in fold {self.actual_folds}: {str(e)}")
+                    cv_scores.append(0.0)
         
         best_score = np.max(cv_scores) if cv_scores else 0.0
         if best_score > self.best_precision:
