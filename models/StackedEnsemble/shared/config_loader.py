@@ -9,22 +9,20 @@ from utils.logger import ExperimentLogger
 class ConfigurationLoader:
     """Handles loading and validation of model configurations."""
     
-    def __init__(self, logger=None, experiment_name: str = "config_loader"):
+    def __init__(self, model_type: str = None, logger: ExperimentLogger = None, experiment_name: str = None):
         """Initialize the configuration loader.
         
         Args:
+            model_type: Type of model for configuration loading
+            logger: Logger instance
             experiment_name: Name of the experiment for logging
         """
-        self.logger = logger or ExperimentLogger(experiment_name=experiment_name)
+        self.model_type = model_type
+        self.logger = logger or ExperimentLogger(experiment_name=experiment_name or f"{model_type}_config_loader")
         self.project_root = Path(__file__).parent.parent.parent.parent
-        self.base_config_path = Path(os.path.join(
-            self.project_root,
-            "models",
-            "StackedEnsemble",
-            "config"
-        ))
-        
-    def load_model_config(self, model_type: str) -> Dict[str, Any]:
+        self.base_config_path = self.project_root / "models" / "StackedEnsemble" / "config"
+
+    def load_model_config(self, model_type: str = None) -> Dict[str, Any]:
         """Load model-specific configuration.
         
         Args:
@@ -33,8 +31,12 @@ class ConfigurationLoader:
         Returns:
             Dictionary containing model configuration
         """
-        config_path = Path(os.path.join(self.base_config_path, "model_configs", f"{model_type}_config.yaml"))
-        self.logger.info(f"Loading configuration from {config_path}")
+        model_type = model_type or self.model_type
+        if not model_type:
+            raise ValueError("Model type must be specified either in initialization or method call")
+            
+        config_path = self.base_config_path / "model_configs" / f"{model_type}_config.yaml"
+        # self.logger.info(f"Loading configuration from {config_path}")
         
         try:
             with open(config_path, 'r') as f:
@@ -50,8 +52,8 @@ class ConfigurationLoader:
         except yaml.YAMLError as e:
             self.logger.error(f"Error parsing configuration file: {e}")
             raise
-            
-    def load_hyperparameter_space(self, model_type: str) -> Dict[str, Any]:
+
+    def load_hyperparameter_space(self, model_type: str = None) -> Dict[str, Any]:
         """Load hyperparameter search space configuration.
         
         Args:
@@ -60,8 +62,12 @@ class ConfigurationLoader:
         Returns:
             Dictionary containing hyperparameter search space
         """
-        space_path = Path(os.path.join(self.base_config_path, "hyperparameter_spaces", f"{model_type}_space.yaml"))
-        self.logger.info(f"Loading hyperparameter space from {space_path}")
+        model_type = model_type or self.model_type
+        if not model_type:
+            raise ValueError("Model type must be specified either in initialization or method call")
+            
+        space_path = self.base_config_path / "hyperparameter_spaces" / f"{model_type}_space.yaml"
+        # self.logger.info(f"Loading hyperparameter space from {space_path}")
         
         try:
             with open(space_path, 'r') as f:
@@ -109,9 +115,12 @@ class ConfigurationLoader:
         """
         required_fields = {
             'hyperparameters': dict,
-            'search_strategy': {
-                'name': str,
-                'settings': dict
+            'optimization': {
+                'n_trials': int,
+                'timeout': int,
+                'study_name': str,
+                'direction': str,
+                'metric': str
             }
         }
         

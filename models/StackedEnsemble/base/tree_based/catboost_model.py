@@ -680,3 +680,53 @@ class CatBoostModel(BaseModel):
             self.logger.error(f"Error calculating metrics: {str(e)}")
             return None
         return metrics
+
+    def get_feature_importance(self) -> pd.DataFrame:
+        """Get feature importance scores.
+        
+        Returns:
+            DataFrame with feature importance scores
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Model must be trained before getting feature importance")
+            
+        try:
+            # Get feature importance scores
+            feature_importance = self.model.get_feature_importance()
+            feature_names = self.model.feature_names_
+            
+            # Convert to DataFrame
+            importance_df = pd.DataFrame({
+                'feature': feature_names,
+                'importance': feature_importance
+            })
+            importance_df = importance_df.sort_values(
+                'importance',
+                ascending=False
+            ).reset_index(drop=True)
+            
+            return importance_df
+            
+        except Exception as e:
+            self.logger.error(f"Error getting feature importance: {str(e)}")
+            return pd.DataFrame(columns=['feature', 'importance'])
+
+    def get_params(self) -> Dict[str, Any]:
+        """Get current model parameters.
+        
+        Returns:
+            Dictionary of parameters
+        """
+        if self.model is not None:
+            return self.model.get_params()
+        return super().get_params()
+
+    def set_params(self, **params) -> None:
+        """Set model parameters.
+        
+        Args:
+            **params: Parameters to set
+        """
+        if self.model is not None:
+            self.model.set_params(**params)
+        super().set_params(**params)

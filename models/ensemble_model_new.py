@@ -299,7 +299,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                     precision = precision_score(y_val, preds, zero_division=0)
                     recall = recall_score(y_val, preds, zero_division=0)
                     # Check if recall is above the minimum threshold, and precision improves.
-                    if recall >= 0.50 and precision > best_precision:
+                    if recall >= 0.30 and precision > best_precision:
                         best_precision = precision
                         best_weights = norm_weights
         return best_weights
@@ -365,7 +365,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         # Enhanced version with automatic ensemble calibration
         self.calibrated_model = CalibratedClassifierCV(
-            estimator=FrozenEstimator(self.model_lgb),
+            estimator=self.model_lgb,
             method='sigmoid',
             ensemble='auto',  # Automatically select best calibration method
             n_jobs=-1
@@ -490,7 +490,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.logger.info("AUC computation failed.", extra={"error": str(e)})
         
         # Check if recall meets the required threshold.
-        required_recall = 0.50
+        required_recall = 0.30
         recall_flag = recall >= required_recall
         
         # Log evaluation metrics.

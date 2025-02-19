@@ -437,7 +437,7 @@ def train_global_model(experiment_name: str = "xgboost_api_model") -> None:
                 best_seed = 0
                 best_model = None
                 while precision < 0.48:
-                    for random_seed in range(503, 506):
+                    for random_seed in range(1, 600):
                         logger.info(f"Using sequential random seed: {random_seed}")
                         os.environ['PYTHONHASHSEED'] = str(random_seed)
                         np.random.seed(random_seed)

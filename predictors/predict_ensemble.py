@@ -256,12 +256,9 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        '61a6219de55047da96199c20c9db0a45',
-        '65bc8b162a3b4e17965c8e0cb32d0767',
-        '36e58c2a25924a928f542b16f1f6304d',
-        'da6fad44f048477e984f0dffe22f53c9',
-        '271228e9f1fe4264b864b849210bdd91'
-        
+        'f51f5fa155dc4772a544652d27efcf13',
+        '2b8f99c18e9a4cc6a5deae4a0b88a6ac',
+        '6916ad7ae0f74927964be197022d97ab' 
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()

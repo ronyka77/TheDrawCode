@@ -48,15 +48,15 @@ class ELOCalculator:
             
             # Calculate league competitiveness metrics
             win_rate_std = np.std(pd.concat([league_data['home_win_rate'], 
-                                           league_data['away_win_rate']]))
+                                        league_data['away_win_rate']]))
                 
             points_std = np.std(pd.concat([league_data['home_average_points'], 
-                                         league_data['away_average_points']]))
+                                        league_data['away_average_points']]))
             
             goal_diff_std = np.std(pd.concat([league_data['Home_goal_difference_cum'], 
-                                            league_data['Away_goal_difference_cum']]) / 
-                                 pd.concat([league_data['Home_team_matches'], 
-                                          league_data['Away_team_matches']]))
+                                        league_data['Away_goal_difference_cum']]) / 
+                                    pd.concat([league_data['Home_team_matches'], 
+                                        league_data['Away_team_matches']]))
             
             # Normalize each metric between 0 and 1
             win_rate_factor = 1 - (win_rate_std / 0.5)  # 0.5 is max possible std for win rate
