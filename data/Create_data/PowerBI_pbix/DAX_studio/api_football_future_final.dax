@@ -1,8 +1,8 @@
 ﻿EVALUATE
 SELECTCOLUMNS(
     future_matches,
-    "Home", future_matches[Home],
-    "Away", future_matches[Away],
+    "Home", future_matches[Home], 
+    "Away", future_matches[Away], 
     "league_name", future_matches[league_name], 
     "Date", future_matches[Date],
     "venue_name", future_matches[venue_name], 

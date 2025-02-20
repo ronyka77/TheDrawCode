@@ -94,7 +94,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                                                     log_dir="./logs/ensemble_model_new")
         # Load selected features (assumed common to all models)
         self.selected_features = import_selected_features_ensemble('all')
-        
+        self.required_recall = 0.40
         # Define base models with CPU-only settings:
         self.model_xgb = XGBClassifier(
             tree_method='hist',
@@ -117,45 +117,41 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             verbose=-1
         )
         self.model_cat = CatBoostClassifier(
+            learning_rate=0.05417760272138922,
+            depth=10,
+            min_data_in_leaf=24,
+            subsample=0.7073642138686587,
+            colsample_bylevel=0.45265461758195863,
+            reg_lambda=3.2680782167131017,
+            leaf_estimation_iterations=2,
+            bagging_temperature=3.693043836835085,
+            scale_pos_weight=8.077642940517311,
+            early_stopping_rounds=85,
             loss_function='Logloss',
-            eval_metric='PRAUC',
+            eval_metric='AUC',
             task_type='CPU',
-            verbose=0,
-            iterations=501,
-            learning_rate=0.044415470772533286,
-            depth=6,
-            l2_leaf_reg=2.5412845413202043,
-            border_count=128,
-            subsample=0.7727569705672401,
-            colsample_bylevel=0.9102359904680224,
-            scale_pos_weight=2.12218845501254,
-            min_data_in_leaf=225,
-            early_stopping_rounds=335,
-            leaf_estimation_iterations=4,
-            grow_policy='Lossguide',
-            random_seed=354
+            thread_count=-1,
+            random_seed=26,
+            verbose=100
         )
         self.model_lgb = LGBMClassifier(
+            learning_rate=0.11949236037348597,
+            num_leaves=49,
+            max_depth=4,
+            min_child_samples=162,
+            feature_fraction=0.7075821414747916,
+            bagging_fraction=0.5033592889721001,
+            bagging_freq=7,
+            reg_alpha=10.639888116989091,
+            reg_lambda=7.977879804092241,
+            min_split_gain=0.1345418888840171,
             objective='binary',
             metric=['binary_logloss', 'auc'],
-            boosting_type='gbdt',
-            device_type='cpu',
             verbose=-1,
-            learning_rate=0.006225134508905533,
-            max_depth=7,
-            reg_lambda=0.4136861259036423,
-            n_estimators=3902,
-            num_leaves=55,
-            early_stopping_rounds=382,
-            feature_fraction=0.8438720741641329,
-            bagging_freq=1,
-            min_child_samples=35,
-            bagging_fraction=0.8491638385070807,
-            feature_fraction_bynode=0.9963248890782458,
-            colsample_bytree=0.8641354771809475,
-            min_child_weight=29,
-            scale_pos_weight=2.118498238482285,
-            random_state=229
+            n_jobs=-1,
+            device='cpu',
+            early_stopping_rounds=527,
+            random_state=19
         )
         # Set up meta-learner based on the chosen type
         self.meta_learner_type = meta_learner_type
@@ -196,7 +192,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
     def _tune_threshold(self, probs: np.ndarray, targets: pd.Series, 
                         grid_start: float = 0.0, grid_stop: float = 1.0, grid_step: float = 0.01,
-                        required_recall: float = 0.50, target_precision: float = 0.50) -> (float, dict):
+                        target_precision: float = 0.50) -> (float, dict):
         """
         Tune the global threshold by scanning a grid.
         In addition to ensuring a minimum recall, also try to select a threshold
@@ -217,7 +213,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 max_recall = rec
                 max_recall_threshold = thresh
             # Select candidate if recall meets the minimum and precision meets or exceeds target.
-            if rec >= required_recall and prec >= best_precision:
+            if rec >= self.required_recall and prec >= best_precision:
                 if prec > best_precision:
                     best_precision = prec
                     best_threshold = thresh
@@ -235,7 +231,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 preds = (probs >= thresh).astype(int)
                 prec = precision_score(targets, preds, zero_division=0)
                 rec = recall_score(targets, preds, zero_division=0)
-                if rec >= required_recall and prec > best_precision:
+                if rec >= self.required_recall and prec > best_precision:
                     best_precision = prec
                     best_threshold = thresh
             candidate_metrics = {
@@ -299,7 +295,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                     precision = precision_score(y_val, preds, zero_division=0)
                     recall = recall_score(y_val, preds, zero_division=0)
                     # Check if recall is above the minimum threshold, and precision improves.
-                    if recall >= 0.30 and precision > best_precision:
+                    if recall >= self.required_recall and precision > best_precision:
                         best_precision = precision
                         best_weights = norm_weights
         return best_weights
@@ -408,7 +404,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         p_stack = self.meta_learner.predict_proba(meta_features)[:, 1]
         final_probs = (p_soft + p_stack) / 2.0
         
-        # Tune threshold (using the refined _tune_threshold method that enforces recall and precision criteria).
+        # Tune threshold 
         self.optimal_threshold, tuning_metrics = self._tune_threshold(final_probs, y_val)
         self.logger.info("Threshold tuning completed, optimal_threshold: %.2f", self.optimal_threshold)
 
@@ -490,8 +486,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.logger.info("AUC computation failed.", extra={"error": str(e)})
         
         # Check if recall meets the required threshold.
-        required_recall = 0.30
-        recall_flag = recall >= required_recall
+        recall_flag = recall >= self.required_recall
         
         # Log evaluation metrics.
         self.logger.info(f"Precision computed: {precision}")
@@ -499,12 +494,12 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.logger.info(f"F1 score computed: {f1}")
         self.logger.info(f"AUC computed: {auc}")
         self.logger.info(f"Optimal threshold: {self.optimal_threshold}")
-        self.logger.info(f"Required recall threshold: {required_recall}")
+        self.logger.info(f"Required recall threshold: {self.required_recall}")
         self.logger.info(f"Recall target status: {recall_flag}")
         if not recall_flag:
-            self.logger.info("Recall below the required threshold.", extra={"observed_recall": recall, "required_recall": required_recall})
+            self.logger.info("Recall below the required threshold.", extra={"observed_recall": recall, "required_recall": self.required_recall})
         else:
-            self.logger.info("Recall meets the required threshold.", extra={"observed_recall": recall, "required_recall": required_recall})
+            self.logger.info("Recall meets the required threshold.", extra={"observed_recall": recall, "required_recall": self.required_recall})
         
         return {"precision": precision,
                 "recall": recall,

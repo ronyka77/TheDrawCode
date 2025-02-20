@@ -327,7 +327,6 @@ class ApiFootball:
         """
         Retrieves fixture IDs from MongoDB where home/stats is empty, the date is today or earlier,
         and the league ID is one of the specified IDs.
-
         Returns:
             List[int]: List of fixture IDs without statistics that meet the criteria.
         """

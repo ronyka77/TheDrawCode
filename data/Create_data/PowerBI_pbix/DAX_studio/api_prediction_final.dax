@@ -1,7 +1,7 @@
 ﻿EVALUATE
 SELECTCOLUMNS(
     model_data_training,
-    "Home", model_data_training[Home],
+    "Home", model_data_training[Home],  
     "Away", model_data_training[Away],
     "league_name", model_data_training[league_name],
     "Date", model_data_training[Date],

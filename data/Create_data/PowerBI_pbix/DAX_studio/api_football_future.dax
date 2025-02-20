@@ -4,7 +4,7 @@ SELECTCOLUMNS(
     FILTER(
         SUMMARIZECOLUMNS(
             future_matches[home_encoded],
-            future_matches[away_encoded],
+            future_matches[away_encoded], 
             future_matches[Datum],
             future_matches[Home],
             future_matches[Away],
@@ -16,7 +16,7 @@ SELECTCOLUMNS(
             future_matches[league_name], 
             future_matches[referee],
             future_matches[referee_encoded], 
-            future_matches[Last_home_match], 
+            future_matches[Last_home_match],  
             future_matches[Last_away_match],  
             future_matches[away_attack_strength],
             future_matches[away_average_points],
