@@ -57,8 +57,7 @@ def train_and_evaluate_candidate(
     y_test: pd.Series,
     X_val: pd.DataFrame,
     y_val: pd.Series,
-    logger: ExperimentLogger
-) -> Tuple[Dict[str, Any], Dict[str, float]]:
+    logger: ExperimentLogger) -> Tuple[Dict[str, Any], Dict[str, float]]:
     """
     Train and evaluate a candidate model configuration.
     
@@ -77,11 +76,15 @@ def train_and_evaluate_candidate(
     
     # Compute initial dynamic weights
     initial_weights = ensemble_model._compute_dynamic_weights(y_val, p_xgb, p_cat, p_lgb)
-    logger.info("Initial dynamic weights computed:", extra=initial_weights)
+    logger.info(f"Initial XGBoost weight: {initial_weights['xgb']:.4f}")
+    logger.info(f"Initial CatBoost weight: {initial_weights['cat']:.4f}")
+    logger.info(f"Initial LightGBM weight: {initial_weights['lgb']:.4f}")
     
     # Search for optimal weights
     refined_weights = ensemble_model._search_optimal_weights(p_xgb, p_cat, p_lgb, y_val)
-    logger.info("Refined dynamic weights computed:", extra=refined_weights)
+    logger.info(f"Refined XGBoost weight: {refined_weights['xgb']:.4f}")
+    logger.info(f"Refined CatBoost weight: {refined_weights['cat']:.4f}")
+    logger.info(f"Refined LightGBM weight: {refined_weights['lgb']:.4f}")
     
     # Override the model's dynamic weights with the refined ones
     ensemble_model.dynamic_weights = refined_weights
@@ -100,8 +103,7 @@ def create_meta_learner_params(
     lr: float,
     n_est: int,
     max_depth: int,
-    scale_pos_weight: float
-) -> Dict[str, Any]:
+    scale_pos_weight: float) -> Dict[str, Any]:
     """Create meta learner parameters dictionary with CPU-only settings."""
     return {
         "learning_rate": lr,
@@ -155,7 +157,6 @@ def main():
         len(meta_scale_pos_weight_candidates)
     )
     current_combination = 0
-
     logger.info(f"Starting grid search with {total_combinations} combinations...")
 
     for lr in meta_lr_candidates:
@@ -206,29 +207,28 @@ def main():
                         recall = metrics["recall"]
                         
                         if recall >= ensemble_model.required_recall and precision > best_precision:
+                            logger.info(f"New best precision: {precision:.4f}")
                             best_precision = precision
                             best_candidate = result
                             best_model = ensemble_model
                         
-                        logger.info(
-                            f"Combination {current_combination} results:",
-                            extra={
-                                "meta_params": candidate_meta_params,
-                                "initial_weights": weights_info["initial_weights"],
-                                "refined_weights": weights_info["refined_weights"],
-                                "metrics": metrics,
-                                "optimal_threshold": ensemble_model.optimal_threshold
-                            }
-                        )
+                        # Log candidate results
+                        logger.info(f"Combination {current_combination} results:")
+                        logger.info(f"Learning rate: {candidate_meta_params['learning_rate']}")
+                        logger.info(f"Number of estimators: {candidate_meta_params['n_estimators']}")
+                        logger.info(f"Max depth: {candidate_meta_params['max_depth']}")
+                        logger.info(f"Scale pos weight: {candidate_meta_params['scale_pos_weight']}")
+                        logger.info(f"Refined weights - XGBoost: {weights_info['refined_weights']['xgb']:.4f}")
+                        logger.info(f"Refined weights - CatBoost: {weights_info['refined_weights']['cat']:.4f}")
+                        logger.info(f"Refined weights - LightGBM: {weights_info['refined_weights']['lgb']:.4f}")
+                        logger.info(f"Metrics:")
+                        for metric_name, metric_value in metrics.items():
+                            logger.info(f"{metric_name}: {metric_value:.4f}")
+                        logger.info(f"Optimal threshold: {ensemble_model.optimal_threshold:.4f}")
                         
                     except Exception as e:
-                        logger.error(
-                            f"Error in combination {current_combination}:",
-                            extra={
-                                "error": str(e),
-                                "meta_params": candidate_meta_params
-                            }
-                        )
+                        logger.error(f"Error in combination {current_combination}")
+                        logger.error(f"Error details: {str(e)}")
                         continue
 
     # Save all grid search results
@@ -236,7 +236,16 @@ def main():
 
     # Log the best candidate using MLflow
     if best_model is not None:
-        logger.info("Best candidate found:", extra=best_candidate)
+        logger.info("Best candidate configuration:")
+        logger.info(f"Best precision: {best_precision:.4f}")
+        for param_name, param_value in best_candidate["meta_params"].items():
+            logger.info(f"Best {param_name}: {param_value}")
+        logger.info(f"Best XGBoost weight: {best_candidate['dynamic_weights']['xgb']:.4f}")
+        logger.info(f"Best CatBoost weight: {best_candidate['dynamic_weights']['cat']:.4f}")
+        logger.info(f"Best LightGBM weight: {best_candidate['dynamic_weights']['lgb']:.4f}")
+        logger.info(f"Best optimal threshold: {best_candidate['optimal_threshold']:.4f}")
+        for metric_name, metric_value in best_candidate["metrics"].items():
+            logger.info(f"Best {metric_name}: {metric_value:.4f}")
         
         with mlflow.start_run(run_name="hypertune_ensemble_best"):
             # Log parameters
