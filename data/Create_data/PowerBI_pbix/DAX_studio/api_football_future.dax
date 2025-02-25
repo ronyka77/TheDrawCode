@@ -7,7 +7,7 @@ SELECTCOLUMNS(
             future_matches[away_encoded], 
             future_matches[Datum],
             future_matches[Home],
-            future_matches[Away],
+            future_matches[Away], 
             future_matches[venue_encoded],
             future_matches[venue_capacity], 
             future_matches[venue_grass], 
@@ -94,7 +94,8 @@ SELECTCOLUMNS(
             future_matches[season_encoded],
             future_matches[Season_league]
         ),
-        future_matches[away_average_points] <> BLANK() || future_matches[Away_fouls_mean] <> BLANK()
+        future_matches[away_average_points] <> BLANK() && future_matches[away_average_points] >= 0 
+        || future_matches[Away_fouls_mean] <> BLANK() &&  future_matches[away_average_points] >= 0 
     ),
     "home_encoded", ROUNDUP(future_matches[home_encoded], 0),
     "away_encoded", ROUNDUP(future_matches[away_encoded], 0),

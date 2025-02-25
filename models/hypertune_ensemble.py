@@ -76,15 +76,9 @@ def train_and_evaluate_candidate(
     
     # Compute initial dynamic weights
     initial_weights = ensemble_model._compute_dynamic_weights(y_val, p_xgb, p_cat, p_lgb)
-    logger.info(f"Initial XGBoost weight: {initial_weights['xgb']:.4f}")
-    logger.info(f"Initial CatBoost weight: {initial_weights['cat']:.4f}")
-    logger.info(f"Initial LightGBM weight: {initial_weights['lgb']:.4f}")
     
     # Search for optimal weights
     refined_weights = ensemble_model._search_optimal_weights(p_xgb, p_cat, p_lgb, y_val)
-    logger.info(f"Refined XGBoost weight: {refined_weights['xgb']:.4f}")
-    logger.info(f"Refined CatBoost weight: {refined_weights['cat']:.4f}")
-    logger.info(f"Refined LightGBM weight: {refined_weights['lgb']:.4f}")
     
     # Override the model's dynamic weights with the refined ones
     ensemble_model.dynamic_weights = refined_weights
@@ -139,10 +133,10 @@ def main():
     logger.info("Data loaded and prepared successfully.")
 
     # Define candidate grids for meta learner hyperparameters
-    meta_lr_candidates = [0.01, 0.05, 0.1]
-    meta_n_estimators_candidates = [200, 300, 400]
-    meta_max_depth_candidates = [3, 5, 7]
-    meta_scale_pos_weight_candidates = [1.0, 2.0, 3.0]
+    meta_lr_candidates = [0.1]
+    meta_n_estimators_candidates = [400, 500]
+    meta_max_depth_candidates = [7, 9]
+    meta_scale_pos_weight_candidates = [2.0, 2.5]
 
     best_precision = -np.inf
     best_candidate = None
@@ -204,9 +198,10 @@ def main():
                         
                         # Check if the candidate meets requirements and improves precision
                         precision = metrics["precision"]
-                        recall = metrics["recall"]
+                        recall = metrics["recall"] 
+                        prediction_rate = metrics["prediction_rate"]
                         
-                        if recall >= ensemble_model.required_recall and precision > best_precision:
+                        if recall >= ensemble_model.required_recall and precision > best_precision and prediction_rate > 0.20:
                             logger.info(f"New best precision: {precision:.4f}")
                             best_precision = precision
                             best_candidate = result
@@ -230,9 +225,8 @@ def main():
                         logger.error(f"Error in combination {current_combination}")
                         logger.error(f"Error details: {str(e)}")
                         continue
-
     # Save all grid search results
-    save_grid_search_results(grid_search_results)
+    # save_grid_search_results(grid_search_results)
 
     # Log the best candidate using MLflow
     if best_model is not None:
@@ -240,9 +234,9 @@ def main():
         logger.info(f"Best precision: {best_precision:.4f}")
         for param_name, param_value in best_candidate["meta_params"].items():
             logger.info(f"Best {param_name}: {param_value}")
-        logger.info(f"Best XGBoost weight: {best_candidate['dynamic_weights']['xgb']:.4f}")
-        logger.info(f"Best CatBoost weight: {best_candidate['dynamic_weights']['cat']:.4f}")
-        logger.info(f"Best LightGBM weight: {best_candidate['dynamic_weights']['lgb']:.4f}")
+        logger.info(f"Best XGBoost weight: {best_candidate['refined_weights']['xgb']:.4f}")
+        logger.info(f"Best CatBoost weight: {best_candidate['refined_weights']['cat']:.4f}")
+        logger.info(f"Best LightGBM weight: {best_candidate['refined_weights']['lgb']:.4f}")
         logger.info(f"Best optimal threshold: {best_candidate['optimal_threshold']:.4f}")
         for metric_name, metric_value in best_candidate["metrics"].items():
             logger.info(f"Best {metric_name}: {metric_value:.4f}")

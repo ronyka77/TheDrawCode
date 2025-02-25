@@ -44,6 +44,7 @@ from mlflow.models.signature import infer_signature
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
 from pathlib import Path
 import os
 import sys
@@ -89,7 +90,8 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
     """
     def __init__(self, logger: ExperimentLogger = None, calibrate: bool = False, 
                     calibration_method: str = "sigmoid", individual_thresholding: bool = False,
-                    meta_learner_type: str = 'xgb', dynamic_weighting: bool = True):
+                    meta_learner_type: str = 'xgb', dynamic_weighting: bool = True,
+                    extra_base_model_type: str = 'random_forest'):
         self.logger = logger or ExperimentLogger(experiment_name="ensemble_model_new",
                                                     log_dir="./logs/ensemble_model_new")
         # Load selected features (assumed common to all models)
@@ -153,6 +155,50 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             early_stopping_rounds=527,
             random_state=19
         )
+        
+        # Initialize the extra base model based on the selected type
+        self.extra_base_model_type = extra_base_model_type.lower()
+        if self.extra_base_model_type == 'random_forest':
+            self.model_extra = RandomForestClassifier(
+                n_estimators=100,
+                max_depth=24,
+                min_samples_split=11,
+                min_samples_leaf=5,
+                max_features=None,
+                bootstrap=True,
+                class_weight=None,
+                criterion='entropy',
+                random_state=42,
+                n_jobs=-1
+            )
+            self.logger.info("Extra base model initialized as RandomForestClassifier.")
+        elif self.extra_base_model_type == 'svm':
+            self.model_extra = SVC(
+                probability=True,
+                kernel='rbf',
+                C=1.0,
+                gamma='scale',
+                class_weight='balanced',
+                random_state=42
+            )
+            self.logger.info("Extra base model initialized as SVC.")
+        elif self.extra_base_model_type == 'mlp':
+            self.model_extra = MLPClassifier(
+                hidden_layer_sizes=(100, 50),
+                activation='relu',
+                solver='adam',
+                alpha=0.0001,
+                batch_size='auto',
+                learning_rate='adaptive',
+                max_iter=200,
+                early_stopping=True,
+                validation_fraction=0.1,
+                random_state=42
+            )
+            self.logger.info("Extra base model initialized as MLPClassifier.")
+        else:
+            raise ValueError(f"Unknown extra_base_model_type: {self.extra_base_model_type}")
+            
         # Set up meta-learner based on the chosen type
         self.meta_learner_type = meta_learner_type
         self.optimal_threshold = 0.5  # default (used for global tuning)
@@ -164,7 +210,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # Flag to control dynamic weighting during global probability voting
         self.dynamic_weighting = dynamic_weighting
         if self.dynamic_weighting:
-            self.dynamic_weights = {'xgb': 1/2, 'cat': 1/3, 'lgb': 1/6}  # default equal weights
+            self.dynamic_weights = {'xgb': 1/3, 'cat': 1/3, 'lgb': 1/6, 'extra': 1/6}  # default weights
 
     def _prepare_data(self, X: pd.DataFrame) -> pd.DataFrame:
         """Ensure X contains the required features and fill missing values."""
@@ -242,7 +288,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.logger.info(f"No threshold achieved target precision; selected threshold with maximum recall. selected_threshold: {best_threshold}, max_recall: {max_recall}")
         return best_threshold, candidate_metrics
 
-    def _compute_dynamic_weights(self, targets: pd.Series, p_xgb: np.ndarray, p_cat: np.ndarray, p_lgb: np.ndarray) -> dict:
+    def _compute_dynamic_weights(self, targets: pd.Series, p_xgb: np.ndarray, p_cat: np.ndarray, p_lgb: np.ndarray, p_extra: np.ndarray) -> dict:
         """
         Compute dynamic weights for each base model based on their precision on the validation set.
         The weights are normalized such that they sum to 1.
@@ -251,53 +297,59 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         preds_xgb = (p_xgb >= 0.5).astype(int)
         preds_cat = (p_cat >= 0.5).astype(int)
         preds_lgb = (p_lgb >= 0.5).astype(int)
+        preds_extra = (p_extra >= 0.5).astype(int)
         
         prec_xgb = precision_score(targets, preds_xgb, zero_division=0)
         prec_cat = precision_score(targets, preds_cat, zero_division=0)
         prec_lgb = precision_score(targets, preds_lgb, zero_division=0)
+        prec_extra = precision_score(targets, preds_extra, zero_division=0)
         
         self.logger.info("Validation precision for dynamic weighting:", 
-                            extra={"xgb": prec_xgb, "cat": prec_cat, "lgb": prec_lgb})
-        total = prec_xgb + prec_cat + prec_lgb + np.finfo(np.float32).eps  # add epsilon to avoid division by 0.
+                            extra={"xgb": prec_xgb, "cat": prec_cat, "lgb": prec_lgb, "extra": prec_extra})
+        total = prec_xgb + prec_cat + prec_lgb + prec_extra + np.finfo(np.float32).eps  # add epsilon to avoid division by 0.
         weights = {
             'xgb': prec_xgb / total,
             'cat': prec_cat / total,
-            'lgb': prec_lgb / total
+            'lgb': prec_lgb / total,
+            'extra': prec_extra / total
         }
         self.logger.info("Dynamic weights computed:", extra=weights)
         return weights
 
-    def _search_optimal_weights(self, p_xgb, p_cat, p_lgb, y_val):
-        best_weights = {"xgb": 1/2, "cat": 1/3, "lgb": 1/6}
+    def _search_optimal_weights(self, p_xgb, p_cat, p_lgb, p_extra, y_val):
+        best_weights = {"xgb": 1/3, "cat": 1/3, "lgb": 1/6, "extra": 1/6}
         best_precision = -np.inf
         # Define candidate weights in increments (for example, 0.1 steps)
         candidates = np.arange(0.0, 1.05, 0.1)
         for w_xgb in candidates:
             for w_cat in candidates:
                 for w_lgb in candidates:
-                    total = w_xgb + w_cat + w_lgb
-                    # Only consider combinations with non-zero total weight
-                    if total == 0:
-                        continue
-                    # Normalize weights.
-                    norm_weights = {"xgb": w_xgb/total,
-                                    "cat": w_cat/total,
-                                    "lgb": w_lgb/total}
-                    # Combine probabilities with current weights.
-                    p_soft = (norm_weights["xgb"] * p_xgb +
-                              norm_weights["cat"] * p_cat +
-                              norm_weights["lgb"] * p_lgb)
-                    # If using meta learner probabilities, combine as before:
-                    meta_features = np.column_stack((p_xgb, p_cat, p_lgb))
-                    p_stack = self.meta_learner.predict_proba(meta_features)[:, 1]
-                    final_probs = (p_soft + p_stack) / 2.0
-                    preds = (final_probs >= self.optimal_threshold).astype(int)
-                    precision = precision_score(y_val, preds, zero_division=0)
-                    recall = recall_score(y_val, preds, zero_division=0)
-                    # Check if recall is above the minimum threshold, and precision improves.
-                    if recall >= self.required_recall and precision > best_precision:
-                        best_precision = precision
-                        best_weights = norm_weights
+                    for w_extra in candidates:
+                        total = w_xgb + w_cat + w_lgb + w_extra
+                        # Only consider combinations with non-zero total weight
+                        if total == 0:
+                            continue
+                        # Normalize weights.
+                        norm_weights = {"xgb": w_xgb/total,
+                                        "cat": w_cat/total,
+                                        "lgb": w_lgb/total,
+                                        "extra": w_extra/total}
+                        # Combine probabilities with current weights.
+                        p_soft = (norm_weights["xgb"] * p_xgb +
+                                norm_weights["cat"] * p_cat +
+                                norm_weights["lgb"] * p_lgb +
+                                norm_weights["extra"] * p_extra)
+                        # If using meta learner probabilities, combine as before:
+                        meta_features = np.column_stack((p_xgb, p_cat, p_lgb, p_extra))
+                        p_stack = self.meta_learner.predict_proba(meta_features)[:, 1]
+                        final_probs = (p_soft + p_stack) / 2.0
+                        preds = (final_probs >= self.optimal_threshold).astype(int)
+                        precision = precision_score(y_val, preds, zero_division=0)
+                        recall = recall_score(y_val, preds, zero_division=0)
+                        # Check if recall is above the minimum threshold, and precision improves.
+                        if recall >= self.required_recall and precision > best_precision:
+                            best_precision = precision
+                            best_weights = norm_weights
         return best_weights
 
     def _initialize_meta_learner(self):
@@ -359,6 +411,32 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             eval_set=(X_test, y_test)
         )
         
+        # Train the extra base model
+        self.logger.info(f"Training extra base model ({self.extra_base_model_type})...")
+        if self.extra_base_model_type == 'svm':
+            # For SVM, we might need to scale the features
+            from sklearn.preprocessing import StandardScaler
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train_bal)
+            X_test_scaled = scaler.transform(X_test)
+            X_val_scaled = scaler.transform(X_val)
+            self.model_extra.fit(X_train_scaled, y_train_bal)
+            # Store the scaler for later use
+            self.extra_model_scaler = scaler
+        elif self.extra_base_model_type == 'mlp':
+            # For MLP, we might also need to scale the features
+            from sklearn.preprocessing import StandardScaler
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train_bal)
+            X_test_scaled = scaler.transform(X_test)
+            X_val_scaled = scaler.transform(X_val)
+            self.model_extra.fit(X_train_scaled, y_train_bal)
+            # Store the scaler for later use
+            self.extra_model_scaler = scaler
+        else:
+            # For RandomForest, no scaling is needed
+            self.model_extra.fit(X_train_bal, y_train_bal)
+        
         # Enhanced version with automatic ensemble calibration
         self.calibrated_model = CalibratedClassifierCV(
             estimator=self.model_lgb,
@@ -376,8 +454,14 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         p_cat = self.model_cat.predict_proba(X_val)[:, 1]
         p_lgb = self.calibrated_model.predict_proba(X_val)[:, 1]
         
+        # Get predictions from the extra base model
+        if hasattr(self, 'extra_model_scaler'):
+            p_extra = self.model_extra.predict_proba(self.extra_model_scaler.transform(X_val))[:, 1]
+        else:
+            p_extra = self.model_extra.predict_proba(X_val)[:, 1]
+        
         # Form the meta-feature array.
-        meta_features = np.column_stack((p_xgb, p_cat, p_lgb))
+        meta_features = np.column_stack((p_xgb, p_cat, p_lgb, p_extra))
         
         # Initialize meta learner.
         self._initialize_meta_learner()
@@ -387,18 +471,20 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.logger.info("Meta learner fitted with meta features.")
         
         # Update dynamic weights based on validation probabilities.
-        self.dynamic_weights = self._search_optimal_weights(p_xgb, p_cat, p_lgb, y_val)
+        self.dynamic_weights = self._search_optimal_weights(p_xgb, p_cat, p_lgb, p_extra, y_val)
         self.logger.info(f"XGBoost weight updated: {self.dynamic_weights['xgb']:.4f}")
         self.logger.info(f"CatBoost weight updated: {self.dynamic_weights['cat']:.4f}") 
         self.logger.info(f"LightGBM weight updated: {self.dynamic_weights['lgb']:.4f}")
+        self.logger.info(f"Extra model weight updated: {self.dynamic_weights['extra']:.4f}")
         
         # Compute ensemble probabilities using dynamic weights.
         if self.dynamic_weighting:
             p_soft = (self.dynamic_weights['xgb'] * p_xgb +
                       self.dynamic_weights['cat'] * p_cat +
-                      self.dynamic_weights['lgb'] * p_lgb)
+                      self.dynamic_weights['lgb'] * p_lgb +
+                      self.dynamic_weights['extra'] * p_extra)
         else:
-            p_soft = (p_xgb + p_cat + p_lgb) / 3.0
+            p_soft = (p_xgb + p_cat + p_lgb + p_extra) / 4.0
         
         # Get meta learner predictions.
         p_stack = self.meta_learner.predict_proba(meta_features)[:, 1]
@@ -419,14 +505,21 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         p_cat = self.model_cat.predict_proba(X)[:, 1]
         p_lgb = self.calibrated_model.predict_proba(X)[:, 1]
         
+        # Get predictions from the extra base model
+        if hasattr(self, 'extra_model_scaler'):
+            p_extra = self.model_extra.predict_proba(self.extra_model_scaler.transform(X))[:, 1]
+        else:
+            p_extra = self.model_extra.predict_proba(X)[:, 1]
+        
         if self.dynamic_weighting and not self.individual_thresholding:
             p_soft = (self.dynamic_weights['xgb'] * p_xgb +
                       self.dynamic_weights['cat'] * p_cat +
-                      self.dynamic_weights['lgb'] * p_lgb)
+                      self.dynamic_weights['lgb'] * p_lgb +
+                      self.dynamic_weights['extra'] * p_extra)
         else:
-            p_soft = (p_xgb + p_cat + p_lgb) / 3.0
+            p_soft = (p_xgb + p_cat + p_lgb + p_extra) / 4.0
             
-        meta_features = np.column_stack((p_xgb, p_cat, p_lgb))
+        meta_features = np.column_stack((p_xgb, p_cat, p_lgb, p_extra))
         p_stack = self.meta_learner.predict_proba(meta_features)[:, 1]
         final_probs = (p_soft + p_stack) / 2.0
         return final_probs
@@ -442,21 +535,30 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         p_cat = self.model_cat.predict_proba(X)[:, 1]
         p_lgb = self.calibrated_model.predict_proba(X)[:, 1]
         
+        # Get predictions from the extra base model
+        if hasattr(self, 'extra_model_scaler'):
+            p_extra = self.model_extra.predict_proba(self.extra_model_scaler.transform(X))[:, 1]
+        else:
+            p_extra = self.model_extra.predict_proba(X)[:, 1]
+        
         if self.individual_thresholding and hasattr(self, 'tuned_thresholds'):
             preds_xgb = (p_xgb >= self.tuned_thresholds['xgb']).astype(int)
             preds_cat = (p_cat >= self.tuned_thresholds['cat']).astype(int)
             preds_lgb = (p_lgb >= self.tuned_thresholds['lgb']).astype(int)
-            final_preds = ((preds_xgb + preds_cat + preds_lgb) >= 2).astype(int)
+            preds_extra = (p_extra >= self.tuned_thresholds.get('extra', 0.5)).astype(int)
+            # Majority vote (at least 3 out of 4 models predict positive)
+            final_preds = ((preds_xgb + preds_cat + preds_lgb + preds_extra) >= 3).astype(int)
             return final_preds
         else:
             if self.dynamic_weighting:
                 p_soft = (self.dynamic_weights['xgb'] * p_xgb +
                           self.dynamic_weights['cat'] * p_cat +
-                          self.dynamic_weights['lgb'] * p_lgb)
+                          self.dynamic_weights['lgb'] * p_lgb +
+                          self.dynamic_weights['extra'] * p_extra)
             else:
-                p_soft = (p_xgb + p_cat + p_lgb) / 3.0
+                p_soft = (p_xgb + p_cat + p_lgb + p_extra) / 4.0
                 
-            meta_features = np.column_stack((p_xgb, p_cat, p_lgb))
+            meta_features = np.column_stack((p_xgb, p_cat, p_lgb, p_extra))
             p_stack = self.meta_learner.predict_proba(meta_features)[:, 1]
             final_probs = (p_soft + p_stack) / 2.0
             preds = (final_probs >= self.optimal_threshold).astype(int)
@@ -522,7 +624,8 @@ if __name__ == "__main__":
     # Instantiate ensemble model with probability calibration, dynamic weighting, and an alternative meta learner
     ensemble_model = EnsembleModel(
         logger=logger, calibrate=True, calibration_method="sigmoid",
-        meta_learner_type="xgb", dynamic_weighting=True
+        meta_learner_type="xgb", dynamic_weighting=True,
+        extra_base_model_type="random_forest"
     )
     
     # Start MLflow run
@@ -533,7 +636,8 @@ if __name__ == "__main__":
             "calibration_method": "sigmoid",
             "meta_learner_type": "xgb",
             "dynamic_weighting": True,
-            "threshold_tuning": True
+            "threshold_tuning": True,
+            "extra_base_model_type": "random_forest"
         })
         
         # Train the ensemble model

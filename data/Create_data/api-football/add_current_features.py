@@ -18,7 +18,7 @@ class MongoDBFeatures:
     """
     def __init__(self, logger=None):
         self.logger = logger
-        self.mongo_uri = 'mongodb://192.168.0.77:27017/'
+        self.mongo_uri = 'mongodb://192.168.0.72:27017/'
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]
         self.fixtures_collection = self.db["fixtures"]
@@ -42,7 +42,7 @@ class MongoDBFeatures:
         fixture_list = list(fixtures)
         print(f"Found {len(fixture_list)} fixtures with home.stats.")
         return fixture_list
-   
+
     def normalize_fixtures_data(self, fixtures_with_stats: List[Dict]) -> pd.DataFrame:
         """
         Normalizes the fixtures data and returns a pandas DataFrame.
@@ -233,7 +233,7 @@ class MongoDBFeatures:
             print(f"Problem fixture: {fixture}")  # Print problematic fixture
             print(f"Error count: {error_count}")
             return pd.DataFrame()
-    
+
     def export_to_excel(self, fixtures_dataframe: pd.DataFrame, file_path: str) -> None:
         """
         Exports the DataFrame to an Excel file, handling data types and formatting.
@@ -247,7 +247,7 @@ class MongoDBFeatures:
             print(f"Data exported to {file_path}")
         except Exception as e:
             print(f"Error exporting data to Excel: {e}")
-     
+
     def add_features(self, fixtures_dataframe: pd.DataFrame) -> pd.DataFrame:
         """
         Adds features to the fixtures DataFrame.

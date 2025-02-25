@@ -94,7 +94,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                                                     log_dir="./logs/ensemble_model_new")
         # Load selected features (assumed common to all models)
         self.selected_features = import_selected_features_ensemble('all')
-        self.required_recall = 0.40
+        self.required_recall = 0.60
         # Define base models with CPU-only settings:
         self.model_xgb = XGBClassifier(
             tree_method='hist',
@@ -113,8 +113,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             reg_alpha=0.7544589894634769,
             reg_lambda=9.320178296187327,
             scale_pos_weight=2.4844767951297175,
-            subsample=0.46392442652907506,
-            verbose=-1
+            subsample=0.46392442652907506
         )
         self.model_cat = CatBoostClassifier(
             learning_rate=0.05417760272138922,
@@ -173,8 +172,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         return X.astype(np.float32)
 
     def _tune_individual_threshold(self, probs: np.ndarray, targets: pd.Series, 
-                                    grid_start: float = 0.4, grid_stop: float = 0.7, grid_step: float = 0.01, 
-                                    min_recall: float = 0.50) -> float:
+                                    grid_start: float = 0.4, grid_stop: float = 0.7, grid_step: float = 0.01) -> float:
         """
         Tune threshold for a single model's probabilities by iterating over a grid and selecting the value
         that maximizes precision while ensuring recall is at least min_recall.
@@ -185,7 +183,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             preds = (probs >= thresh).astype(int)
             prec = precision_score(targets, preds, zero_division=0)
             rec = recall_score(targets, preds, zero_division=0)
-            if rec >= min_recall and prec > best_precision:
+            if rec >= self.required_recall and prec > best_precision:
                 best_precision = prec
                 best_threshold = thresh
         return best_threshold
@@ -476,8 +474,15 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         predictions = self.predict(X)
         probs = self.predict_proba(X)
         
-        precision = precision_score(y, predictions, zero_division=0)
-        recall = recall_score(y, predictions, zero_division=0)
+        # Calculate confusion matrix components
+        true_positives = ((predictions == 1) & (y == 1)).sum()
+        false_positives = ((predictions == 1) & (y == 0)).sum()
+        false_negatives = ((predictions == 0) & (y == 1)).sum()
+        prediction_rate = predictions.mean()
+
+        # Calculate precision and recall from components
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
         f1 = f1_score(y, predictions, zero_division=0)
         try:
             auc = roc_auc_score(y, probs)
@@ -506,7 +511,8 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 "f1_score": f1,
                 "auc": auc,
                 "optimal_threshold": self.optimal_threshold,
-                "recall_flag": recall_flag}
+                "recall_flag": recall_flag,
+                "prediction_rate": prediction_rate}
 
 if __name__ == "__main__":    
     # Load data (assuming these functions return pandas DataFrames/Series)
