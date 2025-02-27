@@ -137,22 +137,22 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             verbose=100
         )
         self.model_lgb = LGBMClassifier(
-            learning_rate=0.11949236037348597,
-            num_leaves=49,
+            learning_rate=0.11444068792330053,
+            num_leaves=52,
             max_depth=4,
-            min_child_samples=162,
-            feature_fraction=0.7075821414747916,
-            bagging_fraction=0.5033592889721001,
+            min_child_samples=171,
+            feature_fraction=0.7263512433582645,
+            bagging_fraction=0.5499561443083391,
             bagging_freq=7,
-            reg_alpha=10.639888116989091,
-            reg_lambda=7.977879804092241,
-            min_split_gain=0.1345418888840171,
+            reg_alpha=9.967002635494612,
+            reg_lambda=8.013583096360682,
+            min_split_gain=0.13431182805041417,
             objective='binary',
             metric=['binary_logloss', 'auc'],
             verbose=-1,
             n_jobs=-1,
             device='cpu',
-            early_stopping_rounds=527,
+            early_stopping_rounds=587,
             random_state=19
         )
         
@@ -184,16 +184,21 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.logger.info("Extra base model initialized as SVC.")
         elif self.extra_base_model_type == 'mlp':
             self.model_extra = MLPClassifier(
-                hidden_layer_sizes=(100, 50),
-                activation='relu',
+                hidden_layer_sizes=(50),
+                activation='logistic',
                 solver='adam',
-                alpha=0.0001,
-                batch_size='auto',
+                alpha=0.007712811947156352,
                 learning_rate='adaptive',
-                max_iter=200,
+                learning_rate_init=0.00029662989987000704,
+                max_iter=324,
                 early_stopping=True,
-                validation_fraction=0.1,
-                random_state=42
+                validation_fraction=0.18566223936114976,
+                beta_1=0.8760785048616898,
+                beta_2=0.995612771975695,
+                epsilon=2.33262447559419e-08,
+                batch_size=64,
+                tol=1.6435497475111308e-05,
+                random_state=253
             )
             self.logger.info("Extra base model initialized as MLPClassifier.")
         else:

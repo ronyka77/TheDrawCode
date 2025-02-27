@@ -379,11 +379,11 @@ def main():
         # Provide code snippet for ensemble integration
         param_str = ", ".join([f"{k}={repr(v)}" for k, v in best_params.items()])
         print(f"""
-self.model_extra = RandomForestClassifier(
-    {param_str},
-    random_state=42,
-    n_jobs=-1
-)
+            self.model_extra = RandomForestClassifier(
+                {param_str},
+                random_state=42,
+                n_jobs=-1
+            )
         """)
 
 if __name__ == "__main__":

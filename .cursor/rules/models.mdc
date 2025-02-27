@@ -1,0 +1,216 @@
+---
+description: Used for model python files
+globs: 
+alwaysApply: false
+---
+Overview
+This document defines rules and conventions for our soccer draw prediction machine learning project. It serves as a guide for AI assistants and developers working with the codebase.
+Project Architecture
+Our project focuses on ensemble machine learning models for predicting soccer draws with the following structure:
+CPU-only training enforced across all models
+Minimum required recall target of 0.40
+MLflow integration for experiment tracking
+Multiple ensemble strategies (stacked, voting, and meta-learning)
+
+TheDrawCode/
+├── models/            # ML model implementations 
+├── utils/             # Shared utility functions
+└── data/              # Data processing and management
+
+Core Model Types
+Ensemble Models (models/*_ensemble_model*.py):
+Combined predictions from multiple base models
+Meta-learning capabilities
+Dynamic weighting systems
+Threshold optimization for precision/recall balance
+Base Boosting Models (models/*boost*.py):
+XGBoost, CatBoost, and LightGBM implementations
+CPU-optimized configurations
+Hyperparameter-tuned implementations
+Common feature selection approaches
+Hyperparameter Tuning (models/hypertune*.py):
+Grid search implementations
+Optimization frameworks
+Evaluation metrics tracking
+MLflow integration
+Code Structure Guidelines
+Ensemble Model Structure
+All ensemble model implementations should follow this structure:
+Imports (standard → third-party → local)
+Class Definition
+Initialization Logic
+Data Preparation Methods
+Training Implementation
+Prediction Logic
+Evaluation Functions
+Main Execution Block
+Example skeleton:
+
+"""
+EnsembleModel Module
+
+This module implements an ensemble model that combines multiple base models.
+"""
+
+# Standard library imports
+import os
+import sys
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+# Third-party imports
+import numpy as np
+import pandas as pd
+import mlflow
+from sklearn.metrics import precision_score, recall_score, f1_score
+
+# Add project root to path
+try:
+    project_root = Path(__file__).parent.parent
+    sys.path.append(str(project_root))
+except Exception as e:
+    print(f"Error setting project root path: {e}")
+    
+# Local imports
+from utils.logger import ExperimentLogger
+from utils.create_evaluation_set import create_ensemble_evaluation_set
+
+class EnsembleModel:
+    """Ensemble model implementation with meta-learning capabilities."""
+    
+    def __init__(self, logger=None, calibrate=False):
+        """Initialize ensemble model with configuration parameters."""
+        # Initialization code here
+        
+    def _prepare_data(self, X):
+        """Prepare input data for model training/inference."""
+        # Data preparation code here
+        
+    def train(self, X_train, y_train, X_val, y_val):
+        """Train the ensemble with specified parameters."""
+        # Training implementation here
+        
+    def predict(self, X):
+        """Generate predictions using the trained model."""
+        # Prediction logic here
+        
+    def evaluate(self, X, y):
+        """Evaluate model performance with metrics."""
+        # Evaluation code here
+
+if __name__ == "__main__":
+    # Main execution block
+
+    Base Boosting Models Structure
+Base model implementations should follow:
+Imports
+Model Configuration
+Model Training
+Prediction Logic
+Evaluation Functions
+Hyperparameter Tuning Structure
+Tuning scripts should follow:
+Imports
+Parameter Grid Definition
+Tuning Function Implementation
+Evaluation Logic
+Results Logging to MLflow
+Training Standards
+CPU-Only Training Requirements
+All models must use CPU-only training configurations:
+XGBoost: tree_method='hist', device='cpu'
+CatBoost: task_type='CPU'
+LightGBM: device_type='cpu'
+Evaluation Metrics
+Standard metrics to log for all models:
+Precision
+Recall (minimum target: 0.40)
+F1 Score
+AUC (when appropriate)
+Threshold values
+MLflow Guidelines
+Track all experiments in standardized format
+Log hyperparameters and metrics
+Register models with timestamp-based versioning
+Save feature importance plots
+Common Code Patterns
+Dynamic Weight Calculation
+
+def _compute_dynamic_weights(self, targets, p_xgb, p_cat, p_lgb):
+    """
+    Compute dynamic weights for each base model based on validation performance.
+    """
+    preds_xgb = (p_xgb >= 0.5).astype(int)
+    preds_cat = (p_cat >= 0.5).astype(int)
+    preds_lgb = (p_lgb >= 0.5).astype(int)
+    
+    prec_xgb = precision_score(targets, preds_xgb, zero_division=0)
+    prec_cat = precision_score(targets, preds_cat, zero_division=0)
+    prec_lgb = precision_score(targets, preds_lgb, zero_division=0)
+    
+    total = prec_xgb + prec_cat + prec_lgb + np.finfo(np.float32).eps
+    
+    weights = {
+        'xgb': prec_xgb / total,
+        'cat': prec_cat / total,
+        'lgb': prec_lgb / total
+    }
+    
+    return weights
+
+Threshold Optimization
+
+def _tune_threshold(self, probs, targets, grid_start=0.0, grid_stop=1.0, grid_step=0.01):
+    """
+    Tune threshold to maximize precision while maintaining minimum recall.
+    """
+    best_threshold = None
+    best_precision = -np.inf
+    
+    for thresh in np.arange(grid_start, grid_stop, grid_step):
+        preds = (probs >= thresh).astype(int)
+        prec = precision_score(targets, preds, zero_division=0)
+        rec = recall_score(targets, preds, zero_division=0)
+        
+        if rec >= self.required_recall and prec > best_precision:
+            best_precision = prec
+            best_threshold = thresh
+            
+    return best_threshold
+
+Development Workflow
+Creating New Models
+When creating new ensemble models:
+Reference existing implementations like ensemble_model_stacked.py
+Maintain consistent structure and naming
+Ensure all required methods are implemented
+Follow CPU-only training standards
+Implement both training and inference capabilities
+Tuning Models
+For hyperparameter tuning:
+Define parameter grid with reasonable ranges
+Use MLflow to track all experiments
+Ensure CPU-only configurations
+Log all metrics and parameters
+Optimize for both precision and recall
+Evaluation
+All model evaluation should:
+Report precision, recall, and F1 scores
+Log threshold values
+Validate minimum recall requirements are met
+Track prediction rate statistics
+Generate validation set performance metrics
+Style Guidelines
+Maximum line length: 100 characters
+Use reST style docstrings
+Import order: standard library → third-party → local modules
+Comprehensive docstrings for all classes and methods
+Type hints for function parameters and return values
+Consistent naming conventions
+Required Documentation
+All model implementations must document:
+Model architecture and components
+Training process and parameters
+Configuration options
+Evaluation metrics and interpretation
+CPU training settings

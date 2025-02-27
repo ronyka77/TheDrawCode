@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 title: Architecture Rules
 description: Core architectural principles and technical decisions
 author: Development Team
