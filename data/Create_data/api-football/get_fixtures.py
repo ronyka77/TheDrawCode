@@ -127,7 +127,7 @@ class ApiFootball:
         else:
             self.logger.warning("No leagues data found.")
             return []
-    
+
     def get_league_ids(self) -> None:
         """
         Retrieves league IDs, names, and countries from the leagues.json file and saves them to a new JSON file.
@@ -151,15 +151,13 @@ class ApiFootball:
             self._save_json(league_info, 'league_ids.json')
         except Exception as e:
             self.logger.error(f"Error processing leagues data: {e}")
-    
+
     def get_fixtures(self, league_id: int, season: int) -> List[Dict]:
         """
         Retrieves fixtures for a specific league and season.
-
         Args:
             league_id (int): The ID of the league to get fixtures for
             season (int): The season year to get fixtures for
-
         Returns:
             List[Dict]: A list of fixtures for the specified league and season
         """
@@ -173,7 +171,6 @@ class ApiFootball:
         
         if response and 'response' in response:
             fixtures = response['response']
-             
             # Insert fixtures into MongoDB
             for fixture in fixtures:
                 transformed_fixture = {
@@ -243,14 +240,12 @@ class ApiFootball:
         else:
             self.logger.warning(f"No fixtures found for league {league_id} season {season}")
             return []
-    
-    def get_statistics(self, fixture_id: int) -> Dict:
+
+    def get_statistics(self, fixture_id: int) -> Dict:  
         """
         Retrieves statistics for a specific fixture and stores them in MongoDB.
-
         Args:
             fixture_id (int): The ID of the fixture to get statistics for
-
         Returns:
             Dict: Statistics data for the specified fixture
         """
@@ -263,7 +258,6 @@ class ApiFootball:
         
         if response and 'response' in response and response['response']:
             raw_statistics = response['response']
-
             statistics = {
                 'fixture_id': fixture_id,
                 'home': {
@@ -322,7 +316,7 @@ class ApiFootball:
                 self.logger.error(f"Error checking date for fixture {fixture_id}: {e}")
             time.sleep(3)
             return {}
-    
+
     def get_fixture_ids_without_statistics(self) -> List[int]:
         """
         Retrieves fixture IDs from MongoDB where home/stats is empty, the date is today or earlier,
@@ -354,16 +348,14 @@ class ApiFootball:
         Retrieves fixtures for each league ID found in 'league_ids.json'.
         """
         league_ids_file_path = os.path.join(project_root, 'data', 'create_data', 'api-football', 'league_ids.json')
-        seasons = [2024, 2025]
+        seasons = [2025]
         try:
             with open(league_ids_file_path, 'r') as f:
                 league_ids_data = json.load(f)
-                
             # league_ids_data = [{'league_id': 40}] #IF YOU WANT TO GET FIXTURES FOR A SPECIFIC LEAGUE
             
             num_leagues = len(league_ids_data)
             self.logger.info(f"Total number of leagues: {num_leagues}")
-
             for league_info in league_ids_data:
                 league_id = league_info['league_id']
                 self.logger.info(f"Getting fixtures for league ID: {league_id}")
@@ -373,6 +365,9 @@ class ApiFootball:
                         self.logger.info(f"Retrieved {fixtures} fixtures for league ID: {league_id} season: {season}")
                     else:
                         self.logger.warning(f"No fixtures found for league ID: {league_id} season: {season}")
+                        fixtures = self.get_fixtures(league_id, 2024)
+                        self.logger.info(f"Retrieved {fixtures} fixtures for league ID: {league_id} season: 2024")
+
 
         except Exception as e:
             self.logger.error(f"Error processing league IDs: {e}")
@@ -499,7 +494,7 @@ class ApiFootball:
         try:
             # Get all unique team IDs from fixtures collection
             team_ids = self.fixtures_collection.distinct("teams.home.id") + \
-                      self.fixtures_collection.distinct("teams.away.id")
+                        self.fixtures_collection.distinct("teams.away.id")
             team_ids = list(set(team_ids))
             
             # Get all team IDs that have venue data

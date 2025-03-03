@@ -27,23 +27,28 @@ class DrawPredictor:
         """Initialize predictor with model URI."""
         # Set up MLflow tracking URI based on current environment
         current_dir = os.getcwd()
-        self.model = mlflow.sklearn.load_model(model_uri)
         try:
+            self.model = mlflow.sklearn.load_model(model_uri)
             self.test_model = mlflow.pyfunc.load_model(model_uri)
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            self.model = mlflow.pyfunc.load_model(model_uri)
+            self.test_model = self.model
+        try:
             # Retrieve the optimal threshold if set during training.
             if hasattr(self.model, 'optimal_threshold'):
                 self.threshold = self.model.optimal_threshold
                 print(f"Using model's optimal threshold: {self.threshold:.2%}")
             else:
-                self.threshold = 0.50
-                print("No optimal threshold found in model, using default 50% threshold")
+                self.threshold = 0.27
+                print("No optimal threshold found in model, using default 27% threshold")
             # Get feature names from signature if available.
             if self.test_model.metadata.signature:
                 self.required_features = self.test_model.metadata.signature.inputs.input_names()
                 print(f"Features from signature: {len(self.required_features)}")
         except Exception as e:
             print(f"Error loading model: {e}")
-            self.threshold = 0.50
+            self.threshold = 0.27
 
     def _validate_input(self, df: pd.DataFrame) -> None:
         """Validate input dataframe has all required columns."""
@@ -56,16 +61,23 @@ class DrawPredictor:
         # Validate input if needed.
         self._validate_input(df)
         
-        # Get predictions using the model's built-in predict.
-        # (Your ensemble model's predict method already applies the tuned threshold.)
-        predictions = self.model.predict(df)
-        
-        # For additional details, we also retrieve the probability predictions.
-        probas = self.model.predict_proba(df)
-        if probas.ndim > 1:
-            pos_probas = probas[:, 1]
-        else:
-            pos_probas = probas
+        # Get probabilities - our ensemble model returns a 1D array of positive class probabilities
+        try:
+            # Get predictions using the model's built-in predict.
+            predictions = self.model.predict(df)
+            # Get probabilities directly - already a 1D array of positive class probabilities
+            pos_probas = self.model.predict_proba(df)
+            
+            # Ensure we have a 1D numpy array
+            if not isinstance(pos_probas, np.ndarray):
+                pos_probas = np.array(pos_probas)
+                
+            # No need to select [:, 1] since our model already returns only positive class probabilities
+            
+        except Exception as e:
+            print(f"Error getting probabilities: {e}")
+            # Fallback: if predict_proba fails, convert binary predictions to simple probabilities
+            pos_probas = predictions.astype(float)
         
         results = {
             'predictions': predictions.tolist(),
@@ -152,6 +164,14 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         predictor = DrawPredictor(model_uri)
         prediction_df = prediction_data.copy()
         # print(f"Prediction data len(prediction_df): {len(prediction_df)}")
+        
+        # Ensure data types are compatible with model expectations
+        # Convert numeric columns to float64 to match model expectations
+        numeric_columns = prediction_df.select_dtypes(include=['number']).columns
+        for col in numeric_columns:
+            prediction_df[col] = prediction_df[col].astype('float64')
+        
+            
         # Add column validation
         predictor._validate_input(prediction_df)
         
@@ -159,7 +179,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         if not isinstance(prediction_data, pd.DataFrame):
             raise TypeError("prediction_data must be a pandas DataFrame")
         
-        prediction_df = prediction_data[predictor.required_features]
+        prediction_df = prediction_df[predictor.required_features]
         # Merge prediction data with real scores to get is_draw column
         predict_df = prediction_df.merge(
             real_scores_df[['fixture_id', 'is_draw']],
@@ -202,6 +222,13 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                     on='fixture_id', 
                     how='left'
                 )
+                
+                # Set fixture_id as the last column in dataset by reordering columns
+                if 'fixture_id' in matches_with_results.columns:
+                    # Get all columns except fixture_id
+                    other_cols = [col for col in matches_with_results.columns if col != 'fixture_id']
+                    # Reorder columns with fixture_id at the end
+                    matches_with_results = matches_with_results[other_cols + ['fixture_id']]
                 # Ensure is_draw is properly typed
                 if 'is_draw' in matches_with_results.columns:
                     matches_with_results['is_draw'] = matches_with_results['is_draw'].fillna(-1).astype(int)
@@ -256,12 +283,13 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        '2b8f99c18e9a4cc6a5deae4a0b88a6ac',
-        '6916ad7ae0f74927964be197022d97ab',
-        '11d37c6b5fd84d31beecbe3306987e4c',
-        '743e98e9a7f646709c43b8eeb5e10fc9',
-        '1e12ef8b15ec4124b19e128a066d7306',
-        '97266ccf262149e1b9ce63db164155bf'
+        'f04b93479ee249f6bc77204e5c4b206f',
+        '8abc7269aeba4436a5d23ed2bd13e4d4',
+        '5befa2bf2b5d4ae6866f3cc177c7b68f', 
+        '035abdf986654b1e8b551d0ce044c929',
+        '8d80522037ae4a9790b72129c06851a4',
+        'd3c066618b4d425fbb2ffff99a478238',
+        'acded8143d6d4a1cb3ba14cd959949e3'
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()

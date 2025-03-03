@@ -14,6 +14,7 @@ from typing import Dict, List, Tuple, Optional, Union
 import scipy.stats as stats
 
 from utils.logger import ExperimentLogger
+from models.ensemble.thresholds import tune_threshold_for_precision
 
 def evaluate_model(model, X_val: pd.DataFrame, y_val: pd.Series, 
                 threshold: Optional[float] = None,
@@ -42,7 +43,7 @@ def evaluate_model(model, X_val: pd.DataFrame, y_val: pd.Series,
         if hasattr(model, 'optimal_threshold'):
             threshold = model.optimal_threshold
         else:
-            threshold = 0.5
+            threshold, metrics = tune_threshold_for_precision(model, X_val, y_val, logger=logger)
     
     logger.info(f"Using classification threshold: {threshold:.4f}")
     

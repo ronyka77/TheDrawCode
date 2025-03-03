@@ -41,11 +41,11 @@ from utils.create_evaluation_set import import_selected_features_ensemble
 
 # Module imports
 from models.ensemble.calibration import calibrate_models, analyze_calibration
-from models.ensemble.data_utils import prepare_data, apply_adasyn_resampling
+from models.ensemble.data_utils import prepare_data
 from models.ensemble.meta_features import create_meta_features, create_meta_dataframe
 from models.ensemble.diagnostics import detect_data_leakage, explain_predictions, analyze_prediction_errors
 from models.ensemble.evaluation import evaluate_model, cross_validate
-from models.ensemble.training import initialize_meta_learner, train_base_models, train_meta_learner
+from models.ensemble.training import initialize_meta_learner, train_base_models, hypertune_meta_learner, train_meta_learner
 from models.ensemble.weights import compute_dynamic_weights, compute_precision_focused_weights
 from models.ensemble.thresholds import tune_threshold_for_precision, tune_threshold, tune_individual_threshold
 
@@ -99,61 +99,62 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.target_precision = target_precision  # For threshold tuning
         
         # Define base models with CPU-only settings with reduced complexity to avoid overfitting:
-        self.model_xgb = XGBClassifier(
-            tree_method='hist',
+        self.model_xgb = XGBClassifier( #41.2%
+            tree_method='hist',  # Required for CPU-only training per project rules
             device='cpu',
             n_jobs=-1,
             objective='binary:logistic',
-            learning_rate=0.05,
-            n_estimators=500,  # Reduced from 793
-            max_depth=6,  # Reduced from 11
-            random_state=98,
-            colsample_bytree=0.7,
-            early_stopping_rounds=300,
-            eval_metric=['logloss', 'auc'],
-            gamma=0.8,
-            min_child_weight=50,
-            reg_alpha=1.0,  # Increased regularization
-            reg_lambda=2.0,  # Increased regularization
-            scale_pos_weight=2.19,  # Adjusted for class imbalance
-            subsample=0.8
+            eval_metric=['auc', 'logloss', 'error'],
+            verbosity=0,
+            learning_rate=0.03679351366869405,
+            max_depth=10,
+            min_child_weight=241,
+            subsample=0.56251222880863,
+            colsample_bytree=0.8241956062145627,
+            reg_alpha=0.008010347447856267,
+            reg_lambda=10.456348154500397,
+            gamma=1.3271218963462843,
+            early_stopping_rounds=677,
+            scale_pos_weight=4.437156059787625
         )
-        self.model_cat = CatBoostClassifier(
-            learning_rate=0.05,
-            depth=6,  # Reduced from 10
-            min_data_in_leaf=20,
-            subsample=0.8,
-            colsample_bylevel=0.8,
-            reg_lambda=5.0,  # Increased regularization
-            leaf_estimation_iterations=2,
-            bagging_temperature=1.0,
-            scale_pos_weight=2.19,  # Adjusted for class imbalance
-            early_stopping_rounds=100,
+        self.model_cat = CatBoostClassifier( #39.7%
+            learning_rate=0.05747334517009464,
+            depth=6,
+            min_data_in_leaf=26,
+            subsample=0.7152201908359026,
+            colsample_bylevel=0.35094802393061786,
+            reg_lambda=1.0342319632749895,
+            leaf_estimation_iterations=4,
+            bagging_temperature=2.891201300013366,
+            scale_pos_weight=5.295897250279237,
+            early_stopping_rounds=201,
             loss_function='Logloss',
             eval_metric='AUC',
             task_type='CPU',
             thread_count=-1,
-            random_seed=26,
-            verbose=100
+            verbose=-1
         )
-        self.model_lgb = LGBMClassifier(
-            learning_rate=0.05,
-            num_leaves=32,  # Reduced from 52
-            max_depth=4,
-            min_child_samples=100,
-            feature_fraction=0.8,
-            bagging_fraction=0.8,
-            bagging_freq=5,
-            reg_alpha=2.0,  # Increased regularization
-            reg_lambda=2.0,  # Increased regularization
-            min_split_gain=0.1,
+        self.model_lgb = LGBMClassifier( #40.1%
             objective='binary',
-            metric=['binary_logloss', 'auc'],
+            metric=['average_precision', 'auc'],
             verbose=-1,
             n_jobs=-1,
+            random_state=19,
             device='cpu',
-            early_stopping_rounds=300,
-            random_state=19
+            learning_rate=0.07808365732227378,
+            num_leaves=49,
+            max_depth=5,
+            min_child_samples=186,
+            feature_fraction=0.7362414908665876,
+            bagging_fraction=0.566329378803412,
+            bagging_freq=7,
+            reg_alpha=10.381624688086854,
+            reg_lambda=8.247369065806053,
+            min_split_gain=0.0759612454859611,
+            early_stopping_rounds=368,
+            path_smooth=0.003311033349450048,
+            cat_smooth=6.238451219805991,
+            max_bin=586
         )
         
         # Initialize the extra base model based on the selected type with reduced complexity
@@ -348,12 +349,24 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         if self.extra_base_model_type in ['mlp', 'svm'] and self.extra_model_scaler is not None:
             X_val_scaled = self.extra_model_scaler.transform(X_val_prepared)
             p_extra = extra_model.predict_proba(X_val_scaled)[:, 1]
+            p_extra_train = extra_model.predict_proba(X_train_prepared)[:, 1]
+            p_extra_test = extra_model.predict_proba(X_test_prepared)[:, 1]
         else:
             p_extra = extra_model.predict_proba(X_val_prepared)[:, 1]
+            p_extra_train = extra_model.predict_proba(X_train_prepared)[:, 1]
+            p_extra_test = extra_model.predict_proba(X_test_prepared)[:, 1]
         
         p_xgb = xgb_model.predict_proba(X_val_prepared)[:, 1]
+        p_xgb_train = xgb_model.predict_proba(X_train_prepared)[:, 1]
+        p_xgb_test = xgb_model.predict_proba(X_test_prepared)[:, 1]
+        
         p_cat = cat_model.predict_proba(X_val_prepared)[:, 1]
+        p_cat_train = cat_model.predict_proba(X_train_prepared)[:, 1]
+        p_cat_test = cat_model.predict_proba(X_test_prepared)[:, 1]
+        
         p_lgb = lgb_model.predict_proba(X_val_prepared)[:, 1]
+        p_lgb_train = lgb_model.predict_proba(X_train_prepared)[:, 1]
+        p_lgb_test = lgb_model.predict_proba(X_test_prepared)[:, 1]
         
         # Step 7: Optionally calculate dynamic weights based on validation performance
         if self.dynamic_weighting:
@@ -361,15 +374,29 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.dynamic_weights = compute_precision_focused_weights(
                 p_xgb, p_cat, p_lgb, p_extra, y_val, self.target_precision, self.required_recall, self.logger
             )
+            self.dynamic_weights_train = compute_precision_focused_weights(
+                p_xgb_train, p_cat_train, p_lgb_train, p_extra_train, y_train, self.target_precision, self.required_recall, self.logger
+            )
+            self.dynamic_weights_test = compute_precision_focused_weights(
+                p_xgb_test, p_cat_test, p_lgb_test, p_extra_test, y_test, self.target_precision, self.required_recall, self.logger
+            )
         
         # Step 8: Create meta-features from base model predictions
         self.logger.info("Creating meta-features for meta-learner...")
         meta_features = create_meta_features(
             p_xgb, p_cat, p_lgb, p_extra, self.dynamic_weights if self.dynamic_weighting else None
         )
+        meta_features_train = create_meta_features(
+            p_xgb_train, p_cat_train, p_lgb_train, p_extra_train, self.dynamic_weights_train if self.dynamic_weighting else None
+        )
+        meta_features_test = create_meta_features(
+            p_xgb_test, p_cat_test, p_lgb_test, p_extra_test, self.dynamic_weights_test if self.dynamic_weighting else None
+        )
         
         # Convert to DataFrame for better interpretability
         meta_df = create_meta_dataframe(meta_features)
+        meta_df_train = create_meta_dataframe(meta_features_train)
+        meta_df_test = create_meta_dataframe(meta_features_test)
         
         # Step 9: Initialize and train meta-learner
         self.logger.info(f"Initializing meta-learner of type {self.meta_learner_type}...")
@@ -377,37 +404,31 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         # Train meta-learner
         self.logger.info("Training meta-learner...")
-        self.meta_learner = train_meta_learner(
-            self.meta_learner, meta_features, y_val
-        )
-        
+        # self.meta_learner = train_meta_learner(self.meta_learner, meta_df, y_val)
+        self.meta_learner = hypertune_meta_learner(meta_df_train, y_train, meta_df, y_val, 
+                                                    meta_learner_type=self.meta_learner_type, target_precision=self.target_precision, min_recall=self.required_recall)
         # Step 10: Tune threshold for optimal precision-recall trade-off
         self.logger.info(f"Tuning threshold for target precision {self.target_precision}...")
         
         # Get meta-learner predictions on validation data
-        meta_val_probs = self.meta_learner.predict_proba(meta_features)[:, 1]
+        meta_val_probs = self.meta_learner.predict_proba(meta_df)[:, 1]
         
         # Tune threshold
-        threshold_result = tune_threshold_for_precision(
+        best_threshold, threshold_metrics = tune_threshold_for_precision(
             meta_val_probs, y_val, 
             target_precision=self.target_precision,
             required_recall=self.required_recall,
             logger=self.logger
         )
         
-        # Check if the result is a tuple or a single value
-        if isinstance(threshold_result, tuple):
-            self.optimal_threshold, threshold_metrics = threshold_result
-        else:
-            # If not a tuple, assume it's just the threshold value
-            self.optimal_threshold = threshold_result
-            threshold_metrics = None
+        self.optimal_threshold = best_threshold
+        threshold_metrics = threshold_metrics
         self.logger.info(f"Optimal threshold set to {self.optimal_threshold:.4f}")
         
         # Step 11: Final evaluation on validation data
         self.logger.info("Performing final evaluation on validation data...")
         eval_results = evaluate_model(
-            self.meta_learner, meta_features, y_val, self.optimal_threshold, self.logger
+            self.meta_learner, meta_df, y_val, self.optimal_threshold, self.logger
         )
         
         self.logger.info("Ensemble model training completed successfully.")

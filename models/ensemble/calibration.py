@@ -38,7 +38,6 @@ def calibrate_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
     if logger is None:
         logger = ExperimentLogger(experiment_name="ensemble_model_calibration",
                                     log_dir="./logs/ensemble_model_calibration")
-    
     logger.info(f"Starting model calibration using {calibration_method} method...")
     
     calibrated_models = {}

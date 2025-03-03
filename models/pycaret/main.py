@@ -74,8 +74,8 @@ def parse_args():
                         help="Skip confidence filtering step")
     parser.add_argument("--model-type", type=str, choices=["single", "ensemble"], default="ensemble",
                         help="Type of model to train (default: 'ensemble')")
-    parser.add_argument("--include-models", type=str, default="xgboost,lightgbm,rf,et,catboost",
-                        help="Comma-separated list of models to include (default: 'xgboost,lightgbm,rf,et,catboost')")
+    parser.add_argument("--include-models", type=str, default="xgboost,lightgbm,catboost",
+                        help="Comma-separated list of models to include (default: 'xgboost,lightgbm,catboost')")
     parser.add_argument("--n-iter", type=int, default=50,
                         help="Number of iterations for hyperparameter tuning (default: 50)")
     parser.add_argument("--output-dir", type=str, default="models/saved",

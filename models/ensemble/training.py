@@ -11,6 +11,7 @@ from sklearn.neural_network import MLPClassifier
 from xgboost import XGBClassifier
 from typing import Dict, List, Tuple, Optional, Union
 import mlflow
+import time
 
 from utils.logger import ExperimentLogger
 logger = ExperimentLogger(experiment_name="ensemble_model_training",
@@ -41,7 +42,6 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
             max_depth=4,       # Reduced from 6
             random_state=42,
             colsample_bytree=0.8,
-            early_stopping_rounds=100,
             eval_metric=['logloss', 'auc'],
             gamma=0.1,
             min_child_weight=10,
@@ -268,12 +268,18 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
     
     try:
         # For models that support early stopping (XGBoost)
-        if hasattr(meta_learner, 'early_stopping_rounds') and eval_meta_features is not None:
-            meta_learner.fit(
-                meta_features, meta_targets,
-                eval_set=[(eval_meta_features, eval_meta_targets)],
-                verbose=False
-            )
+        if hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping'):
+            if eval_meta_features is not None and eval_meta_targets is not None:
+                # Ensure both evaluation features and targets are provided
+                meta_learner.fit(
+                    meta_features, meta_targets,
+                    eval_set=[(eval_meta_features, eval_meta_targets)],
+                    verbose=False
+                )
+            else:
+                # Fall back to standard training if eval data is missing
+                logger.warning("Evaluation data missing for early stopping. Falling back to standard training.")
+                meta_learner.fit(meta_features, meta_targets)
         else:
             # Standard training for other models
             meta_learner.fit(meta_features, meta_targets)
@@ -299,3 +305,240 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
     except Exception as e:
         logger.error(f"Error training meta-learner: {str(e)}")
         raise
+
+def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
+                            eval_meta_features: Optional[np.ndarray] = None, 
+                            eval_meta_targets: Optional[np.ndarray] = None,
+                            meta_learner_type='xgb', n_trials=200, timeout=3600, 
+                            target_precision=0.5, min_recall=0.25):
+    """
+    Hypertune meta-learner using Optuna and optimize threshold for precision/recall balance.
+    
+    Args:
+        meta_features: Meta-features for training
+        meta_targets: Target values for training
+        eval_meta_features: Evaluation meta-features for early stopping
+        eval_meta_targets: Evaluation target values for early stopping
+        meta_learner_type: Type of meta-learner ('xgb', 'logistic', 'mlp')
+        n_trials: Number of Optuna trials
+        timeout: Maximum time for optimization in seconds
+        target_precision: Target precision for threshold optimization
+        min_recall: Minimum required recall
+        
+    Returns:
+        tuple: (best_meta_learner, best_threshold)
+    """
+    from utils.logger import ExperimentLogger
+    import optuna
+    from optuna.samplers import TPESampler
+    import mlflow
+    import numpy as np
+    from sklearn.metrics import precision_score, recall_score, f1_score
+    from models.ensemble.thresholds import tune_threshold_for_precision
+    
+    def objective(trial):
+        # Define hyperparameters based on meta-learner type
+        if meta_learner_type == 'xgb':
+            from xgboost import XGBClassifier
+            base_params = {
+                'tree_method': 'hist',
+                'objective': 'binary:logistic',
+                'n_jobs': -1,
+                'eval_metric': ['auc', 'logloss', 'error'],
+                'device': 'cpu',
+                'random_state': 19
+            }
+            
+            params = {
+                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+                'n_estimators': trial.suggest_int('n_estimators', 50, 1000),
+                'max_depth': trial.suggest_int('max_depth', 4, 8),
+                'min_child_weight': trial.suggest_int('min_child_weight', 1, 200),
+                'gamma': trial.suggest_float('gamma', 1.0, 6.0, log=True),
+                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+                'reg_alpha': trial.suggest_float('reg_alpha', 0.01, 10.0, log=True),
+                'reg_lambda': trial.suggest_float('reg_lambda', 1.00, 20.0, log=True),
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 6.0),
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 200, 600)
+            
+            }
+            params.update(base_params)
+            meta_learner = XGBClassifier(**params)
+            
+        elif meta_learner_type == 'logistic':
+            from sklearn.linear_model import LogisticRegression
+            base_params = {
+                'solver': 'saga',  # Compatible with all penalties
+                'max_iter': 1000,
+                'random_state': 19
+            }
+            params = {
+                'C': trial.suggest_float('C', 0.01, 10.0, log=True),
+                'penalty': trial.suggest_categorical('penalty', ['l1', 'l2', 'elasticnet']),
+                'solver': 'saga',  # Compatible with all penalties
+                'max_iter': 1000,
+                'random_state': 19
+            }
+            
+            if params['penalty'] == 'elasticnet':
+                params['l1_ratio'] = trial.suggest_float('l1_ratio', 0.0, 1.0)
+                
+            meta_learner = LogisticRegression(**params)
+            
+        elif meta_learner_type == 'mlp':
+            from sklearn.neural_network import MLPClassifier
+            base_params = {
+                'max_iter': 1000,
+                'early_stopping': True,
+                'random_state': 19
+            }
+            params = {
+                'hidden_layer_sizes': (trial.suggest_int('hidden_units', 10, 100),),
+                'alpha': trial.suggest_float('alpha', 0.0001, 0.1, log=True),
+                'learning_rate_init': trial.suggest_float('learning_rate_init', 0.001, 0.1, log=True),
+                'max_iter': 1000,
+                'early_stopping': True,
+                'random_state': 42
+            }
+            
+            meta_learner = MLPClassifier(**params)
+        
+        else:
+            raise ValueError(f"Unsupported meta-learner type: {meta_learner_type}")
+        
+        # Train meta-learner
+        try:
+            if hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping'):
+                meta_learner.fit(
+                    meta_features, meta_targets,
+                    eval_set=[(eval_meta_features, eval_meta_targets)],
+                    verbose=False
+                )
+            else:
+                meta_learner.fit(meta_features, meta_targets)
+                
+            # Get predictions on validation set
+            if hasattr(meta_learner, 'predict_proba'):
+                y_proba = meta_learner.predict_proba(eval_meta_features)[:, 1]
+            else:
+                y_proba = meta_learner.predict(eval_meta_features)
+                
+            # Find optimal threshold
+            best_threshold, metrics = tune_threshold_for_precision(
+                y_proba, eval_meta_targets, target_precision, min_recall
+            )
+            
+            # If we couldn't find a threshold meeting criteria, penalize the score
+            if metrics['recall'] < min_recall:
+                return -1.0
+            
+            # Log trial results
+            logger.info(f"Trial {trial.number}: precision={metrics['precision']:.4f}, recall={metrics['recall']:.4f}, "
+                        f"threshold={best_threshold:.4f}")
+            
+            return metrics['precision']
+            
+        except Exception as e:
+            logger.error(f"Error in trial {trial.number}: {str(e)}")
+            return -1.0
+    
+    # Create and run Optuna study
+    study = optuna.create_study(
+        direction="maximize",
+        sampler = optuna.samplers.TPESampler(                     # Different seed for better randomization
+                    n_startup_trials=20,         # Reduced from 50 - more efficient
+                    prior_weight=0.4,
+                    seed=int(time.time())  # Dynamic seed
+                )
+        # pruner = optuna.pruners.MedianPruner(
+        #         n_startup_trials=50,  # Collect this many trials before pruning
+        #         n_warmup_steps=1,     # No pruning before this many steps (CV folds) within each trial
+        #         interval_steps=1      # Check pruning condition at every step
+        #     )
+    )
+    
+    study.optimize(objective, n_trials=n_trials, timeout=timeout, show_progress_bar=True)
+    
+    # Get best parameters
+    best_params = study.best_params
+    logger.info(f"Best parameters: {best_params}")
+    
+    # Define base parameters outside objective function scope
+    if meta_learner_type == 'xgb':
+        base_params = {
+            'tree_method': 'hist',
+            'objective': 'binary:logistic',
+            'n_jobs': -1,
+            'eval_metric': ['auc', 'logloss', 'error'],
+            'device': 'cpu',
+            'random_state': 19
+        }
+    elif meta_learner_type == 'logistic':
+        base_params = {
+            'solver': 'saga',  # Compatible with all penalties
+            'max_iter': 1000,
+            'random_state': 19
+        }
+    elif meta_learner_type == 'mlp':
+        base_params = {
+            'max_iter': 1000,
+            'early_stopping': True,
+            'random_state': 19
+        }
+    else:
+        raise ValueError(f"Unsupported meta-learner type: {meta_learner_type}")
+    
+    # Train final meta-learner with best parameters
+    if meta_learner_type == 'xgb':
+        from xgboost import XGBClassifier
+        best_params.update(base_params)
+        best_meta_learner = XGBClassifier(**best_params)
+    elif meta_learner_type == 'logistic':
+        from sklearn.linear_model import LogisticRegression
+        best_params.update(base_params)
+        best_meta_learner = LogisticRegression(**best_params)
+    elif meta_learner_type == 'mlp':
+        from sklearn.neural_network import MLPClassifier
+        best_params.update(**base_params)
+        if 'hidden_units' in best_params:
+            best_params['hidden_layer_sizes'] = (best_params.pop('hidden_units'),)
+        best_meta_learner = MLPClassifier(best_params)
+    
+    # Train final model
+    if hasattr(best_meta_learner, 'early_stopping_rounds') or hasattr(best_meta_learner, 'early_stopping'):
+        best_meta_learner.fit(
+            meta_features, meta_targets,
+            eval_set=[(eval_meta_features, eval_meta_targets)],
+            verbose=False
+        )
+    else:
+        best_meta_learner.fit(meta_features, meta_targets)
+    
+    # Get predictions and find optimal threshold
+    if hasattr(best_meta_learner, 'predict_proba'):
+        y_proba = best_meta_learner.predict_proba(eval_meta_features)[:, 1]
+    else:
+        y_proba = best_meta_learner.predict(eval_meta_features)
+    
+    best_threshold, metrics = tune_threshold_for_precision(
+        y_proba, eval_meta_targets, target_precision, min_recall
+    )
+    
+    # Log final results
+    logger.info(f"Final meta-learner: {meta_learner_type}")
+    logger.info(f"Final threshold: {best_threshold:.4f}")
+    logger.info(f"Final precision: {metrics['precision']:.4f}")
+    logger.info(f"Final recall: {metrics['recall']:.4f}")
+    
+    # Log to MLflow
+    mlflow.log_params(best_params)
+    mlflow.log_param("meta_learner_type", meta_learner_type)
+    mlflow.log_param("best_threshold", best_threshold)
+    mlflow.log_metrics({
+        "final_precision": metrics['precision'],
+        "final_recall": metrics['recall'],
+        "final_f1": f1_score(eval_meta_targets, y_proba >= best_threshold)
+    })
+    
+    return best_meta_learner

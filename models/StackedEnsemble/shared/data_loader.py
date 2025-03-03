@@ -62,10 +62,46 @@ class DataLoader:
         X_val, y_val = create_ensemble_evaluation_set()
         self.logger.info(f"Loaded validation data: {len(X_val)} samples")
         
-        # Apply feature selection to all splits
-        X_train = X_train[self._cached_features]
-        X_test = X_test[self._cached_features]
-        X_val = X_val[self._cached_features]
+        # Apply feature selection to all splits and ensure consistent column order
+        self.logger.info("Applying feature selection with consistent column ordering")
+        X_train = X_train[self._cached_features].copy()
+        X_test = X_test[self._cached_features].copy()
+        X_val = X_val[self._cached_features].copy()
+        
+        # Validate column order consistency
+        train_cols = list(X_train.columns)
+        test_cols = list(X_test.columns)
+        val_cols = list(X_val.columns)
+        
+        if not (train_cols == test_cols == val_cols):
+            self.logger.warning("Column order inconsistency detected - enforcing identical ordering")
+            # Force identical column ordering across all datasets
+            X_train = X_train[self._cached_features]
+            X_test = X_test[self._cached_features]
+            X_val = X_val[self._cached_features]
+
+        # Replace NaN values with 0 in all data splits
+        self.logger.info("Replacing NaN values with 0 in all data splits")
+        X_train = X_train.fillna(0)
+        X_test = X_test.fillna(0)
+        X_val = X_val.fillna(0)
+        # Replace inf values with 0 in all data splits
+        self.logger.info("Replacing inf values with 0 in all data splits")
+        X_train = X_train.replace([np.inf, -np.inf], 0)
+        X_test = X_test.replace([np.inf, -np.inf], 0)
+        X_val = X_val.replace([np.inf, -np.inf], 0)
+        
+        # Log NaN replacement statistics
+        train_nan_count_before = X_train.isna().sum().sum()
+        test_nan_count_before = X_test.isna().sum().sum()
+        val_nan_count_before = X_val.isna().sum().sum()
+        
+        self.logger.info(
+            "NaN replacement complete:"
+            f"\n - Train: {train_nan_count_before} NaN values replaced"
+            f"\n - Test: {test_nan_count_before} NaN values replaced" 
+            f"\n - Validation: {val_nan_count_before} NaN values replaced"
+        )
         
         # Log final data shapes
         self.logger.info(

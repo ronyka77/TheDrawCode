@@ -4,9 +4,9 @@ SELECTCOLUMNS(
     "Home", future_matches[Home], 
     "Away", future_matches[Away], 
     "league_name", future_matches[league_name], 
-    "Date", future_matches[Date], 
-    "venue_name", future_matches[venue_name], 
-    "referee", future_matches[referee],       
+    "Date", future_matches[Date],  
+    "venue_name", future_matches[venue_name],  
+    "referee", future_matches[referee],        
     "match_outcome", future_matches[match_outcome],   
     "fixture_id", ROUNDUP(future_matches[fixture_id], 2),
     "attack_xg_equilibrium", ROUNDUP(future_matches[attack_xg_equilibrium], 2),
@@ -142,7 +142,7 @@ SELECTCOLUMNS(
     "possession_balance", ROUNDUP(future_matches[possession_balance], 2),
     "referee_draw_rate", ROUNDUP(future_matches[referee_draw_rate], 2),
     "referee_draws", ROUNDUP(future_matches[referee_draws], 2),
-    "referee_encoded", ROUNDUP(future_matches[referee_encoded], 2),
+    "referee_encoded", ROUNDUP(future_matches[referee_encoded], 2), 
     "referee_foul_rate", ROUNDUP(future_matches[referee_foul_rate], 2),
     "referee_match_count", ROUNDUP(future_matches[referee_match_count], 2),
     "rest_advantage", ROUNDUP(future_matches[rest_advantage], 2),
@@ -165,3 +165,4 @@ SELECTCOLUMNS(
     "xg_form_similarity", ROUNDUP(future_matches[xg_form_similarity], 2),
     "xg_momentum_similarity", ROUNDUP(future_matches[xg_momentum_similarity], 2)
 )
+	
