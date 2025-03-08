@@ -43,7 +43,7 @@ from models.ensemble.data_utils import balance_and_clean_dataset
 
 
 def run_ensemble(extra_base_model_type: str = 'mlp',
-                meta_learner_type: str = 'xgb',
+                meta_learner_type: str = 'bayesian',
                 calibrate: bool = True,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
@@ -234,7 +234,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the ensemble model training and evaluation.")
     parser.add_argument("--extra-model", type=str, default="mlp", choices=["random_forest", "svm", "mlp"],
                         help="Type of fourth base model")
-    parser.add_argument("--meta-learner", type=str, default="xgb", choices=["xgb", "logistic", "mlp"],
+    parser.add_argument("--meta-learner", type=str, default="sgd", choices=["xgb", "logistic", "mlp", "sgd"],
                         help="Type of meta-learner")
     parser.add_argument("--calibrate", action="store_true", default=True,
                         help="Whether to calibrate base model probabilities")

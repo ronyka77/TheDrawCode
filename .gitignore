@@ -320,3 +320,7 @@ h2o/h2o/python/README.txt
 =2.0.1
 =
 .env
+.ariana/
+.ariana.json
+.vault_secret_key
+.traces/

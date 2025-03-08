@@ -42,7 +42,7 @@ class ApiFootball:
         os.makedirs(self.data_dir, exist_ok=True)
 
         # MongoDB setup
-        self.mongo_uri = 'mongodb://192.168.0.72:27017/'
+        self.mongo_uri = 'mongodb://192.168.0.75:27017/'
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]  # Database name
         self.fixtures_collection = self.db["fixtures"] # Collection name

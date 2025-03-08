@@ -102,20 +102,21 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.model_xgb = XGBClassifier( #41.2%
             tree_method='hist',  # Required for CPU-only training per project rules
             device='cpu',
-            n_jobs=-1,
+            nthread=-1,
             objective='binary:logistic',
-            eval_metric=['auc', 'logloss', 'error'],
+            eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.03679351366869405,
-            max_depth=10,
-            min_child_weight=241,
-            subsample=0.56251222880863,
-            colsample_bytree=0.8241956062145627,
-            reg_alpha=0.008010347447856267,
-            reg_lambda=10.456348154500397,
-            gamma=1.3271218963462843,
-            early_stopping_rounds=677,
-            scale_pos_weight=4.437156059787625
+            learning_rate=0.065,
+            max_depth=9,
+            min_child_weight=450,
+            subsample=0.6,
+            colsample_bytree=0.63,
+            reg_alpha=56.2,
+            reg_lambda=8.61,
+            gamma=3.9000000000000004,
+            early_stopping_rounds=770,
+            scale_pos_weight=2.73,
+            seed=19
         )
         self.model_cat = CatBoostClassifier( #39.7%
             learning_rate=0.05747334517009464,
@@ -202,6 +203,18 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 random_state=253
             )
             self.logger.info("Extra base model initialized as MLPClassifier.")
+        elif self.extra_base_model_type == 'sgd':
+            self.model_extra = SGDClassifier(
+                loss='log_loss',
+                penalty='elasticnet',
+                alpha=0.0001,
+                l1_ratio=0.5,
+                class_weight=None,
+                max_iter=1000,
+                early_stopping=True,
+                random_state=42
+            )
+            self.logger.info("Extra base model initialized as SGDClassifier.")
         else:
             raise ValueError(f"Unknown extra_base_model_type: {self.extra_base_model_type}")
             
@@ -225,7 +238,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.model_lgb_calibrated = None
         self.model_extra_calibrated = None
         self.extra_model_scaler = None
-        
+
     def train(self, X_train, y_train, X_val=None, y_val=None, X_test=None, y_test=None, 
                 split_validation=True, val_size=0.2) -> Dict:
         """

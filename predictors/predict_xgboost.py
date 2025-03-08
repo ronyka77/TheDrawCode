@@ -9,6 +9,8 @@ from typing import Dict, Any, List, Tuple
 import pymongo
 import mlflow.sklearn
 import mlflow.pyfunc
+import mlflow.xgboost
+import mlflow
 from pymongo import MongoClient
 from sklearn.metrics import recall_score, f1_score
 from xgboost import XGBClassifier
@@ -16,39 +18,47 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.create_evaluation_set import get_real_api_scores_from_excel, setup_mlflow_tracking, create_prediction_set_ensemble
 
-experiment_name = "ensemble_model_new"
+experiment_name = "xgboost_soccer_prediction"
 mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 
 class DrawPredictor:
     """Predictor class for draw predictions using the stacked model."""
-
     def __init__(self, model_uri: str):
         """Initialize predictor with model URI."""
-        # Set up MLflow tracking URI based on current environment
-        current_dir = os.getcwd()
         try:
-            self.model = mlflow.sklearn.load_model(model_uri)
-            self.test_model = mlflow.pyfunc.load_model(model_uri)
-        except Exception as e:
-            print(f"Error loading model: {e}")
-            self.model = mlflow.pyfunc.load_model(model_uri)
-            self.test_model = self.model
-        try:
-            # Retrieve the optimal threshold if set during training.
-            if hasattr(self.model, 'optimal_threshold'):
-                self.threshold = self.model.optimal_threshold
-                print(f"Using model's optimal threshold: {self.threshold:.2%}")
+            # Load model directly using mlflow.xgboost
+            # Try loading with xgboost flavor first
+            try:
+                print(f"Loading model using xgboost flavor from {model_uri}")
+                self.model = mlflow.xgboost.load_model(model_uri)
+                print(f"Successfully loaded model using xgboost flavor from {model_uri}")
+            except Exception as e:
+                print(f"Failed to load model with xgboost flavor")
+                raise e
+            
+            # Get model metadata for feature names
+            model_info = mlflow.models.get_model_info(model_uri)
+            if model_info.signature:
+                # Parse signature inputs if they're in string format
+                inputs = model_info.signature.inputs.to_dict()
+                if isinstance(inputs, str):
+                    inputs = json.loads(inputs)
+                self.required_features = [col['name'] for col in inputs]
+                print(f"Loaded {len(self.required_features)} feature names")
             else:
-                self.threshold = 0.27
-                print("No optimal threshold found in model, using default 27% threshold")
-            # Get feature names from signature if available.
-            if self.test_model.metadata.signature:
-                self.required_features = self.test_model.metadata.signature.inputs.input_names()
-                print(f"Features from signature: {len(self.required_features)}")
+                print("Warning: No signature found in model metadata")
+                self.required_features = []
+            
+            # Set threshold
+            self.threshold = getattr(self.model, 'optimal_threshold', 0.27)
+            print(f"Using threshold: {self.threshold:.2%}")
+            
         except Exception as e:
             print(f"Error loading model: {e}")
-            self.threshold = 0.27
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error: {e}")
+            raise
 
     def _validate_input(self, df: pd.DataFrame) -> None:
         """Validate input dataframe has all required columns."""
@@ -58,26 +68,43 @@ class DrawPredictor:
 
     def predict(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Make predictions and return results with probabilities."""
-        # Validate input if needed.
-        self._validate_input(df)
+        # Validate input if needed
+        if self.required_features:
+            self._validate_input(df)
         
-        # Get probabilities - our ensemble model returns a 1D array of positive class probabilities
         try:
-            predictions = self.model.predict(df)
-            pos_probas = self.model.predict_proba(df)
-            # Ensure we have a 1D numpy array
-            if not isinstance(pos_probas, np.ndarray):
-                pos_probas = np.array(pos_probas)
-        except AttributeError as e:
-            if "use_label_encoder" in str(e):
-                print("Attribute error due to missing 'use_label_encoder'. Patching model...")
-                setattr(self.model, "use_label_encoder", False)
+            # Initialize predictions and probabilities
+            predictions = None
+            pos_probas = None
+            
+            # First try direct XGBoost prediction
+            if hasattr(self.model, '_Booster'):
+                import xgboost as xgb
+                # Convert DataFrame to DMatrix for XGBoost
+                dmatrix = xgb.DMatrix(df)
+                # Get raw predictions from the booster
+                pos_probas = self.model._Booster.predict(dmatrix)
+                predictions = (pos_probas >= self.threshold).astype(int)
+            else:
+                # Try sklearn-style prediction
+                pos_probas = self.model.predict_proba(df)[:, 1]
+                predictions = (pos_probas >= self.threshold).astype(int)
+            
+            if pos_probas is None or predictions is None:
+                # Fallback to basic predict
                 predictions = self.model.predict(df)
-                pos_probas = self.model.predict_proba(df)
+                pos_probas = predictions.astype(float)
+                print("Warning: Using binary predictions instead of probabilities")
+                
+        except Exception as e:
+            print(f"Error during prediction: {e}")
+            # Initialize with zeros as last resort
+            predictions = np.zeros(len(df))
+            pos_probas = np.zeros(len(df))
         
         results = {
             'predictions': predictions.tolist(),
-            'draw_probabilities': pos_probas.tolist(),
+            'draw_probabilities': pos_probas.tolist(), 
             'threshold_used': self.threshold,
             'num_predictions': len(predictions),
             'positive_predictions': int(np.sum(predictions)),
@@ -107,7 +134,7 @@ class DrawPredictor:
             best_score = 0
             
             # Focus on higher thresholds for better precision, starting from 0.5
-            for threshold in np.arange(0.5, 0.65, 0.01):
+            for threshold in np.arange(0.2, 0.90, 0.01):
                 preds = (probas >= threshold).astype(int)
                 true_positives = ((preds == 1) & (target_val == 1)).sum()
                 false_positives = ((preds == 1) & (target_val == 0)).sum()
@@ -159,7 +186,6 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Initialize predictor
         predictor = DrawPredictor(model_uri)
         prediction_df = prediction_data.copy()
-        # print(f"Prediction data len(prediction_df): {len(prediction_df)}")
         
         # Ensure data types are compatible with model expectations
         # Convert numeric columns to float64 to match model expectations
@@ -186,7 +212,8 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         predict_df = predict_df.dropna(subset=['is_draw'])
         print(f"Merged prediction data with real scores and dropped NaN is_draw. Shape: {predict_df.shape}")
         # Make predictions first
-        # threshold, best_metrics = predictor._find_optimal_threshold(predictor.model, predict_df, predict_df['is_draw'])
+        threshold, best_metrics = predictor._find_optimal_threshold(predictor.model, predict_df, predict_df['is_draw'])
+
         results = predictor.predict(prediction_df)
         print(f"Prediction successful...")
         # Add predictions to dataframe using .loc to avoid SettingWithCopyWarning
@@ -266,7 +293,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
             else:
                 print("Warning: No real scores data available")
                 matches_with_results = prediction_df.copy()
-            matches_with_results = matches_with_results.loc[:, ~matches_with_results.columns.duplicated(keep='last')]
+        matches_with_results = matches_with_results.loc[:, ~matches_with_results.columns.duplicated(keep='last')]
         return matches_with_results, precision, draws_recall
     except Exception as e:
         print(f"Error during prediction: {str(e)}")
@@ -280,13 +307,15 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        'f04b93479ee249f6bc77204e5c4b206f',
-        # '8abc7269aeba4436a5d23ed2bd13e4d4',
-        '5befa2bf2b5d4ae6866f3cc177c7b68f', 
-        '035abdf986654b1e8b551d0ce044c929',
-        '8d80522037ae4a9790b72129c06851a4',
-        'd3c066618b4d425fbb2ffff99a478238',
-        # 'acded8143d6d4a1cb3ba14cd959949e3'
+        '1a3fd3f61ec144f5bc35da087aed1f33',
+        'fd9e7ead05e5402b81b7aaba70de1fd7',
+        '306fcb9a007447f0a50542d7d98837a9',
+        '442f29de370c4a14969a6aa5de1b60b4',
+        'c3b20fd4dff9466ab5deaccf6ebee4b3',
+        '459e32871ab94727a4118fecf3d7f28d',
+        'ce754a75ac274f0fbc6f0043b578dcec',
+        '4cc45a815e3545bca50faba6ddba70d6',
+        '55d72f8c1e4a42de94eb52793e83134d'
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
@@ -305,7 +334,7 @@ def main():
     # Evaluate each model
     for uri in model_uris:
         try:
-            uri_full = f"runs:/{uri}/ensemble_model"
+            uri_full = f"runs:/{uri}/model"
             predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full, real_scores_df)
             # Add validation check
             if not isinstance(predicted_df, pd.DataFrame) or predicted_df.empty:
@@ -343,11 +372,7 @@ def main():
         cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
         cols.extend(['draw_predicted', 'draw_probability'])
         predicted_df = predicted_df[cols]
-    
-    # Save best model results
-    output_path = Path("./data/prediction/predictions_ensemble_best.xlsx")
-    predicted_df.to_excel(output_path, index=False)
-    print(f"\nBest model predictions saved to: {output_path}")
+
 
 if __name__ == "__main__":
     main()

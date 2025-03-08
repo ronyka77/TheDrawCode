@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import lightgbm as lgb
 import mlflow
+import joblib
 import optuna
 from optuna.integration import LightGBMPruningCallback
 from sklearn.metrics import (
@@ -26,72 +27,169 @@ from sklearn.metrics import (
     confusion_matrix, classification_report, precision_recall_curve
 )
 from datetime import datetime
+import time
 import gc
+from pathlib import Path
+from typing import Any, Dict, Tuple
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-    handlers=[
-        logging.FileHandler("logs/lightgbm_soccer_prediction.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
+# Add project root to Python path
+try:
+    project_root = Path(__file__).parent.parent.parent.parent.parent
+    if not project_root.exists():
+        # Handle network path by using raw string
+        project_root = Path(r"\\".join(str(project_root).split("\\")))
+    sys.path.append(str(project_root))
+    print(f"Project root: {project_root}")
+except Exception as e:
+    print(f"Error setting project root path: {e}")
+    # Fallback to current directory if path resolution fails
+    sys.path.append(os.getcwd())
+    print(f"Current directory: {os.getcwd()}")
+
+from utils.logger import ExperimentLogger
+experiment_name = "lightgbm_soccer_prediction"
+logger = ExperimentLogger(experiment_name)
+
+from utils.create_evaluation_set import setup_mlflow_tracking
+mlrunds_dir = setup_mlflow_tracking(experiment_name)
+
+# Import shared utility functions
+from models.StackedEnsemble.shared.hypertuner_utils import (
+    predict, predict_proba, evaluate, optimize_threshold, calculate_feature_importance
 )
-logger = logging.getLogger("lightgbm_soccer_prediction")
+from models.StackedEnsemble.shared.data_loader import DataLoader
 
 # Global settings
-experiment_name = "lightgbm_soccer_prediction"
 min_recall = 0.20  # Minimum acceptable recall
-n_trials = 100  # Number of hyperparameter optimization trials
+n_trials = 1000  # Number of hyperparameter optimization trials as in notebook
 SEED = 42  # Global seed for reproducibility
-TREE_METHOD = 'hist'  # Use histogram-based tree method for CPU optimization
 DEVICE = 'cpu'  # Enforce CPU training
+
+# Base parameters as in the notebook
+base_params = {
+    'objective': 'binary',
+    'metric': ['binary_logloss', 'average_precision', 'auc'],
+    'verbose': -1,
+    'n_jobs': -1,
+    'random_state': 19,
+    'device': 'cpu'
+}
 
 def load_hyperparameter_space():
     """
-    Define the hyperparameter space for LightGBM model tuning.
+    Define a tightened hyperparameter space for LightGBM tuning based on the
+    top 10 best trials from the last hypertuning cycle. The updated ranges aim
+    to increase precision by focusing on the sweet-spot regions observed.
     
     Returns:
-        dict: Default hyperparameter configuration
+        dict: Hyperparameter space configuration with narrowed ranges and steps.
     """
-    return {
-        # Core parameters
-        'objective': 'binary',
-        'metric': 'auc',
-        'boosting_type': 'gbdt',
-        'device_type': DEVICE,
-        
-        # Learning parameters
-        'learning_rate': 0.05,
-        'n_estimators': 1000,
-        'max_depth': 6,
-        'num_leaves': 31,
-        
-        # Regularization parameters
-        'min_child_samples': 20,
-        'min_child_weight': 0.001,
-        'reg_alpha': 0.0,
-        'reg_lambda': 1.0,
-        
-        # Sampling parameters
-        'subsample': 0.8,
-        'colsample_bytree': 0.8,
-        'subsample_freq': 1,
-        
-        # Early stopping
-        'early_stopping_rounds': 50,
-        
-        # Class balance
-        'scale_pos_weight': 1.0,
-        
-        # Misc
-        'verbose': -1,
-        'seed': SEED,
+    hyperparameter_space = {
+        'learning_rate': {
+            'type': 'float',
+            'low': 0.01,
+            'high': 0.11,
+            'log': False,
+            'step': 0.005
+        },
+        'num_leaves': {
+            'type': 'int',
+            'low': 50,
+            'high': 200,
+            'log': False,
+            'step': 2
+        },
+        'max_depth': {
+            'type': 'int',
+            'low': 5,
+            'high': 10,  # Fixed at 5 based on top trials
+            'log': False,
+            'step': 1
+        },
+        'min_child_samples': {
+            'type': 'int',
+            'low': 250,
+            'high': 500,
+            'log': False,
+            'step': 5
+        },
+        'feature_fraction': {
+            'type': 'float',
+            'low': 0.6,
+            'high': 0.8,
+            'log': False,
+            'step': 0.01
+        },
+        'bagging_fraction': {
+            'type': 'float',
+            'low': 0.4,
+            'high': 0.8,
+            'log': False,
+            'step': 0.01
+        },
+        'bagging_freq': {
+            'type': 'int',
+            'low': 6,
+            'high': 10,  # Fixed at 7 based on top trials
+            'log': False,
+            'step': 1
+        },
+        'reg_alpha': {
+            'type': 'float',
+            'low': 0.1,
+            'high': 10.5,
+            'log': False,
+            'step': 0.1
+        },
+        'reg_lambda': {
+            'type': 'float',
+            'low': 0.1,
+            'high': 9.0,
+            'log': False,
+            'step': 0.05
+        },
+        'min_split_gain': {
+            'type': 'float',
+            'low': 0.1,
+            'high': 0.55,
+            'log': False,
+            'step': 0.01
+        },
+        'early_stopping_rounds': {
+            'type': 'int',
+            'low': 400,
+            'high': 800,
+            'log': False,
+            'step': 10
+        },
+        'path_smooth': {
+            'type': 'float',
+            'low': 0.005,
+            'high': 0.8,
+            'log': False,
+            'step': 0.005
+        },
+        'cat_smooth': {
+            'type': 'float',
+            'low': 1.0,
+            'high': 30.0,
+            'log': False,
+            'step': 0.5
+        },
+        'max_bin': {
+            'type': 'int',
+            'low': 200,
+            'high': 700,
+            'log': False,
+            'step': 5
+        }
     }
+    return hyperparameter_space
 
 def create_model(model_params):
     """
     Create and configure LightGBM model instance.
+    Matches the notebook implementation.
     
     Args:
         model_params (dict): Model parameters
@@ -100,180 +198,27 @@ def create_model(model_params):
         lgb.LGBMClassifier: Configured LightGBM model
     """
     try:
-        # Make a copy to avoid modifying the original
-        params = model_params.copy()
+        params = base_params.copy()
         
-        # Set random seed for reproducibility
-        seed = params.pop('seed', SEED)
-        random.seed(seed)
-        np.random.seed(seed)
+        # Update with provided parameters
+        params.update(model_params)
         
-        # Create model with parameters
+        # Create model
         model = lgb.LGBMClassifier(**params)
-        logger.info(f"Created LightGBM model with {len(params)} parameters")
+        
         return model
         
     except Exception as e:
         logger.error(f"Error creating LightGBM model: {str(e)}")
         raise
 
-def predict(model, X, threshold=0.5):
-    """
-    Generate predictions using trained model.
-    
-    Args:
-        model: Trained LightGBM model
-        X: Features to predict on
-        threshold (float): Decision threshold
-        
-    Returns:
-        np.array: Binary predictions
-    """
-    if model is None:
-        raise RuntimeError("Model must be trained before prediction")
-        
-    try:
-        probas = model.predict_proba(X)[:, 1]
-        return (probas >= threshold).astype(int)
-        
-    except Exception as e:
-        logger.error(f"Error in model prediction: {str(e)}")
-        return np.zeros(len(X))
-
-def predict_proba(model, X):
-    """
-    Generate probability predictions.
-    
-    Args:
-        model: Trained LightGBM model
-        X: Features to predict on
-        
-    Returns:
-        np.array: Probability predictions
-    """
-    if model is None:
-        raise RuntimeError("Model must be trained before prediction")
-        
-    try:
-        return model.predict_proba(X)[:, 1]
-        
-    except Exception as e:
-        logger.error(f"Error in probability prediction: {str(e)}")
-        return np.zeros(len(X))
-
-def evaluate(model, X, y, best_threshold):
-    """
-    Evaluate model performance with multiple metrics.
-    
-    Args:
-        model: Trained LightGBM model
-        X: Feature data
-        y: Target labels
-        best_threshold: Optimized decision threshold
-        
-    Returns:
-        dict: Evaluation metrics
-    """
-    try:
-        # Get predictions using the best threshold
-        y_prob = predict_proba(model, X)
-        y_pred = (y_prob >= best_threshold).astype(int)
-        
-        # Calculate metrics
-        precision = precision_score(y, y_pred, zero_division=0)
-        recall = recall_score(y, y_pred, zero_division=0)
-        f1 = f1_score(y, y_pred, zero_division=0)
-        auc = roc_auc_score(y, y_prob) if len(np.unique(y)) > 1 else 0
-        
-        # Calculate confusion matrix
-        tn, fp, fn, tp = confusion_matrix(y, y_pred).ravel()
-        
-        # Log detailed results
-        logger.info(f"Evaluation Results (threshold={best_threshold:.3f}):")
-        logger.info(f"  Precision: {precision:.3f}")
-        logger.info(f"  Recall: {recall:.3f}")
-        logger.info(f"  F1 Score: {f1:.3f}")
-        logger.info(f"  AUC: {auc:.3f}")
-        logger.info(f"  TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}")
-        
-        return {
-            'precision': precision,
-            'recall': recall,
-            'f1': f1,
-            'auc': auc,
-            'threshold': best_threshold,
-            'tp': tp,
-            'fp': fp,
-            'tn': tn,
-            'fn': fn,
-        }
-    
-    except Exception as e:
-        logger.error(f"Error during evaluation: {str(e)}")
-        return {
-            'precision': 0,
-            'recall': 0,
-            'f1': 0,
-            'auc': 0,
-            'threshold': best_threshold,
-            'tp': 0,
-            'fp': 0,
-            'tn': 0,
-            'fn': 0,
-        }
-
-def optimize_threshold(model, y_true, y_prob):
-    """
-    Optimize classification threshold to maximize precision while maintaining minimum recall.
-    
-    Args:
-        model: Trained LightGBM model
-        y_true: True labels
-        y_prob: Predicted probabilities
-        
-    Returns:
-        tuple: (best_threshold, best_precision, best_recall)
-    """
-    try:
-        # Calculate precision-recall curve
-        precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
-        
-        # Find the threshold that maximizes precision while maintaining minimum recall
-        best_threshold = 0.5
-        best_precision = 0
-        best_recall = 0
-        
-        # Combine precision, recall, and thresholds
-        metrics = list(zip(precision, recall, [0] + list(thresholds)))
-        
-        # Sort metrics by precision (descending)
-        sorted_metrics = sorted(metrics, key=lambda x: x[0], reverse=True)
-        
-        for p, r, t in sorted_metrics:
-            if r >= min_recall:
-                best_precision = p
-                best_recall = r
-                best_threshold = t
-                break
-        
-        # If no threshold meets minimum recall, choose the one with highest recall
-        if best_precision == 0:
-            idx = np.argmax(recall)
-            best_precision = precision[idx]
-            best_recall = recall[idx]
-            best_threshold = thresholds[min(idx, len(thresholds)-1)]
-            logger.warning(f"No threshold met minimum recall of {min_recall}. Using best available: {best_threshold:.3f}")
-        
-        logger.info(f"Optimal threshold: {best_threshold:.3f} (precision: {best_precision:.3f}, recall: {best_recall:.3f})")
-        return best_threshold, best_precision, best_recall
-        
-    except Exception as e:
-        logger.error(f"Error optimizing threshold: {str(e)}")
-        return 0.5, 0, 0
+# Note: predict, predict_proba, evaluate, and optimize_threshold functions 
+# have been replaced with imports from hypertuner_utils.py
 
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
     Train a LightGBM model with early stopping and threshold optimization.
+    Updated to match notebook implementation.
     
     Args:
         X_train: Training features
@@ -285,280 +230,357 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         model_params: Model parameters
         
     Returns:
-        tuple: (trained_model, best_threshold, metrics)
+        tuple: (trained_model, metrics)
     """
     try:
-        # Extract parameters
-        params = model_params.copy()
-        n_estimators = params.pop('n_estimators', 1000)
-        early_stopping_rounds = params.pop('early_stopping_rounds', 50)
+        # Extract early stopping rounds if present
+        early_stopping_rounds = model_params.pop('early_stopping_rounds', 100)
         
-        # Create model
-        model = create_model(params)
+        # Create model with remaining parameters
+        model = create_model(model_params)
         
-        # Calculate class weights
-        if y_train.mean() > 0:
-            scale_pos_weight = params.get('scale_pos_weight', 1.0)
-            neg_class_count = np.sum(y_train == 0)
-            pos_class_count = np.sum(y_train == 1)
-            weight_for_0 = 1.0
-            weight_for_1 = (neg_class_count / pos_class_count) * scale_pos_weight
-            sample_weight = np.ones_like(y_train, dtype=float)
-            sample_weight[y_train == 1] = weight_for_1
-        else:
-            sample_weight = None
-            logger.warning("No positive samples in training set. Using uniform weights.")
+        # Create eval set for early stopping
+        eval_set = [(X_test, y_test)]
         
-        # Train model
+        # Fit model with early stopping
         model.fit(
             X_train, y_train,
-            eval_set=[(X_test, y_test)],
-            eval_metric='auc',
-            early_stopping_rounds=early_stopping_rounds,
-            sample_weight=sample_weight,
-            verbose=False
+            eval_set=eval_set,
+            callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)]
         )
         
         # Get validation predictions
-        y_prob = predict_proba(model, X_eval)
-        
-        # Optimize threshold
-        best_threshold, best_precision, best_recall = optimize_threshold(
-            model,
-            y_eval, 
-            y_prob
+        best_threshold, metrics = optimize_threshold(
+            model, X_eval, y_eval, min_recall=min_recall
         )
         
-        logger.info(f"Best threshold: {best_threshold:.3f} with precision: {best_precision:.3f}")
-        
-        # Get final metrics with best threshold
-        metrics = evaluate(model, X_eval, y_eval, best_threshold)
-        
-        return model, best_threshold, metrics
+        return model, metrics
         
     except Exception as e:
-        logger.error(f"Error training model: {str(e)}")
-        return None, 0.5, {}
+        logger.error(f"Error training LightGBM model: {str(e)}")
+        raise
 
-def save_model(model, path, threshold=None, metrics=None, params=None):
+def save_model(model, path, threshold=0.5):
     """
-    Save model and associated metadata.
+    Save LightGBM model to specified path.
+    Updated to match notebook implementation using joblib.
     
     Args:
         model: Trained LightGBM model
-        path (str): Path to save model
-        threshold (float, optional): Optimal decision threshold
-        metrics (dict, optional): Model evaluation metrics
-        params (dict, optional): Model parameters
+        path: Path to save model
+        threshold: Optimal decision threshold
     """
+    if model is None:
+        raise RuntimeError("No model to save")
+        
     try:
         # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         
         # Save model
-        with open(path, 'wb') as f:
-            pickle.dump(model, f)
+        joblib.dump(model, path)
         
-        # Save metadata
-        metadata = {
-            'threshold': threshold if threshold is not None else 0.5,
-            'metrics': metrics if metrics is not None else {},
-            'params': params if params is not None else {},
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'model_type': 'lightgbm'
-        }
-        
-        metadata_path = path.replace('.pkl', '_metadata.json')
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
+        # Save threshold
+        threshold_path = path.parent / "threshold.json"
+        with open(threshold_path, 'w') as f:
+            json.dump({
+                'threshold': threshold,
+                'model_type': 'lightgbm',
+                'params': model.get_params()
+            }, f, indent=2)
             
-        logger.info(f"Model saved to {path} with metadata")
+        logger.info(f"Model saved to {path}")
         
     except Exception as e:
         logger.error(f"Error saving model: {str(e)}")
+        raise
 
 def load_model(path):
     """
-    Load model and associated metadata.
+    Load LightGBM model from specified path.
+    Updated to match notebook implementation using joblib.
     
     Args:
-        path (str): Path to load model from
+        path: Path to load model from
         
     Returns:
-        tuple: (model, metadata)
+        tuple: (model, threshold)
     """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"No model file found at {path}")
+        
     try:
         # Load model
-        with open(path, 'rb') as f:
-            model = pickle.load(f)
+        model = joblib.load(path)
         
-        # Load metadata
-        metadata_path = path.replace('.pkl', '_metadata.json')
-        if os.path.exists(metadata_path):
-            with open(metadata_path, 'r') as f:
-                metadata = json.load(f)
+        # Load threshold
+        threshold_path = path.parent / "threshold.json"
+        if threshold_path.exists():
+            with open(threshold_path, 'r') as f:
+                data = json.load(f)
+                threshold = data.get('threshold', 0.5)
         else:
-            metadata = {'threshold': 0.5}
+            threshold = 0.5
             
-        return model, metadata
+        logger.info(f"Model loaded from {path}")
+        return model, threshold
         
     except Exception as e:
         logger.error(f"Error loading model: {str(e)}")
-        return None, {'threshold': 0.5}
+        raise
 
-def objective(trial):
+def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
     """
-    Objective function for Optuna hyperparameter optimization.
+    Run hyperparameter optimization with Optuna.
+    Added to match notebook implementation.
     
     Args:
-        trial: Optuna trial object
+        X_train: Training features
+        y_train: Training labels
+        X_test: Testing features
+        y_test: Testing labels
+        X_eval: Evaluation features
+        y_eval: Evaluation labels
+        hyperparameter_space: Hyperparameter space configuration
         
     Returns:
-        float: Precision score (to be maximized)
+        dict: Best parameters
     """
-    # Import data at runtime to avoid global scope issues
+    logger.info("Starting hyperparameter optimization")
+    
+    if not hyperparameter_space:
+        hyperparameter_space = load_hyperparameter_space()
+    
+    best_score = 0.0
+    
+    def objective(trial):
+        try:
+            params = base_params.copy()
+            
+            # Add hyperparameters from config with step size if provided.
+            for param_name, param_config in hyperparameter_space.items():
+                if param_config['type'] == 'float':
+                    if 'step' in param_config:
+                        params[param_name] = trial.suggest_float(
+                            param_name,
+                            param_config['low'],
+                            param_config['high'],
+                            step=param_config['step'],
+                            log=param_config.get('log', False)
+                        )
+                    else:
+                        params[param_name] = trial.suggest_float(
+                            param_name,
+                            param_config['low'],
+                            param_config['high'],
+                            log=param_config.get('log', False)
+                        )
+                elif param_config['type'] == 'int':
+                    if 'step' in param_config:
+                        params[param_name] = trial.suggest_int(
+                            param_name,
+                            param_config['low'],
+                            param_config['high'],
+                            step=param_config['step']
+                        )
+                    else:
+                        params[param_name] = trial.suggest_int(
+                            param_name,
+                            param_config['low'],
+                            param_config['high']
+                        )
+            
+            # Train model and get metrics
+            model, metrics = train_model(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                params
+            )
+            
+            recall = metrics.get('recall', 0.0)
+            precision = metrics.get('precision', 0.0)
+            
+            # Optimize for precision while maintaining minimum recall
+            score = precision if recall >= min_recall else 0.0
+            
+            logger.info(f"Trial {trial.number}:")
+            logger.info(f"  Params: {params}")
+            logger.info(f"  Score: {score}")
+            
+            for metric_name, metric_value in metrics.items():
+                trial.set_user_attr(metric_name, metric_value)
+            return score
+            
+        except Exception as e:
+            logger.error(f"Trial failed: {str(e)}")
+            return 0.0
+    
     try:
-        from data.data_loader import load_data
-        X_train, y_train, X_test, y_test, X_eval, y_eval = load_data()
-        
-        # Define hyperparameter space
-        params = {
-            'objective': 'binary',
-            'metric': 'auc',
-            'boosting_type': trial.suggest_categorical('boosting_type', ['gbdt', 'dart']),
-            'device_type': DEVICE,
-            
-            # Learning parameters
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),
-            'n_estimators': trial.suggest_int('n_estimators', 500, 3000),
-            'max_depth': trial.suggest_int('max_depth', 3, 12),
-            'num_leaves': trial.suggest_int('num_leaves', 15, 127),
-            
-            # Regularization parameters
-            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
-            'min_child_weight': trial.suggest_float('min_child_weight', 0.001, 10.0, log=True),
-            'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 0.0, 10.0, log=True),
-            
-            # Sampling parameters
-            'subsample': trial.suggest_float('subsample', 0.5, 1.0),
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
-            'subsample_freq': trial.suggest_int('subsample_freq', 0, 10),
-            
-            # Early stopping
-            'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 30, 100),
-            
-            # Class balance
-            'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.5, 5.0),
-            
-            # Misc
-            'verbose': -1,
-            'seed': SEED + trial.number,  # Vary seed for each trial
-        }
-        
-        # Create and train model
-        model, threshold, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, params
+        study = optuna.create_study(
+            study_name='lightgbm_optimization',
+            direction='maximize',
+            sampler=optuna.samplers.TPESampler(   # Different seed for better randomization
+                n_startup_trials=300,     # Reduced from 50 - more efficient
+                prior_weight=0.3
+            )
         )
         
-        # Log metrics
-        precision = metrics.get('precision', 0)
-        recall = metrics.get('recall', 0)
-        f1 = metrics.get('f1', 0)
-        auc = metrics.get('auc', 0)
-        
-        trial.set_user_attr('threshold', threshold)
-        trial.set_user_attr('recall', recall)
-        trial.set_user_attr('f1', f1)
-        trial.set_user_attr('auc', auc)
-        
-        # Clean up to avoid memory leaks
-        del model
-        gc.collect()
-        
-        # Return precision score (to be maximized)
-        return precision
-        
-    except Exception as e:
-        logger.error(f"Error in objective function: {str(e)}")
-        return 0.0
+        # Optimize
+        best_score = -float('inf')  # Initialize with worst possible score
+        best_params = {}
+        top_trials = []
 
-def hypertune_mlp(experiment_name):
+        def callback(study, trial):
+            nonlocal best_score
+            nonlocal best_params
+            nonlocal top_trials
+            logger.info(f"Current best score: {best_score:.4f}")
+            if trial.value > best_score:
+                best_score = trial.value
+                best_params = trial.params
+                logger.info(f"New best score found in trial {trial.number}: {best_score:.4f}")
+            # Create a record for the current trial
+            current_run = (trial.value, trial.params, trial.number)
+            
+            # Append the trial's record to the list
+            top_trials.append(current_run)
+            
+            # Sort the list in descending order by score (trial.value)
+            top_trials.sort(key=lambda x: x[0], reverse=True)
+            
+            # Keep only the top 10 best trials
+            top_trials = top_trials[:10]
+            # Log top trials as a table every 10 trials
+            if trial.number % 9 == 0:
+                table_header = "| Rank | Trial # | Score | Parameters |"
+                table_separator = "|------|---------|-------|------------|"
+                table_rows = [f"| {i+1} | {trial[2]} | {trial[0]:.4f} | {trial[1]} |" for i, trial in enumerate(top_trials)]
+                
+                logger.info("Top 10 trials:")
+                logger.info(table_header)
+                logger.info(table_separator)
+                for row in table_rows:
+                    logger.info(row)
+            return best_score
+        
+        study.optimize(
+            objective, 
+            n_trials=n_trials, 
+            timeout=10000,  # 10000 seconds as in notebook
+            show_progress_bar=True,
+            callbacks=[callback]
+        )
+        
+        best_params.update(base_params)
+        
+        logger.info(f"Best trial value: {best_score}")
+        logger.info(f"Best parameters found: {best_params}")
+        return best_params
+            
+    except Exception as e:
+        logger.error(f"Error in hyperparameter optimization: {str(e)}")
+        raise
+
+def hypertune_lightgbm(experiment_name: str):
     """
-    Run hyperparameter optimization using Optuna.
+    Main training function with MLflow tracking.
+    Updated name from hypertune_mlp to hypertune_lightgbm to match notebook.
     
     Args:
         experiment_name (str): Experiment name for MLflow tracking
         
     Returns:
-        tuple: (best_params, best_threshold, best_precision, best_recall, best_f1, best_auc)
+        tuple: (best_params, best_metrics)
     """
     try:
-        # Set up MLflow tracking
-        mlflow.set_experiment(experiment_name)
-        
-        # Create Optuna study
-        study = optuna.create_study(
-            study_name=f"lightgbm_optimization_{datetime.now().strftime('%Y%m%d_%H%M')}",
-            direction="maximize",
-            sampler=optuna.samplers.TPESampler(seed=SEED),
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=30)
-        )
-        
-        # Define callback to log trials to MLflow
-        def callback(study, trial):
-            if trial.state == optuna.trial.TrialState.COMPLETE:
-                with mlflow.start_run(run_name=f"trial_{trial.number}"):
-                    # Log parameters
-                    params = trial.params.copy()
-                    for param_name, param_value in params.items():
-                        mlflow.log_param(param_name, param_value)
-                    
-                    # Log metrics
-                    mlflow.log_metric("precision", trial.value)
-                    mlflow.log_metric("recall", trial.user_attrs.get('recall', 0))
-                    mlflow.log_metric("f1", trial.user_attrs.get('f1', 0))
-                    mlflow.log_metric("auc", trial.user_attrs.get('auc', 0))
-                    mlflow.log_metric("threshold", trial.user_attrs.get('threshold', 0.5))
-                    
-        # Run optimization
-        logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
-        study.optimize(objective, n_trials=n_trials, callbacks=[callback], n_jobs=1)
-        
-        # Get best parameters
-        best_params = study.best_params
-        best_precision = study.best_value
-        best_threshold = study.best_trial.user_attrs.get('threshold', 0.5)
-        best_recall = study.best_trial.user_attrs.get('recall', 0)
-        best_f1 = study.best_trial.user_attrs.get('f1', 0)
-        best_auc = study.best_trial.user_attrs.get('auc', 0)
-        
-        # Log results
-        logger.info("Best hyperparameters:")
-        for param_name, param_value in best_params.items():
-            logger.info(f"  {param_name}: {param_value}")
-        logger.info(f"Best precision: {best_precision:.3f}")
-        logger.info(f"Best recall: {best_recall:.3f}")
-        logger.info(f"Best F1: {best_f1:.3f}")
-        logger.info(f"Best AUC: {best_auc:.3f}")
-        logger.info(f"Best threshold: {best_threshold:.3f}")
-        
-        return best_params, best_threshold, best_precision, best_recall, best_f1, best_auc
-        
+        # Start MLflow run
+        with mlflow.start_run(run_name=f"lightgbm_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+            # Set tags
+            mlflow.set_tags({
+                "model_type": "lightgbm_base",
+                "training_mode": "global",
+                "cpu_only": True
+            })
+            
+            # Load hyperparameter space
+            hyperparameter_space = load_hyperparameter_space()
+            
+            # Run hyperparameter optimization
+            logger.info("Starting hyperparameter optimization")
+            best_params = optimize_hyperparameters(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                hyperparameter_space=hyperparameter_space
+            )
+            
+            # Train final model with best parameters
+            logger.info("Training final model with best parameters")
+            model, metrics = train_model(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                best_params
+            )
+            # Log best parameters to MLflow
+            logger.info("Logging best parameters to MLflow")
+            for param_name, param_value in best_params.items():
+                mlflow.log_param(param_name, param_value)
+            
+            # Log final metrics
+            mlflow.log_metrics({
+                "precision": metrics.get('precision', 0.0),
+                "recall": metrics.get('recall', 0.0),
+                "f1": metrics.get('f1', 0.0),
+                "auc": metrics.get('auc', 0.0),
+                "threshold": metrics.get('threshold', 0.5)
+            })
+            
+            # Create input example with a sample from evaluation data
+            # Handle integer columns by converting them to float64 to properly manage missing values
+            input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, 'iloc') else X_eval[:5].copy()
+            
+            # Identify and convert integer columns to float64 to prevent schema enforcement errors
+            if hasattr(input_example, 'dtypes'):
+                for col in input_example.columns:
+                    if X_eval[col].dtype.kind == 'i':
+                        logger.info(f"Converting integer column '{col}' to float64 to handle potential missing values")
+                        X_eval[col] = X_eval[col].astype('float64')
+            
+            # Infer signature with proper handling for integer columns with potential missing values
+            signature = mlflow.models.infer_signature(
+                input_example,
+                model.predict(input_example)
+            )
+            mlflow.lightgbm.log_model(
+                model,
+                "model",
+                registered_model_name=f"lightgbm_{datetime.now().strftime('%Y%m%d_%H%M')}",
+                signature=signature
+            )
+            
+            # Save model locally
+            model_path = Path(f"models/StackedEnsemble/base/tree_based/lightgbm_model_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl")
+            save_model(model, model_path, metrics.get('threshold', 0.5))
+            
+            return best_params, metrics
+            
     except Exception as e:
-        logger.error(f"Error in hyperparameter optimization: {str(e)}")
-        return load_hyperparameter_space(), 0.5, 0, 0, 0, 0
+        logger.error(f"Error in hyperparameter tuning: {str(e)}")
+        return None, None
 
-def log_to_mlflow(model, precision, recall, params, experiment_name):
+def log_to_mlflow(model, metrics, params, experiment_name):
     """
     Log trained model, metrics, and parameters to MLflow.
     
     Args:
         model: Trained LightGBM model
-        precision (float): Precision score
-        recall (float): Recall score
-        params (dict): Model parameters
-        experiment_name (str): Experiment name
+        metrics: Model evaluation metrics
+        params: Model parameters
+        experiment_name: Experiment name
         
     Returns:
         str: Run ID
@@ -574,9 +596,8 @@ def log_to_mlflow(model, precision, recall, params, experiment_name):
                 mlflow.log_param(param_name, param_value)
             
             # Log metrics
-            mlflow.log_metric("precision", precision)
-            mlflow.log_metric("recall", recall)
-            mlflow.log_metric("f1", 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0)
+            for metric_name, metric_value in metrics.items():
+                mlflow.log_metric(metric_name, metric_value)
             
             # Log model
             model_info = mlflow.lightgbm.log_model(
@@ -585,124 +606,100 @@ def log_to_mlflow(model, precision, recall, params, experiment_name):
                 registered_model_name=f"lightgbm_{datetime.now().strftime('%Y%m%d_%H%M')}"
             )
             
-            # Log feature importance
-            if hasattr(model, 'feature_importances_'):
-                try:
-                    from data.data_loader import get_feature_names
-                    feature_names = get_feature_names()
-                    importance_df = pd.DataFrame({
-                        'Feature': feature_names if len(feature_names) == len(model.feature_importances_) 
-                                  else [f"feature_{i}" for i in range(len(model.feature_importances_))],
-                        'Importance': model.feature_importances_
-                    }).sort_values('Importance', ascending=False)
-                    
-                    # Save to CSV and log as artifact
-                    importance_path = "feature_importance.csv"
-                    importance_df.to_csv(importance_path, index=False)
-                    mlflow.log_artifact(importance_path)
-                    os.remove(importance_path)
-                except Exception as e:
-                    logger.warning(f"Error logging feature importance: {str(e)}")
+            # Log feature importance using the shared utility
+            importance_df = calculate_feature_importance(
+                model, 
+                feature_names=X_train.columns if hasattr(X_train, 'columns') else None
+            )
+            
+            if not importance_df.empty:
+                # Save to CSV and log as artifact
+                importance_path = "feature_importance.csv"
+                importance_df.to_csv(importance_path, index=False)
+                mlflow.log_artifact(importance_path)
+                os.remove(importance_path)
             
             logger.info(f"Model logged to MLflow: {model_info.model_uri}")
+            logger.info(f"Run ID: {run.info.run_id}")
             return run.info.run_id
             
     except Exception as e:
         logger.error(f"Error logging to MLflow: {str(e)}")
         return None
 
-def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval, logger):
+def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
-    Train a LightGBM model with focus on precision target and multi-seed approach.
+    Train LightGBM model with focus on precision target.
     
     Args:
         X_train: Training features
         y_train: Training labels
-        X_test: Validation features
-        y_test: Validation labels
+        X_test: Testing features
+        y_test: Testing labels
         X_eval: Evaluation features
         y_eval: Evaluation labels
-        logger: Logger instance
         
     Returns:
-        tuple: (best_model, best_threshold, best_metrics)
+        tuple: (best_model, best_metrics)
     """
     try:
-        # Get best parameters from hypertuning or use defaults
-        try:
-            best_params, _, _, _, _, _ = hypertune_mlp(experiment_name)
-        except Exception as e:
-            logger.warning(f"Error during hypertuning: {str(e)}. Using default parameters.")
-            best_params = load_hyperparameter_space()
+        # Run hyperparameter tuning
+        logger.info("Running hyperparameter tuning")
+        best_params, _ = hypertune_lightgbm(experiment_name)
         
-        # Add fixed parameters
-        best_params['objective'] = 'binary'
-        best_params['metric'] = 'auc'
-        best_params['device_type'] = DEVICE
-        best_params['verbose'] = -1
+        if not best_params:
+            logger.warning("Hyperparameter tuning failed. Using default parameters.")
+            best_params = base_params.copy()
+            best_params.update({
+                'learning_rate': 0.05,
+                'num_leaves': 31,
+                'max_depth': 6,
+                'min_child_samples': 20,
+                'feature_fraction': 0.8,
+                'bagging_fraction': 0.8,
+                'bagging_freq': 0,
+                'reg_alpha': 0.1,
+                'reg_lambda': 0.1,
+                'min_split_gain': 0.01
+            })
         
-        # Try different random seeds
-        best_precision = 0
-        best_model = None
-        best_threshold = 0.5
-        best_metrics = {}
-        
-        logger.info("Training with multiple seeds for stability")
-        for seed in range(42, 52):  # Try 10 different seeds
-            logger.info(f"Training with seed {seed}")
-            
-            # Set seed in parameters
-            current_params = best_params.copy()
-            current_params['seed'] = seed
-            
-            # Train model
-            model, threshold, metrics = train_model(
-                X_train, y_train, X_test, y_test, X_eval, y_eval, current_params
-            )
-            
-            # Check if better precision while maintaining recall target
-            precision = metrics.get('precision', 0)
-            recall = metrics.get('recall', 0)
-            
-            if (precision > best_precision and recall >= min_recall) or (best_model is None):
-                best_precision = precision
-                best_model = model
-                best_threshold = threshold
-                best_metrics = metrics
-                logger.info(f"New best model with seed {seed}: precision={precision:.3f}, recall={recall:.3f}")
-            
-            # Clean up
-            if model != best_model:
-                del model
-                gc.collect()
-        
-        # Final evaluation
-        logger.info(f"Best model precision: {best_precision:.3f}")
-        logger.info(f"Best model threshold: {best_threshold:.3f}")
+        # Train final model with best parameters
+        logger.info("Training final model with best parameters")
+        model, metrics = train_model(
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, y_eval,
+            best_params
+        )
         
         # Log to MLflow
-        log_to_mlflow(best_model, best_precision, best_metrics.get('recall', 0), best_params, experiment_name)
+        log_to_mlflow(model, metrics, best_params, experiment_name)
         
-        # Save model
+        # Save model locally
         model_path = f"models/StackedEnsemble/base/tree_based/lightgbm_model_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl"
-        save_model(best_model, model_path, best_threshold, best_metrics, best_params)
+        save_model(model, model_path, metrics.get('threshold', 0.5))
         
-        return best_model, best_threshold, best_metrics
+        return model, metrics
         
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
-        return None, 0.5, {}
+        return None, None
 
 def main():
     """
-    Main execution function for training and hypertuning.
+    Main execution function.
     """
     try:
-        logger.info("Starting LightGBM model training and hypertuning")
+        logger.info("Starting LightGBM model training")
         
         # Import data at runtime to avoid global scope issues
-        from data.data_loader import load_data
-        X_train, y_train, X_test, y_test, X_eval, y_eval = load_data()
+        from models.StackedEnsemble.shared.data_loader import DataLoader
+        
+        global X_train, y_train, X_test, y_test, X_eval, y_eval
+        
+        # Load data
+        dataloader = DataLoader()
+        X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
         
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
@@ -710,23 +707,17 @@ def main():
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
         
-        # Train with precision target
-        best_model, best_threshold, best_metrics = train_with_precision_target(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, logger
-        )
+        # Hyperparameter optimization - run 3 times and select best
+        logger.info("Starting hyperparameter optimization with 3 runs")
+        best_overall_params = None
+        best_overall_metrics = None
         
-        # Final evaluation
-        if best_model is not None:
-            logger.info("Final model metrics:")
-            logger.info(f"  Precision: {best_metrics.get('precision', 0):.3f}")
-            logger.info(f"  Recall: {best_metrics.get('recall', 0):.3f}")
-            logger.info(f"  F1: {best_metrics.get('f1', 0):.3f}")
-            logger.info(f"  AUC: {best_metrics.get('auc', 0):.3f}")
-            logger.info(f"  Threshold: {best_threshold:.3f}")
-        else:
-            logger.error("Failed to train a valid model")
+        # for run in range(1, 4):
+        logger.info(f"Starting hyperparameter optimization run")
+        current_params, current_metrics = hypertune_lightgbm(experiment_name)
         
-        logger.info("LightGBM training completed")
+        logger.info(f"Run completed with parameters: {current_params}")
+        logger.info(f"Run metrics: {current_metrics}")
         
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

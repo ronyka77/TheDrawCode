@@ -1259,10 +1259,8 @@ def import_training_data_ensemble():
     else:
         data = pd.read_excel(data_path)
         logger.info(f"Loaded training data from Excel: {data_path}")
-
         # Create target variable
         data['is_draw'] = (data['match_outcome'] == 2).astype(int)
-
         # Select features and target
         columns_to_drop = [
             'match_outcome',
@@ -1278,6 +1276,8 @@ def import_training_data_ensemble():
             'away_win', 
             'Date',
             'date',
+            'referee',
+            'league_name',
             'referee_draw_rate', 
             'referee_draws', 
             'referee_match_count',
@@ -1288,7 +1288,6 @@ def import_training_data_ensemble():
             'mid_season_factor' 
         ]
         data = data.drop(columns=columns_to_drop, errors='ignore')
-
         # Convert all numeric-like columns (excluding problematic_cols that have
         # already been handled)
         data = convert_numeric_columns(
@@ -1298,7 +1297,6 @@ def import_training_data_ensemble():
             fill_value=0.0,
             verbose=True
         )
-
         # Define integer columns that should remain as int64
         int_columns = [
             'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
@@ -1562,11 +1560,3 @@ if __name__ == "__main__":
     # logger.info("Training data updated successfully")
     update_api_data_for_draws()
     logger.info("Prediction data updated successfully")
-    # try:
-    #     run_id = "bc2a97417edb42d48967315de091d12d"
-    #     selected_features = get_selected_columns_from_mlflow_run(run_id)
-    #     logger.info(f"Selected features for run {run_id}:")
-    #     for feature in selected_features:
-    #         logger.info(f"- {feature}")
-    # except Exception as e:
-    #     logger.info(f"Error retrieving features: {str(e)}")

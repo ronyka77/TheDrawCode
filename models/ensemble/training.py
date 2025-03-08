@@ -7,6 +7,7 @@ Functions for training the ensemble models.
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
+from sklearn.linear_model import SGDClassifier
 from sklearn.neural_network import MLPClassifier
 from xgboost import XGBClassifier
 from typing import Dict, List, Tuple, Optional, Union
@@ -16,6 +17,10 @@ import time
 from utils.logger import ExperimentLogger
 logger = ExperimentLogger(experiment_name="ensemble_model_training",
                             log_dir="./logs/ensemble_model_training")
+
+# Import the new Bayesian meta learner
+from models.ensemble.bayesian_meta_learner import BayesianMetaLearner, train_with_optimal_parameters
+from models.ensemble.ResNet import ResNetMetaLearner
 
 def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
     """
@@ -101,10 +106,32 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
         
         logger.info("MLPClassifier meta-learner initialized with adaptive learning rate")
         
+    elif meta_learner_type.lower() == 'sgd':
+        meta_learner = SGDClassifier(
+            loss='log_loss',
+            penalty='elasticnet',
+            alpha=0.0001,
+            l1_ratio=0.5,
+            class_weight=None,
+            max_iter=1000,
+            early_stopping=True,
+            random_state=42
+        )
+        
+        logger.info("SGDClassifier meta-learner initialized with log_loss loss function")
+        
+    elif meta_learner_type.lower() == 'resnet':
+        meta_learner = ResNetMetaLearner()
+        logger.info("ResNetMetaLearner meta-learner initialized")
+    
+    elif meta_learner_type.lower() == 'bayesian':
+        meta_learner = BayesianMetaLearner()
+        logger.info("BayesianMetaLearner meta-learner initialized")
+
     else:
         logger.error(f"Unknown meta_learner_type: {meta_learner_type}")
         raise ValueError(f"Unknown meta_learner_type: {meta_learner_type}. "
-                        f"Supported types: 'xgb', 'logistic', 'logistic_cv', 'mlp'")
+                        f"Supported types: 'xgb', 'logistic', 'logistic_cv', 'mlp', 'resnet', 'bayesian'")
     
     # Log meta-learner parameters to MLflow
     meta_learner_params = meta_learner.get_params()
@@ -249,7 +276,8 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
 
 def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np.ndarray,
                         eval_meta_features: Optional[np.ndarray] = None, 
-                        eval_meta_targets: Optional[np.ndarray] = None) -> object:
+                        eval_meta_targets: Optional[np.ndarray] = None,
+                        meta_learner_type: str = 'xgb') -> object:
     """
     Train the meta-learner on meta-features from base models.
     
@@ -259,6 +287,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
         meta_targets: Target values for training
         eval_meta_features: Evaluation meta-features for early stopping
         eval_meta_targets: Evaluation target values for early stopping
+        meta_learner_type: Type of meta-learner model
         
     Returns:
         Trained meta-learner model
@@ -267,8 +296,34 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
     logger.info("Training meta-learner...")
     
     try:
+        if meta_learner_type == 'resnet':
+            # Special handling for ResNet meta-learner
+            meta_learner.fit(
+                meta_features, meta_targets,
+                X_val=eval_meta_features, 
+                y_val=eval_meta_targets,
+                target_precision=target_precision,
+                min_recall=min_recall
+            )
+            # ResNet has its own threshold tuning internally
+            best_threshold = meta_learner.threshold
+            
+            # Get predictions using the tuned threshold
+            y_proba = meta_learner.predict_proba(eval_meta_features)[:, 1]
+            y_pred = (y_proba >= best_threshold).astype(int)
+            
+            # Calculate metrics with the model's threshold
+            precision, recall = meta_learner._calculate_precision_recall(
+                eval_meta_targets, y_pred
+            )
+            metrics = {'precision': precision, 'recall': recall}
+        
+        elif meta_learner_type == 'bayesian':
+            # Special handling for Bayesian meta-learner
+            meta_learner.train(meta_features, meta_targets, eval_meta_features, eval_meta_targets)
+        
         # For models that support early stopping (XGBoost)
-        if hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping'):
+        elif hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping'):
             if eval_meta_features is not None and eval_meta_targets is not None:
                 # Ensure both evaluation features and targets are provided
                 meta_learner.fit(
@@ -286,7 +341,26 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
         
         # Log meta-learner performance metrics to MLflow
         try:
-            if hasattr(meta_learner, 'evals_result'):
+            if meta_learner_type == 'resnet':
+                # ResNet has its own threshold tuning internally
+                best_threshold = meta_learner.threshold
+                
+                # Get predictions using the tuned threshold
+                y_proba = meta_learner.predict_proba(eval_meta_features)[:, 1]
+                y_pred = (y_proba >= best_threshold).astype(int)
+                
+                # Calculate metrics with the model's threshold
+                precision, recall = meta_learner._calculate_precision_recall(
+                    eval_meta_targets, y_pred
+                )
+                metrics = {'precision': precision, 'recall': recall}
+                mlflow.log_metrics(metrics)
+            elif meta_learner_type == 'bayesian':
+                # Log Bayesian meta-learner metrics
+                if hasattr(meta_learner, 'metrics_') and meta_learner.metrics_:
+                    for metric_name, value in meta_learner.metrics_.items():
+                        mlflow.log_metric(f"meta_learner_{metric_name}", value)
+            elif hasattr(meta_learner, 'evals_result'):
                 # XGBoost-style metrics
                 evals_result = meta_learner.evals_result()
                 for metric_name, values in evals_result.get('validation_0', {}).items():
@@ -309,7 +383,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
 def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                             eval_meta_features: Optional[np.ndarray] = None, 
                             eval_meta_targets: Optional[np.ndarray] = None,
-                            meta_learner_type='xgb', n_trials=200, timeout=3600, 
+                            meta_learner_type='xgb', n_trials=300, timeout=3600, 
                             target_precision=0.5, min_recall=0.25):
     """
     Hypertune meta-learner using Optuna and optimize threshold for precision/recall balance.
@@ -319,7 +393,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         meta_targets: Target values for training
         eval_meta_features: Evaluation meta-features for early stopping
         eval_meta_targets: Evaluation target values for early stopping
-        meta_learner_type: Type of meta-learner ('xgb', 'logistic', 'mlp')
+        meta_learner_type: Type of meta-learner ('xgb', 'logistic', 'mlp', 'bayesian')
         n_trials: Number of Optuna trials
         timeout: Maximum time for optimization in seconds
         target_precision: Target precision for threshold optimization
@@ -374,12 +448,17 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 'random_state': 19
             }
             params = {
-                'C': trial.suggest_float('C', 0.01, 10.0, log=True),
+                'C': trial.suggest_float('C', 0.001, 10.0, log=True),
                 'penalty': trial.suggest_categorical('penalty', ['l1', 'l2', 'elasticnet']),
-                'solver': 'saga',  # Compatible with all penalties
+                'solver': trial.suggest_categorical('solver', ['liblinear', 'saga']),
                 'max_iter': 1000,
                 'random_state': 19
             }
+            
+            if params['penalty'] == 'elasticnet':
+                params['l1_ratio'] = trial.suggest_float('l1_ratio', 0.0, 1.0)
+                
+            params['class_weight'] = trial.suggest_categorical('class_weight', [None, 'balanced'])
             
             if params['penalty'] == 'elasticnet':
                 params['l1_ratio'] = trial.suggest_float('l1_ratio', 0.0, 1.0)
@@ -404,12 +483,102 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             
             meta_learner = MLPClassifier(**params)
         
+        elif meta_learner_type == 'sgd':
+            from sklearn.linear_model import SGDClassifier
+            base_params = {
+                'random_state': 19,
+                'validation_fraction': 0.2,
+                'n_jobs': -1
+            }
+            params = {
+                'loss': trial.suggest_categorical('loss', ['log_loss', 'modified_huber']),
+                'penalty': trial.suggest_categorical('penalty', ['l1', 'l2', 'elasticnet']),
+                'alpha': trial.suggest_float('alpha', 1e-6, 1.0, log=True),
+                # 'class_weight': trial.suggest_categorical('class_weight', [None, 'balanced', 5, 10, 15]),
+                'learning_rate': trial.suggest_categorical('learning_rate', ['optimal', 'constant', 'invscaling', 'adaptive']),
+                'eta0': trial.suggest_float('eta0', 0.001, 0.5, log=True),
+                'max_iter': trial.suggest_int('max_iter', 500, 5000, step=500),
+                'tol': trial.suggest_float('tol', 1e-5, 1e-2, log=True),
+                'early_stopping': True,
+                'validation_fraction': trial.suggest_float('validation_fraction', 0.1, 0.3),
+                'n_iter_no_change': trial.suggest_int('n_iter_no_change', 5, 20),
+                'average': trial.suggest_categorical('average', [True, False, 10, 100]),
+            }
+            
+            if params['penalty'] == 'elasticnet':
+                params['l1_ratio'] = trial.suggest_float('l1_ratio', 0.0, 1.0, step=0.1)
+                
+            params.update(base_params)
+            meta_learner = SGDClassifier(**params)
+        
+        elif meta_learner_type == 'resnet':
+            base_params = {
+                'tree_method': 'hist'  # Enforce CPU-only training
+            }
+            params = {
+                'hidden_dim': trial.suggest_int('hidden_dim', 16, 128),
+                'num_blocks': trial.suggest_int('num_blocks', 1, 4),
+                'lr': trial.suggest_float('lr', 1e-4, 1e-2, log=True),
+                'batch_size': trial.suggest_categorical('batch_size', [32, 64, 128, 256]),
+                'epochs': trial.suggest_int('epochs', 50, 300),
+                'patience': trial.suggest_int('patience', 5, 30)
+            }
+            params.update(base_params)
+            meta_learner = ResNetMetaLearner(**params)
+            
+        elif meta_learner_type == 'bayesian':
+            # Bayesian meta-learner hyperparameters
+            params = {
+                'alpha': trial.suggest_float('alpha', 1e-6, 1e-3, log=True),  # Reduced range based on best alpha of ~2.18e-5
+                'n_iter': trial.suggest_int('n_iter', 1000, 5000, step=500),  # Increased upper bound based on max_iter of 3500
+                'tol': trial.suggest_float('tol', 1e-6, 1e-4, log=True),  # Narrowed range around best tol of ~2.79e-5
+                'fit_intercept': trial.suggest_categorical('fit_intercept', [True, False]),
+                'normalize': trial.suggest_categorical('normalize', [True, False]),
+                'class_weight': trial.suggest_categorical('class_weight', [None, 'balanced']),
+                'learning_rate': trial.suggest_categorical('learning_rate', ['adaptive', 'constant', 'optimal']),  # Added with 'adaptive' first
+                'eta0': trial.suggest_float('eta0', 0.01, 0.1, log=True),  # Added based on best eta0 of ~0.029
+            }
+            meta_learner = BayesianMetaLearner(**params)
         else:
             raise ValueError(f"Unsupported meta-learner type: {meta_learner_type}")
         
         # Train meta-learner
         try:
-            if hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping'):
+            if meta_learner_type == 'resnet':
+                # Special handling for ResNet meta-learner
+                meta_learner.fit(
+                    meta_features, meta_targets,
+                    X_val=eval_meta_features, 
+                    y_val=eval_meta_targets,
+                    target_precision=target_precision,
+                    min_recall=min_recall
+                )
+                # ResNet has its own threshold tuning internally
+                best_threshold = meta_learner.threshold
+                
+                # Get predictions using the tuned threshold
+                y_proba = meta_learner.predict_proba(eval_meta_features)[:, 1]
+                y_pred = (y_proba >= best_threshold).astype(int)
+                
+                # Calculate metrics with the model's threshold
+                precision, recall = meta_learner._calculate_precision_recall(
+                    eval_meta_targets, y_pred
+                )
+                metrics = {'precision': precision, 'recall': recall}
+                
+            elif meta_learner_type == 'bayesian':
+                # Special handling for Bayesian meta-learner
+                meta_learner.train(meta_features, meta_targets, eval_meta_features, eval_meta_targets)
+                
+                # Get predictions on validation set
+                y_proba = meta_learner.predict_proba(eval_meta_features)
+                
+                # Find optimal threshold
+                best_threshold, metrics = tune_threshold_for_precision(
+                    y_proba, eval_meta_targets, target_precision, min_recall
+                )
+                
+            elif hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping') and meta_learner_type != 'sgd':
                 meta_learner.fit(
                     meta_features, meta_targets,
                     eval_set=[(eval_meta_features, eval_meta_targets)],
@@ -418,24 +587,25 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             else:
                 meta_learner.fit(meta_features, meta_targets)
                 
-            # Get predictions on validation set
-            if hasattr(meta_learner, 'predict_proba'):
-                y_proba = meta_learner.predict_proba(eval_meta_features)[:, 1]
-            else:
-                y_proba = meta_learner.predict(eval_meta_features)
-                
-            # Find optimal threshold
-            best_threshold, metrics = tune_threshold_for_precision(
-                y_proba, eval_meta_targets, target_precision, min_recall
-            )
+            # Get predictions on validation set (for non-ResNet and non-Bayesian models)
+            if meta_learner_type not in ['resnet', 'bayesian']:
+                if hasattr(meta_learner, 'predict_proba'):
+                    y_proba = meta_learner.predict_proba(eval_meta_features)[:, 1]
+                else:
+                    y_proba = meta_learner.predict(eval_meta_features)
+                    
+                # Find optimal threshold
+                best_threshold, metrics = tune_threshold_for_precision(
+                    y_proba, eval_meta_targets, target_precision, min_recall
+                )
             
             # If we couldn't find a threshold meeting criteria, penalize the score
             if metrics['recall'] < min_recall:
                 return -1.0
             
-            # Log trial results
-            logger.info(f"Trial {trial.number}: precision={metrics['precision']:.4f}, recall={metrics['recall']:.4f}, "
-                        f"threshold={best_threshold:.4f}")
+            # # Log trial results
+            # logger.info(f"Trial {trial.number}: precision={metrics['precision']:.4f}, recall={metrics['recall']:.4f}, "
+            #             f"threshold={best_threshold:.4f}")
             
             return metrics['precision']
             
@@ -451,18 +621,13 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                     prior_weight=0.4,
                     seed=int(time.time())  # Dynamic seed
                 )
-        # pruner = optuna.pruners.MedianPruner(
-        #         n_startup_trials=50,  # Collect this many trials before pruning
-        #         n_warmup_steps=1,     # No pruning before this many steps (CV folds) within each trial
-        #         interval_steps=1      # Check pruning condition at every step
-        #     )
     )
     
     study.optimize(objective, n_trials=n_trials, timeout=timeout, show_progress_bar=True)
     
     # Get best parameters
     best_params = study.best_params
-    logger.info(f"Best parameters: {best_params}")
+    logger.info(f"Best parameters of hypertuning: {best_params}")
     
     # Define base parameters outside objective function scope
     if meta_learner_type == 'xgb':
@@ -477,7 +642,6 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     elif meta_learner_type == 'logistic':
         base_params = {
             'solver': 'saga',  # Compatible with all penalties
-            'max_iter': 1000,
             'random_state': 19
         }
     elif meta_learner_type == 'mlp':
@@ -486,6 +650,16 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             'early_stopping': True,
             'random_state': 19
         }
+    elif meta_learner_type == 'sgd':
+        base_params = {
+            'random_state': 19,
+            'early_stopping': True,
+            'validation_fraction': 0.2,
+            'n_jobs': -1
+        }
+    elif meta_learner_type == 'bayesian':
+        # No base params needed for Bayesian meta-learner
+        base_params = {}
     else:
         raise ValueError(f"Unsupported meta-learner type: {meta_learner_type}")
     
@@ -504,7 +678,35 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         if 'hidden_units' in best_params:
             best_params['hidden_layer_sizes'] = (best_params.pop('hidden_units'),)
         best_meta_learner = MLPClassifier(best_params)
+    elif meta_learner_type == 'sgd':
+        from sklearn.linear_model import SGDClassifier
+        best_params.update(**base_params)
+        best_meta_learner = SGDClassifier(**best_params)
+    elif meta_learner_type == 'bayesian':
+        logger.info("Training Bayesian meta-learner with optimal parameters")
+        # Use the Bayesian meta-learner with optimal parameters
+        best_meta_learner = BayesianMetaLearner(**best_params)
+        # Special handling for Bayesian meta-learner
+        best_meta_learner.train(meta_features, meta_targets, eval_meta_features, eval_meta_targets)
+        
+        # Get predictions on validation set
+        y_proba = best_meta_learner.predict_proba(eval_meta_features)
+        
+        # Find optimal threshold
+        best_threshold, metrics = tune_threshold_for_precision(
+            y_proba, eval_meta_targets, target_precision, min_recall
+        )
+        
+        # Log final results for Bayesian meta-learner
+        logger.info(f"Final meta-learner: {meta_learner_type}")
+        logger.info(f"Final threshold: {best_threshold:.4f}")
+        logger.info(f"Final precision: {metrics['precision']:.4f}")
+        logger.info(f"Final recall: {metrics['recall']:.4f}")
+        logger.info("Bayesian meta-learner trained with optimal parameters")
+        return best_meta_learner
     
+    # This log message applies to all non-Bayesian meta-learners
+    logger.info(f"Training final model with best parameters(Not Bayesian): {best_params}")
     # Train final model
     if hasattr(best_meta_learner, 'early_stopping_rounds') or hasattr(best_meta_learner, 'early_stopping'):
         best_meta_learner.fit(
@@ -542,3 +744,5 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     })
     
     return best_meta_learner
+
+
