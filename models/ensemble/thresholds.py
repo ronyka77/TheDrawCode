@@ -229,9 +229,9 @@ def tune_threshold_for_precision(y_prob: np.ndarray, y_true: pd.Series,
         logger.info(f"  Recall: {optimal_recall:.4f}")
         logger.info(f"  F1 Score: {optimal_f1:.4f}")
         metrics = {
-            'precision': optimal_precision,
-            'recall': optimal_recall,
-            'f1': optimal_f1
+            'precision': optimal_precision if optimal_precision is not None else 0,
+            'recall': optimal_recall if optimal_recall is not None else 0,
+            'f1': optimal_f1 if optimal_f1 is not None else 0
         }
     # Log to MLflow
     mlflow.log_metrics({

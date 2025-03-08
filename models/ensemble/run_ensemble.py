@@ -42,8 +42,8 @@ from models.ensemble.ensemble_model import EnsembleModel
 from models.ensemble.data_utils import balance_and_clean_dataset
 
 
-def run_ensemble(extra_base_model_type: str = 'mlp',
-                meta_learner_type: str = 'bayesian',
+def run_ensemble(extra_base_model_type: str = 'random_forest',
+                meta_learner_type: str = 'xgb',
                 calibrate: bool = True,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
@@ -67,7 +67,6 @@ def run_ensemble(extra_base_model_type: str = 'mlp',
     
     # Set up MLflow tracking
     mlruns_dir = setup_mlflow_tracking(experiment_name)
-
     try:
         # Start MLflow run
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -91,8 +90,6 @@ def run_ensemble(extra_base_model_type: str = 'mlp',
                 logger.info("Loading data with time-based splits...")
                 from models.StackedEnsemble.shared.data_loader import DataLoader
                 X_train, y_train, X_test, y_test, X_val, y_val = DataLoader().load_data()
-                # X_train, y_train = balance_and_clean_dataset(X_train, y_train)
-                # X_test, y_test = balance_and_clean_dataset(X_test, y_test)
             except Exception as e:
                 logger.error(f"Error loading time-based data: {str(e)}")
                 logger.info("Falling back to standard data loading...")

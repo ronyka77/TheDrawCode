@@ -10,12 +10,13 @@ from datetime import datetime
 
 logger = ExperimentLogger(experiment_name="soccer_prediction", log_dir="logs/soccer_prediction")
 
+
+
 class BayesianMetaLearner:
     """
     Bayesian Logistic Regression implementation as meta learner for ensemble models.
     Uses PyMC for Bayesian inference and provides hyperparameter tuning capabilities.
     """
-    
     def __init__(self, n_samples=1000, tune=1000, target_accept=0.8, prior_scale=3.0, class_weight=None, **kwargs):
         """
         Initialize the Bayesian Meta Learner
@@ -87,20 +88,46 @@ class BayesianMetaLearner:
         self.trace = trace
         
         # Evaluate if validation data is provided
-        if X_val is not None and y_val is not None:
-            self.evaluate(X_val, y_val)
+        # if X_val is not None and y_val is not None:
+        #     self.evaluate(X_val, y_val)
         
         return self
-    
+
     def predict_proba(self, X):
         """
-        Make probabilistic predictions with the Bayesian model
+        Make probabilistic predictions returning the positive class probability.
         
         Args:
-            X: Features to predict on
+            X: Features to predict on.
         
         Returns:
-            Predicted probabilities
+            Predicted probabilities for class 1 as a 1D numpy array.
+        """
+        if self.model is None or self.trace is None:
+            raise ValueError("Model has not been trained yet")
+        
+        with self.model:
+            weights_posterior = self.trace.posterior.weights.values
+            intercept_posterior = self.trace.posterior.intercept.values
+            # Compute the posterior means across chains and samples.
+            weights_mean = weights_posterior.mean(axis=(0, 1))
+            intercept_mean = intercept_posterior.mean(axis=(0, 1))
+            
+            # Compute the linear prediction and clip for numerical stability.
+            linear_pred = intercept_mean + np.dot(X, weights_mean)
+            linear_pred = np.clip(linear_pred, -700, 700)
+            p = 1.0 / (1.0 + np.exp(-linear_pred))
+        return p
+
+    def predict_positive_proba(self, X):
+        """
+        Make probabilistic predictions returning the probability for the positive class only.
+        
+        Args:
+            X: Features to predict on.
+        
+        Returns:
+            Predicted probabilities for class 1 as a 1D numpy array.
         """
         if self.model is None or self.trace is None:
             raise ValueError("Model has not been trained yet")
@@ -109,32 +136,31 @@ class BayesianMetaLearner:
             weights_posterior = self.trace.posterior.weights.values
             intercept_posterior = self.trace.posterior.intercept.values
             
-            # Average across chains and samples
+            # Compute posterior means regardless of dimension
             weights_mean = weights_posterior.mean(axis=(0, 1))
             intercept_mean = intercept_posterior.mean(axis=(0, 1))
             
-            # Linear combination
+            # Compute linear predictions and clip for numerical stability
             linear_pred = intercept_mean + np.dot(X, weights_mean)
-            
-            # Apply sigmoid to get probabilities
-            y_pred_proba = 1.0 / (1.0 + np.exp(-linear_pred))
-            
-        return y_pred_proba
-    
+            linear_pred = np.clip(linear_pred, -700, 700)
+            p = 1.0 / (1.0 + np.exp(-linear_pred))
+        
+        return p
+
     def predict(self, X, threshold=0.5):
         """
-        Make class predictions with the Bayesian model
+        Make class predictions using the probability for the positive class.
         
         Args:
-            X: Features to predict on
-            threshold: Classification threshold
+            X: Features to predict on.
+            threshold: Classification threshold.
         
         Returns:
-            Predicted classes (0 or 1)
+            Predicted classes (0 or 1) as a 1D numpy array.
         """
-        proba = self.predict_proba(X)
-        return (proba > threshold).astype(int)
-    
+        p = self.predict_positive_proba(X)
+        return (p > threshold).astype(int)
+
     def evaluate(self, X_val, y_val, threshold=0.5):
         """
         Evaluate the Bayesian model performance
@@ -148,6 +174,7 @@ class BayesianMetaLearner:
             Dictionary of metrics
         """
         y_pred_proba = self.predict_proba(X_val)
+        # Use only the positive class probabilities; this yields a 1D array.
         y_pred = (y_pred_proba > threshold).astype(int)
         
         # Calculate metrics
@@ -162,11 +189,11 @@ class BayesianMetaLearner:
                     f"precision={precision:.4f}, recall={recall:.4f}, f1={f1:.4f}, loss={loss:.4f}")
         
         metrics = {
-            'meta_learner_accuracy': accuracy,
-            'meta_learner_precision': precision,
-            'meta_learner_recall': recall,
-            'meta_learner_f1': f1,
-            'meta_learner_log_loss': loss
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1': f1,
+            'log_loss': loss
         }
         
         return metrics
@@ -202,7 +229,7 @@ def objective_function(trial, X_train, y_train, X_val, y_val):
         metrics = learner.evaluate(X_val, y_val)
         
         # Optimize for validation loss
-        return metrics['meta_learner_log_loss']
+        return metrics['log_loss']
     except Exception as e:
         logger.error(f"Error in Bayesian meta learner training: {str(e)}")
         return float('inf')  # Return a large value if error occurs
@@ -229,9 +256,7 @@ def optimize_hyperparameters(X_train, y_train, X_val, y_val, n_trials=20, timeou
         direction='minimize',
         sampler=TPESampler(
             consider_prior=True,
-            prior_weight=1.0,
-            precision_weight=0.7,
-            recall_weight=0.3
+            prior_weight=0.3
         )
     )
     
@@ -298,8 +323,8 @@ def optimize_threshold(self, X_val, y_val, target_precision=0.5, min_recall=0.25
     logger.info("Optimizing threshold for Bayesian meta-learner...")
     
     # Get predictions on validation set
-    y_proba = self.predict_proba(X_val)[:, 1]
-    
+    y_proba = self.predict_proba(X_val)
+    logger.info(f"y_proba: {y_proba}")
     # Find optimal threshold using the utility function
     optimal_threshold, metrics = tune_threshold_for_precision(
         y_proba, y_val, 

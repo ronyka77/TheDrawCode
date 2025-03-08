@@ -383,7 +383,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
 def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                             eval_meta_features: Optional[np.ndarray] = None, 
                             eval_meta_targets: Optional[np.ndarray] = None,
-                            meta_learner_type='xgb', n_trials=300, timeout=3600, 
+                            meta_learner_type='xgb', n_trials=500, timeout=3600, 
                             target_precision=0.5, min_recall=0.25):
     """
     Hypertune meta-learner using Optuna and optimize threshold for precision/recall balance.
@@ -418,28 +418,26 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 'tree_method': 'hist',
                 'objective': 'binary:logistic',
                 'n_jobs': -1,
-                'eval_metric': ['auc', 'logloss', 'error'],
+                'eval_metric': ['aucpr', 'error', 'logloss'],
                 'device': 'cpu',
                 'random_state': 19
             }
             
             params = {
-                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                'n_estimators': trial.suggest_int('n_estimators', 50, 1000),
-                'max_depth': trial.suggest_int('max_depth', 4, 8),
+                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.2, log=True),
+                'max_depth': trial.suggest_int('max_depth', 4, 10),
                 'min_child_weight': trial.suggest_int('min_child_weight', 1, 200),
-                'gamma': trial.suggest_float('gamma', 1.0, 6.0, log=True),
-                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.01, 10.0, log=True),
+                'gamma': trial.suggest_float('gamma', 0.1, 3.0, step=0.1),
+                'subsample': trial.suggest_float('subsample', 0.55, 0.9, step=0.01),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.55, 0.9, step=0.01),
+                'reg_alpha': trial.suggest_float('reg_alpha', 0.01, 20.0, log=True),
                 'reg_lambda': trial.suggest_float('reg_lambda', 1.00, 20.0, log=True),
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 6.0),
-                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 200, 600)
-            
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 6.0, step=0.1),
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 200, 1000, step=20)
             }
             params.update(base_params)
             meta_learner = XGBClassifier(**params)
-            
+
         elif meta_learner_type == 'logistic':
             from sklearn.linear_model import LogisticRegression
             base_params = {
@@ -464,7 +462,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 params['l1_ratio'] = trial.suggest_float('l1_ratio', 0.0, 1.0)
                 
             meta_learner = LogisticRegression(**params)
-            
+
         elif meta_learner_type == 'mlp':
             from sklearn.neural_network import MLPClassifier
             base_params = {
@@ -482,27 +480,26 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             }
             
             meta_learner = MLPClassifier(**params)
-        
+
         elif meta_learner_type == 'sgd':
             from sklearn.linear_model import SGDClassifier
             base_params = {
                 'random_state': 19,
-                'validation_fraction': 0.2,
                 'n_jobs': -1
             }
             params = {
-                'loss': trial.suggest_categorical('loss', ['log_loss', 'modified_huber']),
-                'penalty': trial.suggest_categorical('penalty', ['l1', 'l2', 'elasticnet']),
-                'alpha': trial.suggest_float('alpha', 1e-6, 1.0, log=True),
-                # 'class_weight': trial.suggest_categorical('class_weight', [None, 'balanced', 5, 10, 15]),
-                'learning_rate': trial.suggest_categorical('learning_rate', ['optimal', 'constant', 'invscaling', 'adaptive']),
-                'eta0': trial.suggest_float('eta0', 0.001, 0.5, log=True),
-                'max_iter': trial.suggest_int('max_iter', 500, 5000, step=500),
-                'tol': trial.suggest_float('tol', 1e-5, 1e-2, log=True),
+                'loss': 'modified_huber',
+                'penalty': trial.suggest_categorical('penalty', ['l2', 'elasticnet']),
+                'alpha': trial.suggest_float('alpha', 1e-6, 0.5, log=True),
+                'class_weight': trial.suggest_categorical('class_weight', [None, 'balanced']),
+                'learning_rate': trial.suggest_categorical('learning_rate', ['optimal', 'constant', 'adaptive', 'invscaling']),
+                'eta0': trial.suggest_float('eta0', 0.00001, 0.5, log=True),
+                'max_iter': trial.suggest_int('max_iter', 400, 10000, step=200),
+                'tol': trial.suggest_float('tol', 1e-6, 1e-2, log=True),
                 'early_stopping': True,
-                'validation_fraction': trial.suggest_float('validation_fraction', 0.1, 0.3),
-                'n_iter_no_change': trial.suggest_int('n_iter_no_change', 5, 20),
-                'average': trial.suggest_categorical('average', [True, False, 10, 100]),
+                'validation_fraction': trial.suggest_float('validation_fraction', 0.05, 0.4, step=0.01),
+                'n_iter_no_change': trial.suggest_int('n_iter_no_change', 5, 50),
+                'average': trial.suggest_categorical('average', [True, False]),
             }
             
             if params['penalty'] == 'elasticnet':
@@ -510,7 +507,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 
             params.update(base_params)
             meta_learner = SGDClassifier(**params)
-        
+
         elif meta_learner_type == 'resnet':
             base_params = {
                 'tree_method': 'hist'  # Enforce CPU-only training
@@ -525,7 +522,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             }
             params.update(base_params)
             meta_learner = ResNetMetaLearner(**params)
-            
+
         elif meta_learner_type == 'bayesian':
             # Bayesian meta-learner hyperparameters
             params = {
@@ -603,10 +600,6 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             if metrics['recall'] < min_recall:
                 return -1.0
             
-            # # Log trial results
-            # logger.info(f"Trial {trial.number}: precision={metrics['precision']:.4f}, recall={metrics['recall']:.4f}, "
-            #             f"threshold={best_threshold:.4f}")
-            
             return metrics['precision']
             
         except Exception as e:
@@ -617,8 +610,8 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     study = optuna.create_study(
         direction="maximize",
         sampler = optuna.samplers.TPESampler(                     # Different seed for better randomization
-                    n_startup_trials=20,         # Reduced from 50 - more efficient
-                    prior_weight=0.4,
+                    n_startup_trials=50,         # Reduced from 50 - more efficient
+                    prior_weight=0.2,
                     seed=int(time.time())  # Dynamic seed
                 )
     )
@@ -635,7 +628,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             'tree_method': 'hist',
             'objective': 'binary:logistic',
             'n_jobs': -1,
-            'eval_metric': ['auc', 'logloss', 'error'],
+            'eval_metric': ['aucpr', 'logloss', 'error'],
             'device': 'cpu',
             'random_state': 19
         }
@@ -653,8 +646,6 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     elif meta_learner_type == 'sgd':
         base_params = {
             'random_state': 19,
-            'early_stopping': True,
-            'validation_fraction': 0.2,
             'n_jobs': -1
         }
     elif meta_learner_type == 'bayesian':
@@ -708,7 +699,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     # This log message applies to all non-Bayesian meta-learners
     logger.info(f"Training final model with best parameters(Not Bayesian): {best_params}")
     # Train final model
-    if hasattr(best_meta_learner, 'early_stopping_rounds') or hasattr(best_meta_learner, 'early_stopping'):
+    if hasattr(best_meta_learner, 'early_stopping_rounds') or hasattr(best_meta_learner, 'early_stopping') and meta_learner_type != 'sgd':
         best_meta_learner.fit(
             meta_features, meta_targets,
             eval_set=[(eval_meta_features, eval_meta_targets)],

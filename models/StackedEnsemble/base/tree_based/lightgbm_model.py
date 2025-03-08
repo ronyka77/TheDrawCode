@@ -212,9 +212,6 @@ def create_model(model_params):
         logger.error(f"Error creating LightGBM model: {str(e)}")
         raise
 
-# Note: predict, predict_proba, evaluate, and optimize_threshold functions 
-# have been replaced with imports from hypertuner_utils.py
-
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
     Train a LightGBM model with early stopping and threshold optimization.

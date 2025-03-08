@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 import sklearn
 
+
 # Add project root to Python path
 try:
     project_root = Path(__file__).parent.parent.parent.parent.parent
@@ -51,6 +52,7 @@ from utils.logger import ExperimentLogger
 experiment_name = "xgboost_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
+from utils.dynamic_sampler import DynamicTPESampler
 from utils.create_evaluation_set import setup_mlflow_tracking
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
@@ -129,10 +131,10 @@ def load_hyperparameter_space():
         },
         'gamma': {
             'type': 'float',
-            'low': 0.1,                # narrowed based on top trials (0.52-1.59)
-            'high': 3.0,
+            'low': 0.02,                # narrowed based on top trials (0.52-1.59)
+            'high': 1.0,
             'log': False,
-            'step': 0.1
+            'step': 0.02
         },
         'lambda': {
             'type': 'float',
@@ -388,13 +390,29 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             return 0.0
     
     try:
+        # Use dynamic sampler to expand the search space after 200 trials
+        sampler = DynamicTPESampler(
+            dynamic_threshold=200,
+            dynamic_search_space={
+                "learning_rate": lambda orig: optuna.distributions.FloatDistribution(low=0.005, high=0.05, step=0.005),
+                "max_depth": lambda orig: optuna.distributions.IntUniformDistribution(low=5, high=10, step=1),
+                "min_child_weight": lambda orig: optuna.distributions.IntUniformDistribution(low=200, high=500, step=5),
+                "colsample_bytree": lambda orig: optuna.distributions.FloatDistribution(low=0.60, high=0.90, step=0.01),
+                "subsample": lambda orig: optuna.distributions.FloatDistribution(low=0.55, high=0.95, step=0.01),
+                "gamma": lambda orig: optuna.distributions.FloatDistribution(low=0.02, high=1.5, step=0.02),
+                "lambda": lambda orig: optuna.distributions.FloatDistribution(low=1.0, high=8.0, step=0.01),
+                "alpha": lambda orig: optuna.distributions.FloatDistribution(low=10.0, high=70.0, step=0.1),
+                "early_stopping_rounds": lambda orig: optuna.distributions.IntUniformDistribution(low=400, high=1200, step=20),
+                "scale_pos_weight": lambda orig: optuna.distributions.FloatDistribution(low=2.0, high=5.0, step=0.05)
+            },
+            n_startup_trials=300,
+            prior_weight=0.2,
+            warn_independent_sampling=False
+        )
         study = optuna.create_study(
             study_name='xgboost_optimization',
             direction='maximize',
-            sampler=optuna.samplers.TPESampler(   # Different seed for better randomization
-                n_startup_trials=300,    
-                prior_weight=0.3
-            )
+            sampler=sampler
         )
         
         # Optimize
@@ -654,32 +672,6 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
 
-def make_custom_precision(y_true, threshold=0.5):
-    """
-    Creates a custom precision evaluation metric function for XGBoost.
-    This metric function ignores the label information from the dmatrix
-    and uses the externally provided y_true to compute precision.
-    
-    Args:
-        y_true (array-like): The true labels for the evaluation set.
-        threshold (float): Cutoff threshold for converting predicted probabilities
-                            into binary predictions.
-    
-    Returns:
-        function: A metric function that can be passed to xgboost as an eval_metric.
-    """
-    def custom_precision_metric(preds, dmatrix):
-        # Convert predicted probabilities to binary predictions based on the threshold
-        binary_preds = (preds >= threshold).astype(int)
-        
-        # Compute precision using externally supplied y_true
-        true_positives = np.sum((binary_preds == 1) & (np.array(y_true) == 1))
-        predicted_positives = np.sum(binary_preds)
-        precision = true_positives / (predicted_positives + 1e-6)  # avoid division by zero
-        
-        return 'custom_precision', precision
-    return custom_precision_metric
-
 def main():
     """
     Main execution function.
@@ -702,8 +694,6 @@ def main():
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
         
-        # Hyperparameter optimization - run 3 times and select best
-        custom_precision = make_custom_precision(y_eval, threshold=0.5)
         # Update base parameters to use aucpr and custom precision metric
         base_params['eval_metric'] =  ['aucpr', 'error', 'logloss']
         
