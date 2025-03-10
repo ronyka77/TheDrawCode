@@ -50,6 +50,7 @@ from utils.logger import ExperimentLogger
 experiment_name = "lightgbm_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
+from utils.dynamic_sampler import DynamicTPESampler
 from utils.create_evaluation_set import setup_mlflow_tracking
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
@@ -61,7 +62,7 @@ from models.StackedEnsemble.shared.data_loader import DataLoader
 
 # Global settings
 min_recall = 0.20  # Minimum acceptable recall
-n_trials = 1000  # Number of hyperparameter optimization trials as in notebook
+n_trials = 2000  # Number of hyperparameter optimization trials as in notebook
 SEED = 42  # Global seed for reproducibility
 DEVICE = 'cpu'  # Enforce CPU training
 
@@ -416,13 +417,33 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             return 0.0
     
     try:
+        # Use dynamic sampler to expand the search space after 200 trials
+        sampler = DynamicTPESampler(
+            dynamic_threshold=200,
+            dynamic_search_space={
+                "learning_rate": lambda orig: optuna.distributions.FloatDistribution(low=0.01, high=0.11, step=0.005),
+                "num_leaves": lambda orig: optuna.distributions.IntDistribution(low=50, high=200, step=2),
+                "max_depth": lambda orig: optuna.distributions.IntDistribution(low=5, high=10, step=1),
+                "min_child_samples": lambda orig: optuna.distributions.IntDistribution(low=250, high=500, step=5),
+                "feature_fraction": lambda orig: optuna.distributions.FloatDistribution(low=0.6, high=0.8, step=0.01),
+                "bagging_fraction": lambda orig: optuna.distributions.FloatDistribution(low=0.4, high=0.8, step=0.01),
+                "bagging_freq": lambda orig: optuna.distributions.IntDistribution(low=6, high=10, step=1),
+                "reg_alpha": lambda orig: optuna.distributions.FloatDistribution(low=0.1, high=10.5, step=0.1),
+                "reg_lambda": lambda orig: optuna.distributions.FloatDistribution(low=0.1, high=9.0, step=0.05),
+                "min_split_gain": lambda orig: optuna.distributions.FloatDistribution(low=0.1, high=0.55, step=0.01),
+                "early_stopping_rounds": lambda orig: optuna.distributions.IntDistribution(low=400, high=800, step=10),
+                "path_smooth": lambda orig: optuna.distributions.FloatDistribution(low=0.005, high=0.8, step=0.005),
+                "cat_smooth": lambda orig: optuna.distributions.FloatDistribution(low=1.0, high=30.0, step=0.5),
+                "max_bin": lambda orig: optuna.distributions.IntDistribution(low=200, high=700, step=5)
+            },
+            n_startup_trials=200,
+            prior_weight=0.2,
+            warn_independent_sampling=False
+        )
         study = optuna.create_study(
             study_name='lightgbm_optimization',
             direction='maximize',
-            sampler=optuna.samplers.TPESampler(   # Different seed for better randomization
-                n_startup_trials=300,     # Reduced from 50 - more efficient
-                prior_weight=0.3
-            )
+            sampler=sampler
         )
         
         # Optimize
@@ -558,10 +579,6 @@ def hypertune_lightgbm(experiment_name: str):
                 registered_model_name=f"lightgbm_{datetime.now().strftime('%Y%m%d_%H%M')}",
                 signature=signature
             )
-            
-            # Save model locally
-            model_path = Path(f"models/StackedEnsemble/base/tree_based/lightgbm_model_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl")
-            save_model(model, model_path, metrics.get('threshold', 0.5))
             
             return best_params, metrics
             

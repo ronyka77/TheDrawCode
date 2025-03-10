@@ -391,28 +391,37 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     
     try:
         # Use dynamic sampler to expand the search space after 200 trials
-        sampler = DynamicTPESampler(
-            dynamic_threshold=200,
-            dynamic_search_space={
-                "learning_rate": lambda orig: optuna.distributions.FloatDistribution(low=0.005, high=0.05, step=0.005),
-                "max_depth": lambda orig: optuna.distributions.IntUniformDistribution(low=5, high=10, step=1),
-                "min_child_weight": lambda orig: optuna.distributions.IntUniformDistribution(low=200, high=500, step=5),
-                "colsample_bytree": lambda orig: optuna.distributions.FloatDistribution(low=0.60, high=0.90, step=0.01),
-                "subsample": lambda orig: optuna.distributions.FloatDistribution(low=0.55, high=0.95, step=0.01),
-                "gamma": lambda orig: optuna.distributions.FloatDistribution(low=0.02, high=1.5, step=0.02),
-                "lambda": lambda orig: optuna.distributions.FloatDistribution(low=1.0, high=8.0, step=0.01),
-                "alpha": lambda orig: optuna.distributions.FloatDistribution(low=10.0, high=70.0, step=0.1),
-                "early_stopping_rounds": lambda orig: optuna.distributions.IntUniformDistribution(low=400, high=1200, step=20),
-                "scale_pos_weight": lambda orig: optuna.distributions.FloatDistribution(low=2.0, high=5.0, step=0.05)
-            },
-            n_startup_trials=300,
-            prior_weight=0.2,
-            warn_independent_sampling=False
+        # sampler = DynamicTPESampler(
+        #     dynamic_threshold=200,
+        #     dynamic_search_space={
+        #         "learning_rate": lambda orig: optuna.distributions.FloatDistribution(low=0.005, high=0.05, step=0.005),
+        #         "max_depth": lambda orig: optuna.distributions.IntDistribution(low=5, high=10, step=1),
+        #         "min_child_weight": lambda orig: optuna.distributions.IntDistribution(low=200, high=500, step=5),
+        #         "colsample_bytree": lambda orig: optuna.distributions.FloatDistribution(low=0.60, high=0.90, step=0.01),
+        #         "subsample": lambda orig: optuna.distributions.FloatDistribution(low=0.55, high=0.95, step=0.01),
+        #         "gamma": lambda orig: optuna.distributions.FloatDistribution(low=0.02, high=1.5, step=0.02),
+        #         "lambda": lambda orig: optuna.distributions.FloatDistribution(low=1.0, high=8.0, step=0.01),
+        #         "alpha": lambda orig: optuna.distributions.FloatDistribution(low=10.0, high=70.0, step=0.1),
+        #         "early_stopping_rounds": lambda orig: optuna.distributions.IntDistribution(low=400, high=1200, step=20),
+        #         "scale_pos_weight": lambda orig: optuna.distributions.FloatDistribution(low=2.0, high=5.0, step=0.05)
+        #     },
+        #     n_startup_trials=200,
+        #     prior_weight=0.2,
+        #     warn_independent_sampling=False
+        # )
+        cmaes_sampler = optuna.samplers.CmaEsSampler(
+            x0={'learning_rate': 0.025, 'max_depth': 7, 'min_child_weight': 350,
+                'colsample_bytree': 0.75, 'subsample': 0.75, 'gamma': 0.5,
+                'lambda': 4.0, 'alpha': 40.0, 'early_stopping_rounds': 800,
+                'scale_pos_weight': 3.5},
+            sigma0=0.1,
+            seed=42,
+            n_startup_trials=2000
         )
         study = optuna.create_study(
             study_name='xgboost_optimization',
             direction='maximize',
-            sampler=sampler
+            sampler=cmaes_sampler
         )
         
         # Optimize

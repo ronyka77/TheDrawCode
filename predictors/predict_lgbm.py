@@ -21,38 +21,6 @@ from utils.create_evaluation_set import get_real_api_scores_from_excel, setup_ml
 experiment_name = "lightgbm_soccer_prediction"
 mlruns_dir = setup_mlflow_tracking(experiment_name)
 
-
-def convert_df_to_signature_types(df: pd.DataFrame, signature: Any) -> pd.DataFrame:
-    """
-    Convert DataFrame columns to expected types based on MLflow model signature.
-
-    Args:
-        df (pd.DataFrame): Input DataFrame to convert.
-        signature (ModelSignature): The MLflow model signature object.
-
-    Returns:
-        pd.DataFrame: DataFrame with converted column types.
-    """
-    schema = signature.inputs.to_dict()
-    # Expected format: schema should be a dict with key "columns"
-    columns = schema.get("columns", [])
-    for col in columns:
-        col_name = col.get("name")
-        col_type = col.get("type")
-        if col_name in df.columns:
-            try:
-                if col_type in ["integer", "long"]:
-                    # Round and use Pandas nullable integer type
-                    df[col_name] = df[col_name].round().astype("Int64")
-                elif col_type in ["float", "double", "numeric"]:
-                    df[col_name] = df[col_name].astype(float)
-                elif col_type == "string":
-                    df[col_name] = df[col_name].astype(str)
-                # You can add more type mappings if needed
-            except Exception as e:
-                print(f"Error converting column '{col_name}' to {col_type}: {e}")
-    return df
-
 class DrawPredictor:
     """Predictor class for draw predictions using the stacked model."""
     def __init__(self, model_uri: str):
@@ -61,37 +29,31 @@ class DrawPredictor:
             # First, attempt to load with the lightgbm flavor:
             try:
                 print(f"Loading model using lightgbm flavor from {model_uri}")
-                self.model = mlflow.sklearn.load_model(model_uri)
+                self.model = mlflow.lightgbm.load_model(model_uri)
                 print(f"Successfully loaded model using lightgbm flavor from {model_uri}")
             except Exception as e:
-                print("Failed to load model with lightgbm flavor, falling back to pyfunc flavor.")
+                print(f"Failed to load model with lightgbm flavor: {e}, falling back to pyfunc flavor.")
                 # Fallback to pyfunc
                 self.model = mlflow.pyfunc.load_model(model_uri)
-            
-            # Get model metadata for feature names and types
-            model_info = mlflow.models.get_model_info(model_uri)
-            if model_info.signature:
-                # Store signature for use in conversion
-                self.model_signature = model_info.signature
-                # Extract required feature names
-                inputs = self.model_signature.inputs.to_dict()
-                # Handle both dictionary and list formats for inputs
-                if isinstance(inputs, dict) and "columns" in inputs:
-                    self.required_features = [col['name'] for col in inputs.get("columns", [])]
-                elif isinstance(inputs, list):
-                    # Handle case where inputs is a list (as seen in error)
-                    self.required_features = [col['name'] for col in inputs if isinstance(col, dict) and 'name' in col]
-                elif isinstance(inputs, str):
+            try:    
+                # Get model metadata for feature names
+                model_info = mlflow.models.get_model_info(model_uri)
+                if model_info.signature:
+                    # Parse signature inputs if they're in string format
+                    inputs = model_info.signature.inputs.to_dict()
+                    self.input_schema = inputs
+                if isinstance(inputs, str):
                     inputs = json.loads(inputs)
-                    self.required_features = [col['name'] for col in inputs.get("columns", [])]
+                    self.required_features = [col['name'] for col in inputs]
+                    print(f"Loaded {len(self.required_features)} feature names")
+                    self.input_schema = inputs
+                    # print(f"Input schema: {self.input_schema}")
                 else:
-                    print(f"Warning: Unexpected signature format: {type(inputs)}")
-                    self.required_features = []
-                print(f"Loaded {len(self.required_features)} feature names")
-            else:
-                print("Warning: No signature found in model metadata")
-                self.required_features = []
-                self.model_signature = None
+                    self.required_features = [col['name'] for col in inputs]
+                    print(f"Loaded {len(self.required_features)} feature names")
+            except Exception as e:
+                print(f"Error loading model metadata: {e}")
+                raise
             
             # Set threshold
             self.threshold = getattr(self.model, 'optimal_threshold', 0.27)
@@ -112,34 +74,27 @@ class DrawPredictor:
         if self.required_features:
             self._validate_input(df)
         # Convert df columns to expected types based on model signature
-        if self.model_signature is not None:
-            df = convert_df_to_signature_types(df, self.model_signature)
         try:
             # Handle different model types (PyFuncModel doesn't have predict_proba)
             try:
                 if hasattr(self.model, 'predict_proba'):
                     pos_probas = self.model.predict_proba(df)[:, 1]
+                    predictions = (pos_probas >= self.threshold).astype(int)
                 else:
                     # For PyFuncModel or other models without predict_proba
                     print("Model doesn't have predict_proba method, using predict instead")
                     raw_preds = self.model.predict(df)
-                    pos_probas = np.array(raw_preds).astype(float)
-                
-                predictions = (pos_probas >= self.threshold).astype(int)
+                    predictions = raw_preds
             except AttributeError as e:
                 print(f"Error during prediction: {str(e)}")
                 raw_preds = self.model.predict(df)
-                pos_probas = np.array(raw_preds).astype(float)
-                predictions = (pos_probas >= self.threshold).astype(int)
+                predictions = raw_preds
         except Exception as e:
             print(f"Error during prediction: {e}")
             predictions = np.zeros(len(df))
             pos_probas = np.zeros(len(df))
-
         results = {
             'predictions': predictions.tolist(),
-            'draw_probabilities': pos_probas.tolist(), 
-            'threshold_used': self.threshold,
             'num_predictions': len(predictions),
             'positive_predictions': int(np.sum(predictions)),
             'prediction_rate': float(np.mean(predictions))
@@ -166,8 +121,6 @@ class DrawPredictor:
             # Handle different model types for probability prediction
             try:
                 # Convert df columns to expected types based on model signature
-                if self.model_signature is not None:
-                    prediction_df = convert_df_to_signature_types(prediction_df, self.model_signature)
                 if hasattr(self.model, 'predict_proba'):
                     probas = self.model.predict_proba(prediction_df)[:, 1]
                 else:
@@ -180,7 +133,7 @@ class DrawPredictor:
                 # Fallback to direct prediction
                 raw_preds = self.model.predict(prediction_df)
                 probas = np.array(raw_preds).astype(float)
-            best_metrics = {'precision': 0, 'recall': 0, 'f1': 0, 'threshold': 0.5}
+            best_metrics = {'precision': 0, 'recall': 0, 'f1': 0, 'threshold': 0.27}
             best_score = 0
             
             # Focus on higher thresholds for better precision, starting from 0.5
@@ -240,18 +193,45 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Ensure data types are compatible with model expectations
         # Convert numeric columns to float64 to match model expectations
         numeric_columns = prediction_df.select_dtypes(include=['number']).columns
-        for col in numeric_columns:
-            prediction_df[col] = prediction_df[col].astype('float64')
-        
-            
-        # Add column validation
-        predictor._validate_input(prediction_df)
-        
+        if 'fixture_id' in prediction_df.columns:
+            prediction_df['fixture_id'] = pd.to_numeric(prediction_df['fixture_id'], errors='coerce').astype('int64')
+        if 'fixture_id' in real_scores_df.columns:
+            real_scores_df['fixture_id'] = pd.to_numeric(real_scores_df['fixture_id'], errors='coerce').astype('int64')
         # Add dtype consistency check with proper DataFrame handling
         if not isinstance(prediction_data, pd.DataFrame):
             raise TypeError("prediction_data must be a pandas DataFrame")
         
         prediction_df = prediction_df[predictor.required_features]
+        converted_float_columns = 0
+        converted_int_columns = 0
+        converted_bool_columns = 0
+        converted_str_columns = 0
+        converted_datetime_columns = 0
+        if hasattr(predictor, 'input_schema') and predictor.input_schema:
+            for feature in predictor.input_schema:
+                col_name = feature.get('name')
+                if col_name in prediction_df.columns:
+                    expected_type = feature.get('type', '').lower()
+                    if expected_type in ('integer', 'int', 'int64', 'long'):
+                        prediction_df[col_name] = pd.to_numeric(prediction_df[col_name], errors='coerce').astype('Int64')
+                        converted_int_columns += 1  
+                    elif expected_type in ('float', 'double', 'float64'):
+                        prediction_df[col_name] = pd.to_numeric(prediction_df[col_name], errors='coerce').astype('float64')
+                        converted_float_columns += 1
+                    elif expected_type in ('string', 'str'):
+                        prediction_df[col_name] = prediction_df[col_name].astype(str)
+                        converted_str_columns += 1
+                    elif expected_type in ('boolean', 'bool'):
+                        prediction_df[col_name] = prediction_df[col_name].astype(bool)
+                        converted_bool_columns += 1
+                    elif expected_type in ('datetime', 'date', 'timestamp'):
+                        prediction_df[col_name] = pd.to_datetime(prediction_df[col_name], errors='coerce')
+                        converted_datetime_columns += 1
+                    else:
+                        # Fallback: attempt numeric conversion if type is unrecognized
+                        prediction_df[col_name] = pd.to_numeric(prediction_df[col_name], errors='coerce')
+                        print('Fallback: ', col_name)
+        print(f"Converted {converted_float_columns} float columns, {converted_int_columns} int columns, {converted_bool_columns}")
         # Merge prediction data with real scores to get is_draw column
         predict_df = prediction_df.merge(
             real_scores_df[['fixture_id', 'is_draw']],
@@ -260,16 +240,15 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         )
         # Drop rows with NaN in is_draw column
         predict_df = predict_df.dropna(subset=['is_draw'])
+        
         print(f"Merged prediction data with real scores and dropped NaN is_draw. Shape: {predict_df.shape}")
         # Make predictions first
         threshold, best_metrics = predictor._find_optimal_threshold(predictor.model, predict_df, predict_df['is_draw'])
-
         results = predictor.predict(prediction_df)
         print(f"Prediction successful...")
         # Add predictions to dataframe using .loc to avoid SettingWithCopyWarning
         prediction_df = prediction_df.copy()  # Create explicit copy
         prediction_df.loc[:, 'draw_predicted'] = results['predictions']
-        prediction_df.loc[:, 'draw_probability'] = [round(prob, 2) for prob in results['draw_probabilities']]
         # Get real scores and merge - this is where the error occurs
         if 'fixture_id' in prediction_data.columns:
             print(f"prediction_data.columns: {prediction_data.shape}")
@@ -357,16 +336,15 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        '46ffff13478741c0a4ae0fbe90d78bcf',
+        # '46ffff13478741c0a4ae0fbe90d78bcf',
         '9fcbae498c7f405fac064b49300ffde1',
         '3aad6290935b47d8879446259159c74d',
-        '459e32871ab94727a4118fecf3d7f28d',
-        '4b3dc29cc6874b4d939bc21b4e8fbd18',
-        '55877ba9e4e14cbba346c6865a5c5298',
-        'e28bae0f155a4cbba406335f25742036',
+        # '459e32871ab94727a4118fecf3d7f28d',
+        # '4b3dc29cc6874b4d939bc21b4e8fbd18',
+        # '55877ba9e4e14cbba346c6865a5c5298',
+        # 'e28bae0f155a4cbba406335f25742036',
         '75838e5e45942d9b9210e2ad034e9c3',
         '33f216cc24734df8869a6b049106a2d9',
-        '6656e97616804f8c8e703a30c78bc7a2',
         'cfec65e216bf46ad93e93e299c8a11c4'
     ]
     # Get preprocessed prediction data using standardized function
@@ -396,8 +374,8 @@ def main():
             # Save individual model predictions
             model_output_path = Path(f"./data/prediction/predictions_model_{uri}.xlsx")
             # Reorder columns to place draw_predicted and draw_probability last
-            cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
-            cols.extend(['draw_predicted', 'draw_probability'])
+            cols = [col for col in predicted_df.columns if col not in ['draw_predicted']]
+            cols.extend(['draw_predicted'])
             predicted_df = predicted_df[cols]
             predicted_df.to_excel(model_output_path, index=False)
             print(f"Predictions for model {uri} saved to: {model_output_path}")
@@ -417,12 +395,12 @@ def main():
     # Handle empty predictions
     if best_predictions.empty:
         print("Warning: No valid predictions generated. Creating empty result.")
-        predicted_df = pd.DataFrame(columns=['fixture_id', 'draw_predicted', 'draw_probability'])
+        predicted_df = pd.DataFrame(columns=['fixture_id', 'draw_predicted'])
     else:
         predicted_df = best_predictions
         # Reorder columns to place draw_predicted and draw_probability last
-        cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
-        cols.extend(['draw_predicted', 'draw_probability'])
+        cols = [col for col in predicted_df.columns if col not in ['draw_predicted']]
+        cols.extend(['draw_predicted'])
         predicted_df = predicted_df[cols]
 
 
