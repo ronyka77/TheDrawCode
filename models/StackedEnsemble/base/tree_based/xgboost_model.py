@@ -603,10 +603,6 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         # Log to MLflow
         log_to_mlflow(model, metrics, best_params, experiment_name)
         
-        # Save model locally
-        model_path = f"models/StackedEnsemble/base/tree_based/xgboost_model_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl"
-        save_model(model, model_path, metrics.get('threshold', 0.5))
-        
         return model, metrics
         
     except Exception as e:

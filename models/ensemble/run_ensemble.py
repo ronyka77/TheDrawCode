@@ -40,17 +40,10 @@ from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_f
 
 from models.ensemble.ensemble_model import EnsembleModel
 from models.ensemble.data_utils import balance_and_clean_dataset
-<<<<<<< HEAD
 
 
 def run_ensemble(extra_base_model_type: str = 'mlp',
                 meta_learner_type: str = 'lgb',
-=======
-
-
-def run_ensemble(extra_base_model_type: str = 'random_forest',
-                meta_learner_type: str = 'xgb',
->>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
                 calibrate: bool = True,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
@@ -225,12 +218,8 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 sk_model=model_wrapper,
                 artifact_path="ensemble_model",
                 signature=signature,
-<<<<<<< HEAD
                 registered_model_name=model_name,
                 pip_requirements=["scikit-learn==1.4.2"]
-=======
-                registered_model_name=model_name
->>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
             )
             logger.info(f"Model saved with signature and registered as: {model_name}")
             return ensemble_model
@@ -244,11 +233,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the ensemble model training and evaluation.")
     parser.add_argument("--extra-model", type=str, default="mlp", choices=["random_forest", "svm", "mlp"],
                         help="Type of fourth base model")
-<<<<<<< HEAD
     parser.add_argument("--meta-learner", type=str, default="lgb", choices=["xgb", "logistic", "mlp", "lgb"],
-=======
-    parser.add_argument("--meta-learner", type=str, default="sgd", choices=["xgb", "logistic", "mlp", "sgd"],
->>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
                         help="Type of meta-learner")
     parser.add_argument("--calibrate", action="store_true", default=True,
                         help="Whether to calibrate base model probabilities")

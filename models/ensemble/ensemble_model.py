@@ -13,6 +13,9 @@ from sklearn.svm import SVC
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.linear_model import SGDClassifier
 from sklearn.base import BaseEstimator, ClassifierMixin
 from typing import Dict, List, Tuple, Optional, Union
 import os
@@ -116,7 +119,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             device='cpu',
             nthread=-1,
             objective='binary:logistic',
-<<<<<<< HEAD
             eval_metric=['aucpr', 'logloss', 'auc'],
             verbosity=0,
             learning_rate=0.03791741758266303,
@@ -129,20 +131,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             gamma=1.3607609856733809,
             early_stopping_rounds=634,
             scale_pos_weight=3.8790295965457644,
-=======
-            eval_metric=['aucpr', 'error', 'logloss'],
-            verbosity=0,
-            learning_rate=0.065,
-            max_depth=9,
-            min_child_weight=450,
-            subsample=0.6,
-            colsample_bytree=0.63,
-            reg_alpha=56.2,
-            reg_lambda=8.61,
-            gamma=3.9000000000000004,
-            early_stopping_rounds=770,
-            scale_pos_weight=2.73,
->>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
             seed=19
         )
         self.model_cat = CatBoostClassifier( #39.7%
@@ -162,50 +150,26 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             thread_count=-1,
             verbose=-1
         )
-<<<<<<< HEAD
         self.model_lgb = LGBMClassifier( #41.7%
             objective='binary',
             metric=['binary_logloss', 'average_precision', 'auc'],
-=======
-        self.model_lgb = LGBMClassifier( #40.1%
-            objective='binary',
-            metric=['average_precision', 'auc'],
->>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
             verbose=-1,
             n_jobs=-1,
             random_state=19,
             device='cpu',
-<<<<<<< HEAD
-            learning_rate=0.06999999999999999,
-            num_leaves=92,
+            learning_rate=0.071,
+            num_leaves=87,
             max_depth=9,
-            min_child_samples=305,
+            min_child_samples=319,
             feature_fraction=0.6,
-            bagging_fraction=0.56,
-            bagging_freq=8,
-            reg_alpha=4.9,
-            reg_lambda=1.3000000000000003,
-            min_split_gain=0.16,
-            early_stopping_rounds=368,
-            path_smooth=0.47000000000000003,
-            cat_smooth=14.0,
-            max_bin=640
-=======
-            learning_rate=0.07808365732227378,
-            num_leaves=49,
-            max_depth=5,
-            min_child_samples=186,
-            feature_fraction=0.7362414908665876,
-            bagging_fraction=0.566329378803412,
+            bagging_fraction=0.55,
             bagging_freq=7,
-            reg_alpha=10.381624688086854,
-            reg_lambda=8.247369065806053,
-            min_split_gain=0.0759612454859611,
-            early_stopping_rounds=368,
-            path_smooth=0.003311033349450048,
-            cat_smooth=6.238451219805991,
-            max_bin=586
->>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
+            reg_alpha=5.4,
+            reg_lambda=1.23,
+            min_split_gain=0.17,
+            path_smooth=0.488,
+            cat_smooth=13.7,
+            max_bin=645
         )
         
         # Initialize the extra base model based on the selected type with reduced complexity
@@ -424,7 +388,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         if self.extra_base_model_type in ['mlp', 'svm'] and self.extra_model_scaler is not None:
             # Scale validation, training, and test data using the fitted scaler
             X_val_scaled = self.extra_model_scaler.transform(X_val_prepared)
-<<<<<<< HEAD
             X_train_scaled = self.extra_model_scaler.transform(X_train_prepared)
             X_test_scaled = self.extra_model_scaler.transform(X_test_prepared)
             
@@ -437,11 +400,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 p_extra = extra_model.predict_proba(X_val_scaled)[:, 1]
                 p_extra_train = extra_model.predict_proba(X_train_scaled)[:, 1]
                 p_extra_test = extra_model.predict_proba(X_test_scaled)[:, 1]
-=======
-            p_extra = extra_model.predict_proba(X_val_scaled)[:, 1]
-            p_extra_train = extra_model.predict_proba(X_train_prepared)[:, 1]
-            p_extra_test = extra_model.predict_proba(X_test_prepared)[:, 1]
->>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
         else:
             p_extra = extra_model.predict_proba(X_val_prepared)[:, 1]
             p_extra_train = extra_model.predict_proba(X_train_prepared)[:, 1]
