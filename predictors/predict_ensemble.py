@@ -159,6 +159,10 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Initialize predictor
         predictor = DrawPredictor(model_uri)
         prediction_df = prediction_data.copy()
+<<<<<<< HEAD
+=======
+        # print(f"Prediction data len(prediction_df): {len(prediction_df)}")
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
         
         # Ensure data types are compatible with model expectations
         # Convert numeric columns to float64 to match model expectations
@@ -280,10 +284,19 @@ def main():
     # Model URIs to evaluate
     model_uris = [
         'f04b93479ee249f6bc77204e5c4b206f',
+<<<<<<< HEAD
         '035abdf986654b1e8b551d0ce044c929',
         '8d80522037ae4a9790b72129c06851a4',
         'd3c066618b4d425fbb2ffff99a478238',
         'ba00bb0f799c4d5aaa1f2ab803a9827a'
+=======
+        # '8abc7269aeba4436a5d23ed2bd13e4d4',
+        '5befa2bf2b5d4ae6866f3cc177c7b68f', 
+        '035abdf986654b1e8b551d0ce044c929',
+        '8d80522037ae4a9790b72129c06851a4',
+        'd3c066618b4d425fbb2ffff99a478238',
+        # 'acded8143d6d4a1cb3ba14cd959949e3'
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()

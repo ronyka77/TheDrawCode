@@ -13,10 +13,13 @@ from xgboost import XGBClassifier
 from typing import Dict, List, Tuple, Optional, Union
 import mlflow
 import time
+<<<<<<< HEAD
 import random
 import tensorflow as tf
 from tensorflow.keras import layers, regularizers, callbacks
 import os
+=======
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
 
 from utils.logger import ExperimentLogger
 logger = ExperimentLogger(experiment_name="ensemble_model_training",
@@ -26,6 +29,7 @@ logger = ExperimentLogger(experiment_name="ensemble_model_training",
 from models.ensemble.bayesian_meta_learner import BayesianMetaLearner, train_with_optimal_parameters
 from models.ensemble.ResNet import ResNetMetaLearner
 
+<<<<<<< HEAD
 # Set random seeds for reproducibility
 random_seed = 19
 random.seed(random_seed)
@@ -33,6 +37,8 @@ np.random.seed(random_seed)
 tf.random.set_seed(random_seed)
 os.environ['PYTHONHASHSEED'] = str(random_seed)
 
+=======
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
 def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
     """
     Initialize the meta learner based on the provided meta_learner_type.
@@ -156,12 +162,33 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
             random_state=42
         )
         
+<<<<<<< HEAD
         logger.info("SGDClassifier meta-learner initialized with log_loss loss function")
 
     elif meta_learner_type.lower() == 'resnet':
         meta_learner = ResNetMetaLearner()
         logger.info("ResNetMetaLearner meta-learner initialized")
 
+=======
+    elif meta_learner_type.lower() == 'sgd':
+        meta_learner = SGDClassifier(
+            loss='log_loss',
+            penalty='elasticnet',
+            alpha=0.0001,
+            l1_ratio=0.5,
+            class_weight=None,
+            max_iter=1000,
+            early_stopping=True,
+            random_state=42
+        )
+        
+        logger.info("SGDClassifier meta-learner initialized with log_loss loss function")
+        
+    elif meta_learner_type.lower() == 'resnet':
+        meta_learner = ResNetMetaLearner()
+        logger.info("ResNetMetaLearner meta-learner initialized")
+    
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
     elif meta_learner_type.lower() == 'bayesian':
         meta_learner = BayesianMetaLearner()
         logger.info("BayesianMetaLearner meta-learner initialized")
@@ -325,6 +352,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
         elif hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping'):
             if eval_meta_features is not None and eval_meta_targets is not None:
                 # Ensure both evaluation features and targets are provided
+<<<<<<< HEAD
                 if meta_learner_type == 'lgb':
                     early_stopping_rounds = meta_learner.early_stopping_rounds
                     # LightGBM specific early stopping
@@ -340,6 +368,13 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
                         eval_set=[(eval_meta_features, eval_meta_targets)],
                         verbose=False
                     )
+=======
+                meta_learner.fit(
+                    meta_features, meta_targets,
+                    eval_set=[(eval_meta_features, eval_meta_targets)],
+                    verbose=False
+                )
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
             else:
                 # Fall back to standard training if eval data is missing
                 logger.warning("Evaluation data missing for early stopping. Falling back to standard training.")
@@ -392,7 +427,11 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
 def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                             eval_meta_features: Optional[np.ndarray] = None, 
                             eval_meta_targets: Optional[np.ndarray] = None,
+<<<<<<< HEAD
                             meta_learner_type='xgb', n_trials=2000, timeout=3600, 
+=======
+                            meta_learner_type='xgb', n_trials=500, timeout=3600, 
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
                             target_precision=0.5, min_recall=0.25):
     """
     Hypertune meta-learner using Optuna and optimize threshold for precision/recall balance.
@@ -418,7 +457,11 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     import numpy as np
     from sklearn.metrics import precision_score, recall_score, f1_score
     from models.ensemble.thresholds import tune_threshold_for_precision
+<<<<<<< HEAD
     logger.info(f"Hyperparameter tuning for meta-learner type: {meta_learner_type}")
+=======
+    
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
     def objective(trial):
         # Define hyperparameters based on meta-learner type
         if meta_learner_type == 'xgb':
@@ -447,6 +490,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             params.update(base_params)
             meta_learner = XGBClassifier(**params)
 
+<<<<<<< HEAD
         elif meta_learner_type == 'lgb':
             from lightgbm import LGBMClassifier
             import lightgbm as lgb
@@ -477,6 +521,8 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             params.update(base_params)
             meta_learner = LGBMClassifier(**params)
 
+=======
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
         elif meta_learner_type == 'logistic':
             from sklearn.linear_model import LogisticRegression
             base_params = {
@@ -488,7 +534,12 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 'C': trial.suggest_float('C', 0.001, 10.0, log=True),
                 'penalty': trial.suggest_categorical('penalty', ['l1', 'l2', 'elasticnet']),
                 'solver': trial.suggest_categorical('solver', ['liblinear', 'saga']),
+<<<<<<< HEAD
                 'max_iter': trial.suggest_int('max_iter', 100, 1000, step=100)
+=======
+                'max_iter': 1000,
+                'random_state': 19
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
             }
             
             if params['penalty'] == 'elasticnet':
@@ -504,6 +555,10 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         elif meta_learner_type == 'mlp':
             from sklearn.neural_network import MLPClassifier
             base_params = {
+<<<<<<< HEAD
+=======
+                'max_iter': 1000,
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
                 'early_stopping': True,
                 'random_state': 19
             }
@@ -511,10 +566,16 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 'hidden_layer_sizes': (trial.suggest_int('hidden_units', 10, 100),),
                 'alpha': trial.suggest_float('alpha', 0.0001, 0.1, log=True),
                 'learning_rate_init': trial.suggest_float('learning_rate_init', 0.001, 0.1, log=True),
+<<<<<<< HEAD
                 'max_iter': trial.suggest_int('max_iter', 100, 1000, step=100),
                 'batch_size': trial.suggest_int('batch_size', 16, 128),
                 'epochs': trial.suggest_int('epochs', 50, 200),
                 'patience': trial.suggest_int('patience', 10, 50)
+=======
+                'max_iter': 1000,
+                'early_stopping': True,
+                'random_state': 42
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
             }
             
             meta_learner = MLPClassifier(**params)
@@ -613,6 +674,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                     y_proba, eval_meta_targets, target_precision, min_recall
                 )
                 
+<<<<<<< HEAD
             elif meta_learner_type == 'lgb':
                 # LightGBM specific early stopping
                 early_stopping_rounds = params.pop('early_stopping_rounds')
@@ -621,6 +683,8 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                     eval_set=[(eval_meta_features, eval_meta_targets)],
                     callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)] 
                 )
+=======
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
             elif hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping') and meta_learner_type != 'sgd':
                 meta_learner.fit(
                     meta_features, meta_targets,
@@ -655,9 +719,19 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     # Create and run Optuna study
     study = optuna.create_study(
         direction="maximize",
+<<<<<<< HEAD
         sampler = optuna.samplers.RandomSampler(seed=19)
     )
     logger.info(f"Running Optuna study with {n_trials} trials and {meta_learner_type} meta-learner")
+=======
+        sampler = optuna.samplers.TPESampler(                     # Different seed for better randomization
+                    n_startup_trials=50,         # Reduced from 50 - more efficient
+                    prior_weight=0.2,
+                    seed=int(time.time())  # Dynamic seed
+                )
+    )
+    
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
     study.optimize(objective, n_trials=n_trials, timeout=timeout, show_progress_bar=True)
     
     # Get best parameters
@@ -674,6 +748,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             'device': 'cpu',
             'random_state': 19
         }
+<<<<<<< HEAD
     elif meta_learner_type == 'lgb':
         base_params = {
             'objective': 'binary',
@@ -682,6 +757,8 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             'random_state': 19,
             'device': 'cpu'
         }
+=======
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
     elif meta_learner_type == 'logistic':
         base_params = {
             'solver': 'saga',  # Compatible with all penalties
@@ -709,11 +786,14 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         from xgboost import XGBClassifier
         best_params.update(base_params)
         best_meta_learner = XGBClassifier(**best_params)
+<<<<<<< HEAD
     elif meta_learner_type == 'lgb':
         from lightgbm import LGBMClassifier
         import lightgbm as lgb
         best_params.update(base_params)
         best_meta_learner = LGBMClassifier(**best_params)
+=======
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
     elif meta_learner_type == 'logistic':
         from sklearn.linear_model import LogisticRegression
         best_params.update(base_params)
@@ -754,6 +834,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     # This log message applies to all non-Bayesian meta-learners
     logger.info(f"Training final model with best parameters(Not Bayesian): {best_params}")
     # Train final model
+<<<<<<< HEAD
     if meta_learner_type == 'lgb':
         early_stopping_rounds = best_params.pop('early_stopping_rounds')
         best_meta_learner.fit(
@@ -762,6 +843,9 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)]
         )
     elif hasattr(best_meta_learner, 'early_stopping_rounds') or hasattr(best_meta_learner, 'early_stopping') and meta_learner_type != 'sgd':
+=======
+    if hasattr(best_meta_learner, 'early_stopping_rounds') or hasattr(best_meta_learner, 'early_stopping') and meta_learner_type != 'sgd':
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
         best_meta_learner.fit(
             meta_features, meta_targets,
             eval_set=[(eval_meta_features, eval_meta_targets)],

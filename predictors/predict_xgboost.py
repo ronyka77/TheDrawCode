@@ -308,6 +308,7 @@ def main():
     # Model URIs to evaluate
     model_uris = [
         '1a3fd3f61ec144f5bc35da087aed1f33',
+<<<<<<< HEAD
         # 'fd9e7ead05e5402b81b7aaba70de1fd7',
         '306fcb9a007447f0a50542d7d98837a9',
         # '442f29de370c4a14969a6aa5de1b60b4',
@@ -317,6 +318,16 @@ def main():
         # '4cc45a815e3545bca50faba6ddba70d6',
         '55d72f8c1e4a42de94eb52793e83134d',
         '1a536f0ac1ca4d3499d626bef149c651'
+=======
+        'fd9e7ead05e5402b81b7aaba70de1fd7',
+        '306fcb9a007447f0a50542d7d98837a9',
+        '442f29de370c4a14969a6aa5de1b60b4',
+        'c3b20fd4dff9466ab5deaccf6ebee4b3',
+        '459e32871ab94727a4118fecf3d7f28d',
+        'ce754a75ac274f0fbc6f0043b578dcec',
+        '4cc45a815e3545bca50faba6ddba70d6',
+        '55d72f8c1e4a42de94eb52793e83134d'
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
@@ -343,7 +354,11 @@ def main():
                 continue
                 
             # Save individual model predictions
+<<<<<<< HEAD
             model_output_path = Path(f"./data/prediction/xgboost/predictions_model_{uri}.xlsx")
+=======
+            model_output_path = Path(f"./data/prediction/predictions_model_{uri}.xlsx")
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
             # Reorder columns to place draw_predicted and draw_probability last
             cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
             cols.extend(['draw_predicted', 'draw_probability'])

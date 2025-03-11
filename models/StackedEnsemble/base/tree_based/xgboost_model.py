@@ -418,6 +418,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             seed=42,
             n_startup_trials=2000
         )
+<<<<<<< HEAD
         random_sampler = optuna.samplers.RandomSampler(
             seed=19
         )
@@ -425,6 +426,12 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             study_name='xgboost_optimization',
             direction='maximize',
             sampler=random_sampler
+=======
+        study = optuna.create_study(
+            study_name='xgboost_optimization',
+            direction='maximize',
+            sampler=cmaes_sampler
+>>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
         )
         
         # Optimize
