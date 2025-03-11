@@ -46,7 +46,6 @@ class DrawPredictor:
         # Get probabilities
         probas = self.model.predict_proba(predict_df)
         predictions = self.model.predict(predict_df)
-   
 
         # Prepare results
         results = {

@@ -1,732 +1,579 @@
-"""CatBoost model implementation with CPU optimization and hyperparameter tuning."""
+"""
+CatBoost-based model for predicting soccer match draws.
 
-from typing import Dict, Any, Optional, Tuple
+This module implements a CatBoost-based model for predicting soccer match draws,
+including model creation, training, hyperparameter optimization, and MLflow integration.
+"""
+
+import os
+import sys
+import json
+import time
 import numpy as np
 import pandas as pd
-from pathlib import Path
 import catboost as cb
 from catboost import Pool
-import joblib
-import json
-import os
-import ray.tune as tune
+import optuna
 import mlflow
-import sys
-import ray
-import time
-os.environ["ARROW_S3_DISABLE"] = "1"
-os.environ["RAY_DEDUP_LOGS"] = "0"
+from pathlib import Path
+from typing import Dict, Union, Any, List, Tuple
+from datetime import datetime
 
+# Add project root to Python path
+try:
+    project_root = Path(__file__).parent.parent.parent.parent.parent
+    if not project_root.exists():
+        # Handle network path by using raw string
+        project_root = Path(r"\\".join(str(project_root).split("\\")))
+    sys.path.append(str(project_root))
+    print(f"Project root: {project_root}")
+except Exception as e:
+    print(f"Error setting project root path: {e}")
+    # Fallback to current directory if path resolution fails
+    sys.path.append(os.getcwd())
+    print(f"Current directory: {os.getcwd()}")
+
+# Import logger
 from utils.logger import ExperimentLogger
-from models.StackedEnsemble.base.model_interface import BaseModel
-from models.StackedEnsemble.utils.metrics import calculate_metrics
-from models.StackedEnsemble.shared.validation import NestedCVValidator
-from models.StackedEnsemble.shared.mlflow_utils import MLFlowManager
-from models.StackedEnsemble.shared.config_loader import ConfigurationLoader
+experiment_name = "catboost_soccer_prediction"
+logger = ExperimentLogger(experiment_name)
 
-# Global validator actor name
-VALIDATOR_ACTOR_NAME = "global_validator"
+from utils.create_evaluation_set import setup_mlflow_tracking
+mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
-@ray.remote
-class ValidatorActor:
-    """Ray actor for validation that ensures single instance."""
+# Import shared utility functions
+from models.StackedEnsemble.shared.hypertuner_utils import (
+    predict, predict_proba, evaluate, optimize_threshold, calculate_feature_importance,
+    DEFAULT_MIN_RECALL
+)
+from models.StackedEnsemble.shared.data_loader import DataLoader
+
+# Global settings
+min_recall = 0.20  # Minimum acceptable recall
+n_trials = 100  # Number of hyperparameter optimization trials as in notebook
+
+# Base parameters as in the notebook
+base_params = {
+    'loss_function': 'Logloss',
+    'eval_metric': 'AUC',                        # Primary metric
+    'custom_metric': ['Precision', 'Recall'],
+    'thread_count': -1,
+    'random_seed': 19,
+    'task_type': 'CPU'
+}
+
+def load_hyperparameter_space():
+    """
+    Define the hyperparameter space for CatBoost model tuning.
     
-    def __init__(self, logger=None, model_type='catboost'):
-        """Initialize validator actor.
-        
-        Args:
-            logger: Logger instance
-            model_type: Model type
-        """
-        # Create a new logger instance for the actor
-        self.logger = logger or ExperimentLogger('catboost_hypertuning')
-        self.validator = NestedCVValidator(logger=self.logger, model_type=model_type)
-        self.logger.info("Created new validator instance")
-        
-    def optimize_hyperparameters(self, model, X, y, X_val, y_val, X_test, y_test, param_space, search_strategy):
-        """Run hyperparameter optimization."""
-        try:
-            # Ensure logger is available
-            if not hasattr(self, 'logger') or self.logger is None:
-                self.logger = ExperimentLogger('catboost_hypertuning')
-                self.validator.logger = self.logger
-            
-            self.logger.info("Starting hyperparameter optimization in validator actor")
-            result = self.validator.optimize_hyperparameters(
-                model, X, y, X_val, y_val, X_test, y_test, param_space, search_strategy
-            )
-            self.logger.info("Completed hyperparameter optimization in validator actor")
-            return result
-        except Exception as e:
-            if hasattr(self, 'logger') and self.logger is not None:
-                self.logger.error(f"Error in optimize_hyperparameters: {str(e)}")
-            return self._get_default_params(param_space)
-    
-    def _get_default_params(self, param_space):
-        """Get default parameters if optimization fails."""
-        try:
-            # Ensure logger is available
-            if not hasattr(self, 'logger') or self.logger is None:
-                self.logger = ExperimentLogger('catboost_hypertuning')
-                self.validator.logger = self.logger
-            
-            self.logger.info("Getting default parameters")
-            params = self.validator._get_default_params(param_space)
-            self.logger.info(f"Retrieved default parameters: {params}")
-            return params
-        except Exception as e:
-            if hasattr(self, 'logger') and self.logger is not None:
-                self.logger.error(f"Error getting default parameters: {str(e)}")
-            return {
-                'learning_rate': 0.01,
-                'iterations': 500,
-                'depth': 6,
-                'task_type': 'CPU',
-                'thread_count': -1,
-                'bootstrap_type': 'Bernoulli',
-                'grow_policy': 'SymmetricTree'
+    Returns:
+        dict: Hyperparameter space configuration
+    """
+    try:
+        # Define hyperparameter space directly as in notebook
+        hyperparameter_space = {
+            'learning_rate': {
+                'type': 'float',
+                'low': 0.005,
+                'high': 0.06,
+                'log': True
+            },
+            'depth': {
+                'type': 'int',
+                'low': 4,
+                'high': 10
+            },
+            'min_data_in_leaf': {
+                'type': 'int', 
+                'low': 15,
+                'high': 40
+            },
+            'subsample': {
+                'type': 'float',
+                'low': 0.60,
+                'high': 0.85
+            },
+            'colsample_bylevel': {
+                'type': 'float',
+                'low': 0.35,
+                'high': 0.55
+            },
+            'reg_lambda': {
+                'type': 'float',
+                'low': 1.0,
+                'high': 5.0,
+                'log': True
+            },
+            'leaf_estimation_iterations': {
+                'type': 'int',
+                'low': 1,
+                'high': 5
+            },
+            'bagging_temperature': {
+                'type': 'float',
+                'low': 2.5,
+                'high': 5.0
+            },
+            'scale_pos_weight': {
+                'type': 'float',
+                'low': 3.0,
+                'high': 10.0 
+            },
+            'early_stopping_rounds': {
+                'type': 'int',
+                'low': 50,
+                'high': 300
             }
-    
-    def get_info(self):
-        """Get validator info."""
-        return "Validator is set up"
-
-class CatBoostModel(BaseModel):
-    """CatBoost model implementation with CPU optimization."""
-    
-    _validator_actor = None  # Class-level validator actor reference
-    
-    @classmethod
-    def get_validator_actor(cls, logger=None):
-        """Get or create the validator actor."""
-        if cls._validator_actor is None:
-            max_retries = 3
-            retry_count = 0
-            
-            while retry_count < max_retries:
-                try:
-                    # Try to get existing actor
-                    cls._validator_actor = ray.get_actor(VALIDATOR_ACTOR_NAME)
-                    logger.info("Retrieved existing validator actor")
-                    break
-                except ValueError:
-                    try:
-                        # Create new actor with proper options
-                        cls._validator_actor = ValidatorActor.options(
-                            name=VALIDATOR_ACTOR_NAME,
-                            lifetime="detached",  # Keep actor alive across failures
-                            max_restarts=-1,  # Unlimited restarts
-                            max_task_retries=3  # Retry failed tasks
-                        ).remote(logger)
-                        logger.info("Created new validator actor")
-                        break
-                    except Exception as e:
-                        retry_count += 1
-                        logger.warning(f"Attempt {retry_count} to create validator actor failed: {str(e)}")
-                        if retry_count == max_retries:
-                            raise RuntimeError("Failed to create validator actor after maximum retries")
-                        time.sleep(1)  # Wait before retrying
-        
-        return cls._validator_actor
-
-    def __init__(self, experiment_name: str = 'catboost_experiment', model_type: str = "catboost", logger: ExperimentLogger = None):
-        """Initialize CatBoost model.
-        
-        Args:
-            experiment_name: Name for MLflow experiment tracking
-            model_type: Type of model (e.g., 'catboost')
-            logger: Logger instance
-        """
-        # Get project root path
-        project_root = Path(__file__).parent.parent.parent.parent.parent
-        
-        # Set up configuration paths
-        self.config_path = os.path.join(
-            project_root,
-            "models",
-            "StackedEnsemble",
-            "config",
-            "model_configs",
-            "catboost_config.yaml"
-        )
-        
-        # Initialize base class
-        super().__init__(model_type=model_type, experiment_name=experiment_name)
-        self.logger = logger or ExperimentLogger('catboost_hypertuning')
-        self.mlflow = MLFlowManager(experiment_name)
-        self.model = None
-        self.best_threshold = 0.3
-        
-        # Initialize Ray if not already initialized
-        if not ray.is_initialized():
-            ray.init(
-                num_cpus=os.cpu_count(),
-                ignore_reinit_error=True,
-                include_dashboard=False,
-                log_to_driver=True
-            )
-        
-        # Get or create validator actor
-        self.validator = self.get_validator_actor(self.logger)
-            
-        # Load model configuration
-        self.config_loader = ConfigurationLoader(logger=self.logger, experiment_name=experiment_name)
-        self.model_config = self.config_loader.load_model_config(model_type)
-        self.hyperparameter_space = self.config_loader.load_hyperparameter_space(model_type)
-        self.best_params = {}
-        self.best_score = 0
-        
-        self.logger.info(f"Initialized {model_type} model with experiment name: {experiment_name}")
-
-    def _create_model(self, **kwargs) -> cb.CatBoostClassifier:
-        """Create and configure CatBoost model instance.
-        
-        Args:
-            **kwargs: Model parameters to override defaults
-            
-        Returns:
-            Configured CatBoost classifier
-        """
-        params = {
-            'task_type': 'CPU',
-            'thread_count': -1,
-            'bootstrap_type': 'Bernoulli',
-            'grow_policy': 'SymmetricTree',
-            'loss_function': 'Logloss',
-            'eval_metric': 'AUC',
-            'random_seed': 19
         }
-        
-        if self.model_config:
-            params.update(self.model_config.get('params', {}))
-        params.update(kwargs)
-        
-        # Ensure task_type is in the proper uppercase format
-        if 'task_type' in params and isinstance(params['task_type'], str):
-            params['task_type'] = params['task_type'].upper()
-        
-        return cb.CatBoostClassifier(**params)
+        return hyperparameter_space
+    except Exception as e:
+        logger.error(f"Error creating hyperparameter space: {str(e)}")
+        return None
 
-    def _convert_to_model_format(
-        self,
-        X: pd.DataFrame,
-        y: Optional[pd.Series] = None) -> Tuple[Any, Optional[Any]]:
-        """Convert data to CatBoost format.
+def create_model(model_params):
+    """
+    Create and configure CatBoost model instance.
+    
+    Args:
+        model_params (dict): Model parameters
         
-        Args:
-            X: Feature matrix
-            y: Optional target vector
-            
-        Returns:
-            Tuple of (X, y) in CatBoost format
-        """
-        if X is None:
-            raise ValueError("The feature dataset X must not be None.")
-        
-        # CatBoost can handle pandas DataFrames directly
-        # Just ensure y is numeric if provided
-        if y is not None and isinstance(y, pd.Series):
-            y = y.astype(int)
-        
-        return X, y
+    Returns:
+        cb.CatBoostClassifier: Configured CatBoost model
+    """
+    if model_params is None:
+        model_params = base_params
+    
+    model_params.update(base_params)
+    
+    return cb.CatBoostClassifier(**model_params)
 
-    def _train_model(
-        self,
-        X: Any,
-        y: Any,
-        X_val: Any,
-        y_val: Any,
-        X_test: Any,
-        y_test: Any,
-        **kwargs) -> Dict[str, float]:
-        """Train CatBoost model with early stopping.
+def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
+    """
+    Train a CatBoost model with early stopping and threshold optimization.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_test: Validation features
+        y_test: Validation labels
+        X_eval: Evaluation features
+        y_eval: Evaluation labels
+        model_params: Model parameters
         
-        Args:
-            X: Training features
-            y: Training labels
-            X_val: Validation features
-            y_val: Validation labels
-            X_test: Test features
-            y_test: Test labels
-            **kwargs: Additional training parameters
-            
-        Returns:
-            Dictionary of training metrics
-        """
-        # Convert data to CatBoost format
-        X_train, y_train = self._convert_to_model_format(X, y)
+    Returns:
+        tuple: (trained_model, metrics)
+    """
+    try:
+        # Extract early stopping rounds if present
+        early_stopping_rounds = model_params.pop('early_stopping_rounds', 100)
         
-        if X_val is not None and y_val is not None:
-            X_val, y_val = self._convert_to_model_format(X_val, y_val)
+        # Create model with remaining parameters
+        model = create_model(model_params)
         
-        if X_test is not None and y_test is not None:
-            X_test, y_test = self._convert_to_model_format(X_test, y_test)
+        # Create eval set for early stopping
+        eval_set = Pool(X_test, y_test)
         
-        # Set up validation if provided
-        eval_set = [(X_test, y_test)] if X_test is not None else None
-        
-        # Train model with early stopping
-        self.model.fit(
-            X_train,
-            y_train,
-            X_val,
-            y_val,
-            X_test,
-            y_test,
+        # Fit model with early stopping
+        model.fit(
+            X_train, y_train,
             eval_set=eval_set,
-            silent=True
+            early_stopping_rounds=early_stopping_rounds,
+            verbose=False
         )
         
-        # Evaluate on validation set
-        metrics = self.evaluate(X_val, y_val)
-        return metrics
+        # Get validation predictions and optimize threshold
+        best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
+        
+        return model, metrics
+        
+    except Exception as e:
+        logger.error(f"Error training CatBoost model: {str(e)}")
+        raise
 
-    def _predict_model(self, X: Any) -> np.ndarray:
-        """Generate predictions using trained model.
+def save_model(model, path, threshold=0.5):
+    """
+    Save CatBoost model to specified path.
+    
+    Args:
+        model: Trained CatBoost model
+        path: Path to save model
+        threshold: Optimal decision threshold
+    """
+    if model is None:
+        raise RuntimeError("No model to save")
         
-        Args:
-            X: Features to predict
-            
-        Returns:
-            Array of predictions
-        """
-        if self.model is None:
-            raise RuntimeError("Model must be trained before prediction")
+    try:
+        # Create directory if it doesn't exist
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         
-        X_cb, _ = self._convert_to_model_format(X)
-        probas = self.model.predict_proba(X_cb)[:, 1]
-        return (probas >= self.best_threshold).astype(int)
-
-    def _predict_proba_model(self, X: Any) -> np.ndarray:
-        """Generate probability predictions.
-        
-        Args:
-            X: Features to predict
-            
-        Returns:
-            Array of probability predictions
-        """
-        if self.model is None:
-            raise RuntimeError("Model must be trained before prediction")
-        
-        X_cb, _ = self._convert_to_model_format(X)
-        return self.model.predict_proba(X_cb)[:, 1]
-
-    def optimize_hyperparameters(
-        self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_val: pd.DataFrame,
-        y_val: pd.Series,
-        X_test: pd.DataFrame,
-        y_test: pd.Series,
-        **kwargs) -> Dict[str, Any]:
-        """Optimize hyperparameters using nested cross-validation.
-        
-        Args:
-            X_train: Training features
-            y_train: Training labels
-            X_val: Validation features
-            y_val: Validation labels
-            X_test: Testing features
-            y_test: Testing labels
-            **kwargs: Additional parameters for optimization
-            
-        Returns:
-            Dictionary of best hyperparameters
-        """
-        self.logger.info("Starting hyperparameter optimization")
-        
-        # Prepare hyperparameter space
-        param_space = self._prepare_parameter_space()
-        self.logger.info("Parameter space prepared for optimization")
-        
-        try:
-            # Get optimization results from the Ray actor
-            self.logger.info("Starting hyperparameter optimization with Ray actor")
-            
-            # Log data shapes for debugging
-            self.logger.info(
-                f"Data shapes for optimization:"
-                f"\n - Training: {X_train.shape}"
-                f"\n - Validation: {X_val.shape}"
-                f"\n - Test: {X_test.shape}"
-            )
-            
-            # Start optimization with timeout
-            self.logger.info("Submitting optimization task to Ray actor")
-            optimization_future = self.validator.optimize_hyperparameters.remote(
-                self, X_train, y_train, X_val, y_val, X_test, y_test,
-                param_space, self.hyperparameter_space.get('search_strategy', {})
-            )
-            
-            # Wait for results with timeout and logging
-            try:
-                self.logger.info("Waiting for optimization results...")
-                best_params = ray.get(optimization_future, timeout=3600)  # 1 hour timeout
-                self.logger.info("Received optimization results from Ray actor")
-            except ray.exceptions.GetTimeoutError:
-                self.logger.error("Optimization timed out after 1 hour")
-                return self._get_default_params(param_space)
-            except Exception as e:
-                self.logger.error(f"Error getting optimization results: {str(e)}")
-                return self._get_default_params(param_space)
-            
-            # Log successful completion
-            self.logger.info("Hyperparameter optimization completed successfully")
-            self.logger.info(f"Best parameters found: {best_params}")
-            return best_params
-                
-        except Exception as e:
-            self.logger.error(f"Error in hyperparameter optimization: {str(e)}")
-            # Get default parameters
-            try:
-                self.logger.info("Attempting to get default parameters")
-                default_params = ray.get(self.validator._get_default_params.remote(param_space))
-                self.logger.info(f"Using default parameters: {default_params}")
-                return default_params
-            except Exception as inner_e:
-                self.logger.error(f"Error getting default parameters: {str(inner_e)}")
-                return {
-                    'task_type': 'CPU',
-                    'thread_count': -1,
-                    'bootstrap_type': 'Bernoulli',
-                    'grow_policy': 'SymmetricTree',
-                }
-
-    def _prepare_parameter_space(self) -> Dict[str, Any]:
-        """Prepare hyperparameter space for optimization."""
-        self.logger.info("Preparing parameter space for optimization")
-        param_space = {}
-        param_ranges = {}
-        
-        for param, config in self.hyperparameter_space['hyperparameters'].items():
-            try:
-                if isinstance(config, (int, float, str)):
-                    param_space[param] = config
-                    param_ranges[param] = f"fixed({config})"
-                    self.logger.debug(f"Added fixed parameter {param}: {config}")
-                elif isinstance(config, dict) and 'distribution' in config:
-                    if config['distribution'] == 'log_uniform':
-                        min_val = max(config['min'], 1e-8)
-                        max_val = max(config['max'], min_val + 1e-8)
-                        param_space[param] = tune.uniform(min_val, max_val)
-                        param_ranges[param] = f"uniform({min_val:.2e}, {max_val:.2e})"
-                        self.logger.debug(f"Added log_uniform parameter {param}")
-                    elif config['distribution'] == 'uniform':
-                        param_space[param] = tune.uniform(config['min'], config['max'])
-                        param_ranges[param] = f"uniform({config['min']:.3f}, {config['max']:.3f})"
-                        self.logger.debug(f"Added uniform parameter {param}")
-                    elif config['distribution'] == 'int_uniform':
-                        min_val = max(1, int(config['min']))
-                        max_val = max(min_val + 1, int(config['max']))
-                        param_space[param] = tune.randint(min_val, max_val)
-                        param_ranges[param] = f"int_uniform({min_val}, {max_val})"
-                        self.logger.debug(f"Added int_uniform parameter {param}")
-            except Exception as e:
-                self.logger.error(f"Error processing parameter {param}: {str(e)}")
-                param_space[param] = config
-                param_ranges[param] = f"default({config})"
-        
-        # Add CPU-specific parameters
-        cpu_params = {
-            'task_type': 'CPU',
-            'thread_count': -1,
-            'bootstrap_type': 'Bernoulli',
-            'grow_policy': 'SymmetricTree',
-        }
-        param_space.update(cpu_params)
-        self.logger.info("Added CPU-specific parameters")
-        
-        # Log the final parameter space
-        self.logger.info("Final parameter space for optimization:")
-        for param, range_str in param_ranges.items():
-            self.logger.info(f"{param}: {range_str}")
-            
-        return param_space
-
-    def _save_model_to_path(self, path: Path) -> None:
-        """Save CatBoost model to specified path.
-        
-        Args:
-            path: Path to save the model
-        """
-        if self.model is None:
-            raise RuntimeError("No model to save")
-        
-        # Save model in both formats for flexibility
-        # Save scikit-learn model format
-        joblib.dump(self.model, path)
-        
-        # Also save native format for faster loading
-        native_path = path.with_suffix('.cbm')
-        self.model.save_model(str(native_path))
+        # Save model
+        model.save_model(str(path))
         
         # Save threshold
         threshold_path = path.parent / "threshold.json"
         with open(threshold_path, 'w') as f:
-            json.dump({'threshold': self.best_threshold}, f)
+            json.dump({
+                'threshold': threshold,
+                'model_type': 'catboost',
+                'params': model.get_params()
+            }, f, indent=2)
             
-        self.logger.info(f"Model saved to {path} (sklearn format) and {native_path} (native format)")
+        logger.info(f"Model saved to {path}")
+        
+    except Exception as e:
+        logger.error(f"Error saving model: {str(e)}")
+        raise
 
-    def _load_model_from_path(self, path: Path) -> None:
-        """Load CatBoost model from specified path.
+def load_model(path):
+    """
+    Load CatBoost model from specified path.
+    
+    Args:
+        path: Path to load model from
         
-        Args:
-            path: Path to load the model from
-        """
-        if not path.exists():
-            raise FileNotFoundError(f"No model file found at {path}")
-            
-        # Try loading native format first (it's faster)
-        native_path = path.with_suffix('.cbm')
-        if native_path.exists():
-            self.model = cb.CatBoostClassifier()
-            self.model.load_model(str(native_path))
-            self.logger.info(f"Loaded native model from {native_path}")
-        else:
-            # Fall back to scikit-learn format
-            self.model = joblib.load(path)
-            self.logger.info(f"Loaded scikit-learn model from {path}")
+    Returns:
+        tuple: (model, threshold)
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"No model file found at {path}")
         
-        # Load threshold if available
+    try:
+        # Load model
+        model = cb.CatBoostClassifier()
+        model.load_model(str(path))
+        
+        # Load threshold
         threshold_path = path.parent / "threshold.json"
         if threshold_path.exists():
             with open(threshold_path, 'r') as f:
-                self.best_threshold = json.load(f)['threshold']
+                data = json.load(f)
+                threshold = data.get('threshold', 0.5)
         else:
-            self.best_threshold = 0.3  # Default threshold
+            threshold = 0.5
             
-        self.logger.info(f"Model loaded with threshold {self.best_threshold}")
-
-    def fit(
-        self,
-        X: Any,
-        y: Any,
-        X_val: Any,
-        y_val: Any,
-        X_test: Optional[Any] = None,
-        y_test: Optional[Any] = None,
-        **kwargs) -> Dict[str, float]:
-        """Train the CatBoost model with early stopping."""
-        self.logger.info("Starting model training")
+        logger.info(f"Model loaded from {path}")
+        return model, threshold
         
+    except Exception as e:
+        logger.error(f"Error loading model: {str(e)}")
+        raise
+
+def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
+    """
+    Run hyperparameter optimization with Optuna.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_test: Testing features
+        y_test: Testing labels
+        X_eval: Evaluation features
+        y_eval: Evaluation labels
+        hyperparameter_space: Hyperparameter space configuration
+        
+    Returns:
+        dict: Best parameters
+    """
+    logger.info("Starting hyperparameter optimization")
+    
+    if not hyperparameter_space:
+        hyperparameter_space = load_hyperparameter_space()
+    
+    best_score = 0.0
+    
+    def objective(trial):
         try:
-            # Remove incompatible parameters
-            if 'scale_pos_weight' in kwargs:
-                del kwargs['scale_pos_weight']
+            params = base_params.copy()
             
-            # Ensure proper parameter types
-            int_params = [
-                'iterations', 'early_stopping_rounds', 'depth', 
-                'min_data_in_leaf', 'thread_count', 'random_seed'
-            ]
-            for param in int_params:
-                if param in kwargs:
-                    kwargs[param] = int(round(float(kwargs[param])))
+            # Add hyperparameters from config
+            for param_name, param_config in hyperparameter_space.items():
+                if param_config['type'] == 'float':
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config['low'],
+                        param_config['high'],
+                        log=param_config.get('log', False)
+                    )
+                elif param_config['type'] == 'int':
+                    params[param_name] = trial.suggest_int(
+                        param_name,
+                        param_config['low'],
+                        param_config['high']
+                    )
             
-            # Ensure proper string parameters
-            str_params = ['task_type', 'bootstrap_type', 'grow_policy', 'loss_function']
-            for param in str_params:
-                if param in kwargs and not isinstance(kwargs[param], str):
-                    kwargs[param] = str(kwargs[param])
-            
-            # Initialize model with parameters
-            self.model = self._create_model(**kwargs)
-            
-            # Prepare data
-            feature_names = list(X.columns) if hasattr(X, 'columns') else None
-            train_pool = Pool(data=X, label=y, feature_names=feature_names)
-            
-            # Prepare validation data
-            if X_val is not None and y_val is not None:
-                valid_pool = Pool(data=X_val, label=y_val, feature_names=feature_names)
-            else:
-                self.logger.info("No validation set provided")
-                valid_pool = None
-            
-            # Prepare test data
-            if X_test is not None and y_test is not None:
-                test_pool = Pool(data=X_test, label=y_test, feature_names=feature_names)
-            else:
-                self.logger.info("No test set provided")
-                test_pool = None
-            
-            # Train model
-            self.model.fit(
-                train_pool,
-                eval_set=test_pool if test_pool is not None else valid_pool,
-                use_best_model=True,
-                silent=True
+            # Train model and get metrics
+            model, metrics = train_model(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                params
             )
             
-            # Evaluate model
-            metrics = self.evaluate(X_val, y_val) if X_val is not None else {
-                'precision': 0.0,
-                'recall': 0.0,
-                'f1': 0.0,
-                'auc': 0.0,
-                'brier_score': 1.0
-            }
+            recall = metrics.get('recall', 0.0)
+            precision = metrics.get('precision', 0.0)
             
-            self.logger.info("Model training completed successfully")
-            return metrics
+            # Optimize for precision while maintaining minimum recall
+            score = precision if recall >= min_recall else 0.0
+            
+            logger.info(f"Trial {trial.number}:")
+            logger.info(f"  Params: {params}")
+            logger.info(f"  Score: {score}")
+            
+            for metric_name, metric_value in metrics.items():
+                trial.set_user_attr(metric_name, metric_value)
+            return score
             
         except Exception as e:
-            self.logger.error(f"Error during model training: {str(e)}")
-            # Return default metrics
-            return {
-                'precision': 0.0,
-                'recall': 0.0,
-                'f1': 0.0,
-                'auc': 0.0,
-                'brier_score': 1.0
-            }
-
-    def predict(self, X: Any) -> np.ndarray:
-        """Make predictions using the trained model.
-        
-        Args:
-            X: Features to predict on
-            
-        Returns:
-            Array of predictions
-        """
-        return self._predict_model(X)
+            logger.error(f"Trial failed: {str(e)}")
+            return 0.0
     
-    def predict_proba(self, X: Any) -> np.ndarray:
-        """Get prediction probabilities.
+    try:
+        study = optuna.create_study(
+            study_name='catboost_optimization',
+            direction='maximize',
+            sampler=optuna.samplers.TPESampler(
+                n_startup_trials=20,
+                prior_weight=0.4,
+                seed=int(time.time())
+            )
+        )
         
-        Args:
-            X: Features to predict on
+        # Optimize
+        best_score = -float('inf')  # Initialize with worst possible score
+        best_params = {}
+        
+        def callback(study, trial):
+            nonlocal best_score
+            nonlocal best_params
+            logger.info(f"Current best score: {best_score:.4f}")
+            if trial.value > best_score:
+                best_score = trial.value
+                best_params = trial.params
+                logger.info(f"New best score found in trial {trial.number}: {best_score:.4f}")
+            return best_score
+        
+        study.optimize(
+            objective, 
+            n_trials=n_trials, 
+            timeout=10000,
+            show_progress_bar=True,
+            callbacks=[callback]
+        )
+        
+        best_params.update(base_params)
+        
+        logger.info(f"Best trial value: {best_score}")
+        logger.info(f"Best parameters found: {best_params}")
+        return best_params
             
-        Returns:
-            Array of prediction probabilities
-        """
-        return self._predict_proba_model(X)
+    except Exception as e:
+        logger.error(f"Error in hyperparameter optimization: {str(e)}")
+        raise
 
-    def evaluate(self, X_val: Any, y_val: Any, optimize_threshold: bool = True) -> Dict[str, float]:
-        """Evaluate model performance."""
-        if optimize_threshold:
-            threshold = self._optimize_threshold(X_val, y_val)
-        else:
-            threshold = 0.3
-        
-        metrics = self._calculate_metrics(X_val, y_val, threshold)
-        self.mlflow.log_metrics({f'val_{k}': v for k, v in metrics.items()})
-        return metrics
+def hypertune_catboost(experiment_name: str):
+    """
+    Main training function with MLflow tracking.
     
-    def _optimize_threshold(self, X_val: Any, y_val: Any) -> float:
-        """Optimize decision threshold based on precision-recall trade-off.
+    Args:
+        experiment_name (str): Experiment name for MLflow tracking
         
-        Args:
-            X_val: Validation features
-            y_val: Validation labels
-            
-        Returns:
-            Optimized threshold value
-        """
-        probas = self.predict_proba(X_val)
-        thresholds = np.linspace(0.25, 0.8, 56)
-        best_threshold = 0.3
-        best_score = 0.0
-        
-        for threshold in thresholds:
-            preds = (probas >= threshold).astype(int)
-            try:
-                metrics = calculate_metrics(y_val, preds, probas)
-            except Exception as e:
-                self.logger.error(f"Error calculating metrics: {str(e)}")
-                continue
-            
-            # Apply precision-recall constraints
-            if metrics['recall'] >= 0.15 and metrics['recall'] < 0.9 and metrics['precision'] > 0.30:
-                score = metrics['precision']
-                if score > best_score:
-                    self.logger.info(
-                        f"Threshold: {threshold:.4f}, "
-                        f"Precision: {metrics['precision']:.4f}, "
-                        f"Recall: {metrics['recall']:.4f}"
-                    )
-                    best_score = score
-                    best_threshold = threshold
-        
-        self.best_threshold = best_threshold
-        self.logger.info(f"Optimized threshold: {best_threshold:.4f}")
-        return best_threshold
-    
-    def _calculate_metrics(self, X: Any, y: Any, threshold: float = 0.3) -> Dict[str, float]:
-        """Calculate performance metrics.
-        
-        Args:
-            X: Features
-            y: True labels
-            threshold: Decision threshold (default: 0.3)
-            
-        Returns:
-            Dictionary of metrics
-            
-        Raises:
-            ValueError: If threshold is None
-        """
-        if threshold is None:
-            threshold = 0.3
-            
-        probas = self.predict_proba(X)
-        preds = (probas >= threshold).astype(int)
-        try:
-            metrics = calculate_metrics(y, preds, probas)
-        except Exception as e:
-            self.logger.error(f"Error calculating metrics: {str(e)}")
-            return None
-        return metrics
-
-    def get_feature_importance(self) -> pd.DataFrame:
-        """Get feature importance scores.
-        
-        Returns:
-            DataFrame with feature importance scores
-        """
-        if not self.is_fitted:
-            raise RuntimeError("Model must be trained before getting feature importance")
-            
-        try:
-            # Get feature importance scores
-            feature_importance = self.model.get_feature_importance()
-            feature_names = self.model.feature_names_
-            
-            # Convert to DataFrame
-            importance_df = pd.DataFrame({
-                'feature': feature_names,
-                'importance': feature_importance
+    Returns:
+        tuple: (best_params, best_metrics)
+    """
+    try:
+        # Start MLflow run
+        with mlflow.start_run(run_name=f"catboost_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+            # Set tags
+            mlflow.set_tags({
+                "model_type": "catboost_base",
+                "training_mode": "global",
+                "cpu_only": True
             })
-            importance_df = importance_df.sort_values(
-                'importance',
-                ascending=False
-            ).reset_index(drop=True)
             
-            return importance_df
+            # Load hyperparameter space
+            hyperparameter_space = load_hyperparameter_space()
             
-        except Exception as e:
-            self.logger.error(f"Error getting feature importance: {str(e)}")
-            return pd.DataFrame(columns=['feature', 'importance'])
+            # Run hyperparameter optimization
+            logger.info("Starting hyperparameter optimization")
+            best_params = optimize_hyperparameters(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                hyperparameter_space=hyperparameter_space
+            )
+            
+            # Train final model with best parameters
+            logger.info("Training final model with best parameters")
+            model, metrics = train_model(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                best_params
+            )
+            
+            # Log final metrics
+            mlflow.log_metrics({
+                "precision": metrics.get('precision', 0.0),
+                "recall": metrics.get('recall', 0.0),
+                "f1": metrics.get('f1', 0.0),
+                "auc": metrics.get('auc', 0.0),
+                "threshold": metrics.get('threshold', 0.5)
+            })
+            
+            # Log model
+            mlflow.catboost.log_model(
+                model,
+                "model",
+                registered_model_name=f"catboost_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            )
+            
+            # Save model locally
+            model_path = Path(f"models/StackedEnsemble/base/tree_based/catboost_model_{datetime.now().strftime('%Y%m%d_%H%M')}.cbm")
+            save_model(model, model_path, metrics.get('threshold', 0.5))
+            
+            return best_params, metrics
+            
+    except Exception as e:
+        logger.error(f"Error in hyperparameter tuning: {str(e)}")
+        return None, None
 
-    def get_params(self) -> Dict[str, Any]:
-        """Get current model parameters.
+def log_to_mlflow(model, metrics, params, experiment_name):
+    """
+    Log trained model, metrics, and parameters to MLflow.
+    
+    Args:
+        model: Trained CatBoost model
+        metrics: Model evaluation metrics
+        params: Model parameters
+        experiment_name: Experiment name
         
-        Returns:
-            Dictionary of parameters
-        """
-        if self.model is not None:
-            return self.model.get_params()
-        return super().get_params()
+    Returns:
+        str: Run ID
+    """
+    try:
+        # Set up MLflow tracking
+        mlflow.set_experiment(experiment_name)
+        
+        # Start a new run
+        with mlflow.start_run(run_name=f"catboost_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
+            # Log parameters
+            for param_name, param_value in params.items():
+                mlflow.log_param(param_name, param_value)
+            
+            # Log metrics
+            for metric_name, metric_value in metrics.items():
+                mlflow.log_metric(metric_name, metric_value)
+            
+            # Log model
+            model_info = mlflow.catboost.log_model(
+                model,
+                "model",
+                registered_model_name=f"catboost_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            )
+            
+            # Log feature importance using the shared utility
+            importance_df = calculate_feature_importance(model)
+            
+            # Save to CSV and log as artifact
+            if not importance_df.empty:
+                importance_path = "feature_importance.csv"
+                importance_df.to_csv(importance_path, index=False)
+                mlflow.log_artifact(importance_path)
+                os.remove(importance_path)
+            
+            logger.info(f"Model logged to MLflow: {model_info.model_uri}")
+            logger.info(f"Run ID: {run.info.run_id}")
+            return run.info.run_id
+            
+    except Exception as e:
+        logger.error(f"Error logging to MLflow: {str(e)}")
+        return None
 
-    def set_params(self, **params) -> None:
-        """Set model parameters.
+def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
+    """
+    Train CatBoost model with focus on precision target.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_test: Testing features
+        y_test: Testing labels
+        X_eval: Evaluation features
+        y_eval: Evaluation labels
         
-        Args:
-            **params: Parameters to set
-        """
-        if self.model is not None:
-            self.model.set_params(**params)
-        super().set_params(**params)
+    Returns:
+        tuple: (best_model, best_metrics)
+    """
+    try:
+        # Run hyperparameter tuning
+        logger.info("Running hyperparameter tuning")
+        best_params, _ = hypertune_catboost(experiment_name)
+        
+        if not best_params:
+            logger.warning("Hyperparameter tuning failed. Using default parameters.")
+            best_params = base_params.copy()
+            best_params.update({
+                'learning_rate': 0.05,
+                'depth': 6,
+                'min_data_in_leaf': 20,
+                'subsample': 0.8,
+                'colsample_bylevel': 0.8,
+                'reg_lambda': 1.0
+            })
+        
+        # Train final model with best parameters
+        logger.info("Training final model with best parameters")
+        model, metrics = train_model(
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, y_eval,
+            best_params
+        )
+        
+        # Log to MLflow
+        log_to_mlflow(model, metrics, best_params, experiment_name)
+        
+        # Save model locally
+        model_path = f"models/StackedEnsemble/base/tree_based/catboost_model_{datetime.now().strftime('%Y%m%d_%H%M')}.cbm"
+        save_model(model, model_path, metrics.get('threshold', 0.5))
+        
+        return model, metrics
+        
+    except Exception as e:
+        logger.error(f"Error in precision-focused training: {str(e)}")
+        return None, None
+
+def main():
+    """
+    Main execution function.
+    """
+    try:
+        logger.info("Starting CatBoost model training")
+        
+        # Import data at runtime to avoid global scope issues
+        from models.StackedEnsemble.shared.data_loader import DataLoader
+        
+        global X_train, y_train, X_test, y_test, X_eval, y_eval
+        
+        # Load data
+        dataloader = DataLoader()
+        X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
+        
+        # Log data shapes
+        logger.info(f"Training data shape: {X_train.shape}")
+        logger.info(f"Testing data shape: {X_test.shape}")
+        logger.info(f"Evaluation data shape: {X_eval.shape}")
+        logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
+        
+        # Hyperparameter optimization
+        logger.info("Starting hyperparameter optimization")
+        best_params = hypertune_catboost(experiment_name)
+        logger.info(f"Best parameters: {best_params}")
+        
+    except Exception as e:
+        logger.error(f"Error in main execution: {str(e)}")
+
+if __name__ == "__main__":
+    main() 

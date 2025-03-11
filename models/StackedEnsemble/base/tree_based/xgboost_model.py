@@ -1,636 +1,722 @@
-"""XGBoost model implementation with CPU optimization."""
+"""
+XGBoost Model for Soccer Draw Prediction
 
-import numpy as np
-import pandas as pd
-from pathlib import Path
+This module implements a XGBoost-based model for predicting soccer match draws.
+It includes functionality for model creation, training, hyperparameter optimization,
+threshold tuning, and MLflow integration for experiment tracking.
+
+The implementation focuses on high precision while maintaining a minimum recall threshold.
+"""
+
 import os
 import sys
-from typing import Dict, Any, Optional, Union, Tuple
-import xgboost as xgb
-import joblib
 import json
+import pickle
+import random
+import logging
+import warnings
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+import mlflow
+import joblib
 import optuna
-from optuna.trial import Trial
-from optuna.samplers import TPESampler
-from optuna.pruners import MedianPruner
-from sklearn.metrics import roc_auc_score
+from optuna.integration import XGBoostPruningCallback
+from sklearn.metrics import (
+    precision_score, recall_score, f1_score, roc_auc_score,
+    confusion_matrix, classification_report, precision_recall_curve
+)
+from datetime import datetime
+import time
+import gc
+from pathlib import Path
+from typing import Any, Dict, Tuple
+import sklearn
+
 
 # Add project root to Python path
-project_root = str(Path(__file__).parent.parent.parent.parent.parent)
-if project_root not in sys.path:
-    sys.path.append(project_root)
-os.environ["PYTHONPATH"] = project_root + os.pathsep + os.environ.get("PYTHONPATH", "")
-experiment_name = 'xgboost_stacked_ensemble_model'
-from models.StackedEnsemble.base.model_interface import BaseModel
+try:
+    project_root = Path(__file__).parent.parent.parent.parent.parent
+    if not project_root.exists():
+        # Handle network path by using raw string
+        project_root = Path(r"\\".join(str(project_root).split("\\")))
+    sys.path.append(str(project_root))
+    print(f"Project root: {project_root}")
+except Exception as e:
+    print(f"Error setting project root path: {e}")
+    # Fallback to current directory if path resolution fails
+    sys.path.append(os.getcwd())
+    print(f"Current directory: {os.getcwd()}")
+
 from utils.logger import ExperimentLogger
+experiment_name = "xgboost_soccer_prediction"
+logger = ExperimentLogger(experiment_name)
 
-class XGBoostModel(BaseModel):
-    """XGBoost model with CPU optimization."""
+from utils.dynamic_sampler import DynamicTPESampler
+from utils.create_evaluation_set import setup_mlflow_tracking
+mlrunds_dir = setup_mlflow_tracking(experiment_name)
+
+# Import shared utility functions
+from models.StackedEnsemble.shared.hypertuner_utils import (
+    predict, predict_proba, evaluate, optimize_threshold, calculate_feature_importance
+)
+from models.StackedEnsemble.shared.data_loader import DataLoader
+
+# Global settings
+min_recall = 0.20  # Minimum acceptable recall
+n_trials = 2000  # Number of hyperparameter optimization trials as in notebook
+# Get current versions
+xgb_version = xgb.__version__
+sklearn_version = sklearn.__version__
+
+# Create explicit pip requirements list
+pip_requirements = [
+    f"xgboost=={xgb_version}",
+    f"scikit-learn=={sklearn_version}",
+    f"mlflow=={mlflow.__version__}"
+]
+
+# Base parameters as in the notebook
+base_params = {
+    'objective': 'binary:logistic',
+    'verbosity': 0,
+    'nthread': -1,
+    'seed': 19,
+    'device': 'cpu',
+    'tree_method': 'hist'
+}
+
+def load_hyperparameter_space():
+    """
+    Define a tightened hyperparameter space for XGBoost tuning based on the
+    top 10 best trials from the last hypertuning cycle. The updated ranges
+    focus on regions where higher precision was observed.
     
-    def __init__(
-        self,
-        model_type: str = 'xgboost',
-        experiment_name: str = None,
-        logger: ExperimentLogger = None):
-        """Initialize XGBoost model.
-        
-        Args:
-            model_type: Model type identifier
-            experiment_name: Name for experiment tracking
-            logger: Logger instance
-        """
-        # Initialize logger first
-        self.logger = logger or ExperimentLogger(experiment_name or f"{model_type}_experiment")
-        
-        # Initialize base class
-        super().__init__(
-            model_type=model_type,
-            experiment_name=experiment_name,
-            logger=self.logger
-        )
-        
-        # Set CPU-specific parameters
-        self.tree_method = 'hist'  # CPU-optimized histogram-based tree method
-        self.n_jobs = -1  # Use all available CPU cores
+    Returns:
+        dict: Hyperparameter space configuration with narrowed ranges and steps.
+    """
+    hyperparameter_space = {
+        'learning_rate': {
+            'type': 'float',
+            'low': 0.005,               # narrowed based on top trials (0.06-0.09)
+            'high': 0.05,
+            'log': False,
+            'step': 0.005
+        },
+        'max_depth': {
+            'type': 'int',
+            'low': 5,                  # narrowed based on top trials (6-7)
+            'high': 10,
+            'step': 1
+        },
+        'min_child_weight': {
+            'type': 'int',
+            'low': 200,                # narrowed based on top trials (~450)
+            'high': 500,
+            'step': 5
+        },
+        'colsample_bytree': {
+            'type': 'float',
+            'low': 0.65,                # narrowed based on top trials (0.62-0.65)
+            'high': 0.90,
+            'log': False,
+            'step': 0.01
+        },
+        'subsample': {
+            'type': 'float',
+            'low': 0.6,                # narrowed based on top trials (0.85-0.91)
+            'high': 0.95,
+            'log': False,
+            'step': 0.01
+        },
+        'gamma': {
+            'type': 'float',
+            'low': 0.02,                # narrowed based on top trials (0.52-1.59)
+            'high': 1.0,
+            'log': False,
+            'step': 0.02
+        },
+        'lambda': {
+            'type': 'float',
+            'low': 1.0,                # narrowed based on top trials (7.51-8.01)
+            'high': 8.0,
+            'log':  False,
+            'step': 0.01
+        },
+        'alpha': {
+            'type': 'float',
+            'low': 10.0,               # narrowed based on top trials (61.14-61.92)
+            'high': 70.0,
+            'log': False,
+            'step': 0.1
+        },
+        'early_stopping_rounds': {
+            'type': 'int',
+            'low': 400,                # kept lower bound as per project rules, widened upper bound
+            'high': 1200,
+            'step': 20
+        },
+        'scale_pos_weight': {
+            'type': 'float',
+            'low': 2.0,                # narrowed based on top trials (1.8-2.28)
+            'high': 4.5,
+            'log': False,
+            'step': 0.05
+        }
+    }
+    return hyperparameter_space
 
-    def _create_model(self, **kwargs) -> xgb.XGBClassifier:
-        """Create and configure XGBoost model instance."""
-        try:
-            # Get default parameters
-            params = {
-                'objective': 'binary:logistic',
-                'tree_method': self.tree_method,
-                'n_jobs': self.n_jobs,
-                'eval_metric': ['logloss', 'auc']
-            }
-            
-            # Update with provided parameters
-            params.update(kwargs)
-            
-            # Create model
-            model = xgb.XGBClassifier(**params)
-            
-            return model
-            
-        except Exception as e:
-            self.logger.error(f"Error creating XGBoost model: {str(e)}")
-            raise
+def create_model(model_params):
+    """
+    Create and configure XGBoost model instance.
+    Matches the notebook implementation.
+    
+    Args:
+        model_params (dict): Model parameters
+        
+    Returns:
+        xgb.XGBClassifier: Configured XGBoost model
+    """
+    try:
+        params = base_params.copy()
+        
+        # Update with provided parameters
+        params.update(model_params)
+        
+        # Create model
+        model = xgb.XGBClassifier(**params)
+        
+        return model
+        
+    except Exception as e:
+        logger.error(f"Error creating XGBoost model: {str(e)}")
+        raise
 
-    def _optimize_threshold(self, y_true: np.ndarray, y_prob: np.ndarray) -> float:
-        """Optimize prediction threshold with focus on precision while maintaining recall above 15%.
-        
-        Args:
-            y_true: True labels
-            y_prob: Predicted probabilities
-            
-        Returns:
-            Optimized threshold value
-        """
-        try:
-            best_threshold = 0.5
-            best_precision = 0.0
-            
-            # Search through thresholds
-            for threshold in np.linspace(0.3, 0.8, 51):
-                y_pred = (y_prob >= threshold).astype(int)
-                
-                # Calculate confusion matrix components
-                tp = np.sum((y_true == 1) & (y_pred == 1))
-                fp = np.sum((y_true == 0) & (y_pred == 1))
-                fn = np.sum((y_true == 1) & (y_pred == 0))
-                
-                precision = tp / (tp + fp + 1e-10)
-                recall = tp / (tp + fn + 1e-10)
-                
-                # Only consider thresholds that maintain recall above 15%
-                if recall >= 0.15:
-                    if precision > best_precision:
-                        best_precision = precision
-                        best_threshold = threshold
-                        # self.logger.info(f"New best threshold: {threshold:.3f} (Precision: {precision:.3f}, Recall: {recall:.3f})")
-            
-            self.logger.info(f"Optimized threshold: {best_threshold:.3f} with precision: {best_precision:.3f}")
-            return best_threshold
-            
-        except Exception as e:
-            self.logger.error(f"Error optimizing threshold: {str(e)}")
-            return 0.5
-
-    def _train_model(   
-        self,
-        X: Any,
-        y: Any,
-        X_val: Any,
-        y_val: Any,
-        X_test: Any,
-        y_test: Any,
-        **kwargs) -> Dict[str, float]:
-        """Train XGBoost model with validation data."""
-        try:
-            self.model = self._create_model(**kwargs)
-            
-            # Set up early stopping
-            early_stopping_rounds = kwargs.get('early_stopping_rounds', 50)
-            
-            # Train model with validation data for early stopping
-            self.model.fit(
-                    X, y,
-                eval_set=[(X_test, y_test)],
-                verbose=False
-            )
-            
-            # Get predictions on validation set
-            y_prob = self.model.predict_proba(X_val)[:, 1]
-            
-            # Optimize threshold
-            self.best_threshold = self._optimize_threshold(y_val, y_prob)
-            y_pred = (y_prob >= self.best_threshold).astype(int)
-            
-            # Calculate confusion matrix components
-            tp = np.sum((y_val == 1) & (y_pred == 1))
-            fp = np.sum((y_val == 0) & (y_pred == 1))
-            fn = np.sum((y_val == 1) & (y_pred == 0))
-            
-            # Calculate metrics
-            metrics = {
-                'precision': tp / (tp + fp + 1e-10),
-                'recall': tp / (tp + fn + 1e-10),
-                'f1': 2 * tp / (2 * tp + fp + fn + 1e-10),
-                'auc': roc_auc_score(y_val, y_prob),
-                'brier_score': np.mean((y_prob - y_val) ** 2),
-                'threshold': self.best_threshold
-            }
-            
-            # Add best iteration if available
-            if hasattr(self.model, 'best_iteration_'):
-                metrics['best_iteration'] = self.model.best_iteration_
-            
-            # self.logger.info(f"Training metrics: {metrics}")
-            return metrics, self.model
-            
-        except Exception as e:
-            self.logger.error(f"Error training XGBoost model: {str(e)}")
-            return {
-                'precision': 0.0,
-                'recall': 0.0,
-                'f1': 0.0,
-                'auc': 0.0,
-                'brier_score': 1.0,
-                'threshold': 0.5
-            }, self.model
-
-    def _predict_model(self, X: Any) -> np.ndarray:
-        """Generate predictions using trained model."""
-        if self.model is None:
-            raise RuntimeError("Model must be trained before prediction")
-        
-        try:
-            probas = self.model.predict_proba(X)[:, 1]
-            threshold = getattr(self, 'best_threshold', 0.5)
-            return (probas >= threshold).astype(int)
-            
-        except Exception as e:
-            self.logger.error(f"Error in model prediction: {str(e)}")
-            return np.zeros(len(X))
-
-    def _predict_proba_model(self, X: Any) -> np.ndarray:
-        """Generate probability predictions."""
-        if self.model is None:
-            raise RuntimeError("Model must be trained before prediction")
-        
-        try:
-            return self.model.predict_proba(X)[:, 1]
-            
-        except Exception as e:
-            self.logger.error(f"Error in probability prediction: {str(e)}")
-            return np.zeros(len(X))
-
-    def _save_model_to_path(self, path: Path) -> None:
-        """Save XGBoost model to specified path."""
-        if self.model is None:
-            raise RuntimeError("No model to save")
-        
-        try:
-            # Create directory if it doesn't exist
-            path.parent.mkdir(parents=True, exist_ok=True)
-            
-        # Save model
-            joblib.dump(self.model, path)
-        
-            # Save threshold
-            threshold_path = path.parent / "threshold.json"
-            with open(threshold_path, 'w') as f:
-                    json.dump({
-                        'threshold': getattr(self, 'best_threshold', 0.5),
-                        'model_type': self.model_type,
-                        'params': self.model.get_params()
-                    }, f, indent=2)
-            
-            self.logger.info(f"Model saved to {path}")
-            
-        except Exception as e:
-            self.logger.error(f"Error saving model: {str(e)}")
-            raise
-
-    def _load_model_from_path(self, path: Path) -> None:
-        """Load XGBoost model from specified path."""
-        if not path.exists():
-            raise FileNotFoundError(f"No model file found at {path}")
-        
-        try:
-        # Load model
-            self.model = joblib.load(path)
-        
-            # Load threshold
-            threshold_path = path.parent / "threshold.json"
-            if threshold_path.exists():
-                with open(threshold_path, 'r') as f:
-                        data = json.load(f)
-                        self.best_threshold = data.get('threshold', 0.5)
-            else:
-                self.best_threshold = 0.5
-                
-            self.logger.info(f"Model loaded from {path}")
-            
-        except Exception as e:
-            self.logger.error(f"Error loading model: {str(e)}")
-            raise
-
-    def get_feature_importance(self) -> pd.DataFrame:
-        """Get feature importance scores.
-        
-        Returns:
-            DataFrame with feature importance scores
-        """
-        if not self.is_fitted:
-            raise RuntimeError("Model must be trained before getting feature importance")
-            
-        try:
-            # Get feature importance scores
-            importance_type = 'gain'
-            scores = self.model.get_booster().get_score(importance_type=importance_type)
-            
-            # Convert to DataFrame
-            importance_df = pd.DataFrame(
-                list(scores.items()),
-                columns=['feature', 'importance']
-            )
-            importance_df = importance_df.sort_values(
-                'importance',
-                ascending=False
-            ).reset_index(drop=True)
-            
-            return importance_df
-            
-        except Exception as e:
-            self.logger.error(f"Error getting feature importance: {str(e)}")
-            return pd.DataFrame(columns=['feature', 'importance'])
-
-    def optimize_hyperparameters(
-        self,
-        X_train: Any,
-        y_train: Any,
-        X_val: Any,
-        y_val: Any,
-        X_test: Any,
-        y_test: Any) -> Dict[str, Any]:
-        """Run hyperparameter optimization with Optuna.
-        
-        Args:
-            X_train, y_train: Training data
-            X_val, y_val: Validation data
-            X_test, y_test: Test data
-            
-        Returns:
-            Best hyperparameters found
-        """
-        
-        def objective(trial: Trial) -> float:
-            """Optuna objective function."""
-            # Define hyperparameter space
-            params = {
-                'tree_method': 'hist',
-                'objective': 'binary:logistic', 
-                'eval_metric': ['logloss', 'auc'],
-                'random_state': 42,
-                'n_jobs': self.n_jobs,
-                
-                # Learning rate and boosting parameters
-                'learning_rate': trial.suggest_float('learning_rate', 0.0001, 0.2, log=True),
-                'n_estimators': trial.suggest_int('n_estimators', 100, 5000),
-                'max_depth': trial.suggest_int('max_depth', 2, 12),
-                'min_child_weight': trial.suggest_int('min_child_weight', 1, 500),
-                
-                # Sampling parameters
-                'subsample': trial.suggest_float('subsample', 0.1, 1.0),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 1.0),
-                
-                # Regularization
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.001, 10.0),
-                'reg_lambda': trial.suggest_float('reg_lambda', 0.01, 50.0),
-                'gamma': trial.suggest_float('gamma', 0.001, 1.0),
-                
-                # Early stopping
-                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 100, 1000),
-                
-                # New parameter
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 0.5, 20)
-            }
-            
-            # Create fresh model instance for this trial
-            self.model = None  # Reset model
-            metrics = self._train_model(
-                X_train, y_train,
-                X_val, y_val,
-                X_test, y_test,
-                **params
-            )
-            
-            # Calculate score based on precision if recall threshold met
-            score = metrics['precision'] if metrics['recall'] > 0.15 else 0.0
-            
-            # Log trial results
-            self.logger.info(f"Trial {trial.number}:")
-            self.logger.info(f"  Params: {params}")
-            self.logger.info(f"  Metrics: {metrics}")
-            self.logger.info(f"  Score: {score}")
-            
-            # Report intermediate values for pruning
-            trial.report(score, step=1)
-            if trial.should_prune():
-                raise optuna.TrialPruned()
-            
-            return score
-        
-        try:
-            # Create study
-            study = optuna.create_study(
-                direction='maximize',
-                sampler=TPESampler(
-                    seed=42,
-                    consider_prior=True,
-                    prior_weight=0.8,
-                    n_startup_trials=10
-                ),
-                pruner=MedianPruner(
-                    n_startup_trials=10,
-                    n_warmup_steps=5,
-                    interval_steps=2
-                )
-            )
-            
-            # Run optimization
-            study.optimize(
-                objective,
-                n_trials=300,
-                timeout=7200,  # 2 hour timeout
-                show_progress_bar=True
-            )
-            
-            # Get best parameters
-            best_params = study.best_params
-            best_params.update({
-                'tree_method': 'hist',
-                'objective': 'binary:logistic',
-                'eval_metric': ['logloss', 'auc'],
-                'random_state': 42,
-                'n_jobs': self.n_jobs
-            })
-            
-            self.logger.info(f"Best parameters found: {best_params}")
-            return best_params 
-        except Exception as e:
-            self.logger.error(f"Error in hyperparameter optimization: {str(e)}")
-            return {
-                'tree_method': 'hist',
-                'objective': 'binary:logistic',
-                'eval_metric': ['logloss', 'auc'],
-                'random_state': 42,
-                'n_jobs': self.n_jobs,
-                'learning_rate': 0.01,
-                'n_estimators': 1000,
-                'max_depth': 6,
-                'min_child_weight': 100,
-                'subsample': 0.5,
-                'colsample_bytree': 0.8,
-                'reg_alpha': 0.01,
-                'reg_lambda': 0.01,
-                'gamma': 0.0
-            }
-
-    def get_params(self) -> Dict[str, Any]:
-        """Get current model parameters.
-            
-        Returns:
-            Dictionary of parameters
-        """
-        if self.model is not None:
-            return self.model.get_params()
-        return {}
-
-    def set_params(self, **params) -> None:
-        """Set model parameters.
-        
-        Args:
-            **params: Parameters to set
-        """
-        if self.model is not None:
-            self.model.set_params(**params)
-        super().set_params(**params)
-
-    def evaluate(self, X: Any, y: Any) -> Dict[str, float]:
-        """Evaluate model performance on given data.
-        
-        Args:
-            X: Features to evaluate on
-            y: True labels
-            
-        Returns:
-            Dictionary of evaluation metrics
-        """
-        try:
-            # Get predictions
-            y_pred = self.predict(X)
-            y_prob = self.predict_proba(X)
-            
-            # Calculate confusion matrix components
-            tp = np.sum((y == 1) & (y_pred == 1))
-            fp = np.sum((y == 0) & (y_pred == 1))
-            fn = np.sum((y == 1) & (y_pred == 0))
-            
-            # Calculate metrics
-            metrics = {
-                'precision': tp / (tp + fp + 1e-10),
-                'recall': tp / (tp + fn + 1e-10),
-                'f1': 2 * tp / (2 * tp + fp + fn + 1e-10),
-                'auc': roc_auc_score(y, y_prob),
-                'brier_score': np.mean((y_prob - y) ** 2)
-            }
-            
-            # self.logger.info(f"Evaluation metrics: {metrics}")
-            return metrics
-            
-        except Exception as e:
-            self.logger.error(f"Error evaluating model: {str(e)}")
-            return {
-                'precision': 0.0,
-                'recall': 0.0,
-                'f1': 0.0,
-                'auc': 0.0,
-                'brier_score': 1.0
-            }
-
-def train_main(experiment_name: str) -> float:
-    """Main training function with MLflow tracking.
+def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
+    """
+    Train a XGBoost model with early stopping and threshold optimization.
+    Updated to match notebook implementation.
     
     Args:
         X_train: Training features
-        y_train: Training labels 
-        X_test: Test features
-        y_test: Test labels
+        y_train: Training labels
+        X_test: Validation features
+        y_test: Validation labels
         X_eval: Evaluation features
         y_eval: Evaluation labels
-        experiment_name: Name for MLflow experiment
+        model_params: Model parameters
         
     Returns:
-        Best precision achieved
+        tuple: (trained_model, metrics)
     """
-    # Import required libraries
-    import mlflow
-    import numpy as np
-    import pandas as pd
-    import random
-    import os
-    from datetime import datetime
-    from copy import deepcopy
-    from mlflow.models.signature import infer_signature
-    from utils.logger import ExperimentLogger
-    from utils.create_evaluation_set import setup_mlflow_tracking
-    exp_logger = ExperimentLogger(experiment_name)
-    mlruns_dir = setup_mlflow_tracking(experiment_name)
-    from models.StackedEnsemble.shared.data_loader import DataLoader
+    try:
+        
+        # Create model with remaining parameters
+        model = create_model(model_params)
+        
+        # Create eval set for early stopping
+        eval_set = [(X_test, y_test)]
+        # Fit model with early stopping
+        model.fit(
+            X_train, y_train,
+            eval_set=eval_set,
+            verbose=False
+        )
+        
+        # Get validation predictions
+        best_threshold, metrics = optimize_threshold(
+            model, X_eval, y_eval, min_recall=min_recall
+        )
+        
+        return model, metrics
+        
+    except Exception as e:
+        logger.error(f"Error training XGBoost model: {str(e)}")
+        raise
 
-    Dataloader = DataLoader()
-    X_train, y_train, X_test, y_test, X_eval, y_eval = Dataloader.load_data()
-    model_params = {
-            'objective': 'binary:logistic',
-            'tree_method': 'hist',
-            'n_jobs': -1,
-            'eval_metric': ['logloss', 'auc'],
-            'learning_rate': 0.010015907839790164,
-            'n_estimators': 130,
-            'max_depth': 12,
-            'min_child_weight': 94,
-            'subsample': 0.2995141103683554,
-            'colsample_bytree': 0.9674584520568595,
-            'reg_alpha': 1.993141051251477,
-            'reg_lambda': 13.371664552561292,
-            'gamma': 0.30999189400795213,
-            'early_stopping_rounds': 443,
-            'scale_pos_weight': 11.221714608899202
-        }
+def save_model(model, path, threshold=0.5):
+    """
+    Save XGBoost model to specified path.
+    Updated to match notebook implementation using joblib.
     
-    # Convert all features to float64
-    X_train = X_train.astype('float64')
-    X_test = X_test.astype('float64')
-    X_eval = X_eval.astype('float64')
-    
-    exp_logger.info(f"X_train shape: {X_train.shape}")
-    exp_logger.info(f"X_test shape: {X_test.shape}")
-    exp_logger.info(f"X_eval shape: {X_eval.shape}")
+    Args:
+        model: Trained XGBoost model
+        path: Path to save model
+        threshold: Optimal decision threshold
+    """
+    if model is None:
+        raise RuntimeError("No model to save")
+        
+    try:
+        # Create directory if it doesn't exist
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Save model
+        joblib.dump(model, path)
+        
+        # Save threshold
+        threshold_path = path.parent / "threshold.json"
+        with open(threshold_path, 'w') as f:
+            json.dump({
+                'threshold': threshold,
+                'model_type': 'xgboost',
+                'params': model.get_params()
+            }, f, indent=2)
+            
+        logger.info(f"Model saved to {path}")
+        
+    except Exception as e:
+        logger.error(f"Error saving model: {str(e)}")
+        raise
 
-    # Start MLflow run with experiment tracking
-    with mlflow.start_run(run_name=f"xgboost_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+def load_model(path):
+    """
+    Load XGBoost model from specified path.
+    Updated to match notebook implementation using joblib.
+    
+    Args:
+        path: Path to load model from
+        
+    Returns:
+        tuple: (model, threshold)
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"No model file found at {path}")
+        
+    try:
+        # Load model
+        model = joblib.load(path)
+        
+        # Load threshold
+        threshold_path = path.parent / "threshold.json"
+        if threshold_path.exists():
+            with open(threshold_path, 'r') as f:
+                data = json.load(f)
+                threshold = data.get('threshold', 0.5)
+        else:
+            threshold = 0.5
+            
+        logger.info(f"Model loaded from {path}")
+        return model, threshold
+        
+    except Exception as e:
+        logger.error(f"Error loading model: {str(e)}")
+        raise
+
+def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
+    """
+    Run hyperparameter optimization with Optuna.
+    Added to match notebook implementation.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_test: Testing features
+        y_test: Testing labels
+        X_eval: Evaluation features
+        y_eval: Evaluation labels
+        hyperparameter_space: Hyperparameter space configuration
+        
+    Returns:
+        dict: Best parameters
+    """
+    logger.info("Starting hyperparameter optimization")
+    
+    if not hyperparameter_space:
+        hyperparameter_space = load_hyperparameter_space()
+    
+    best_score = 0.0
+    
+    def objective(trial):
         try:
-            # Log global parameters to MLflow
-            mlflow.log_params(model_params)
-            exp_logger.info("Logged model parameters to MLflow")
+            params = base_params.copy()
             
-            # Log dataset sizes
-            mlflow.log_metric("train_samples", len(X_train))
-            mlflow.log_metric("test_samples", len(X_test))
-            mlflow.log_metric("eval_samples", len(X_eval))
+            # Add hyperparameters from config with step size if provided
+            for param_name, param_config in hyperparameter_space.items():
+                if param_config['type'] == 'float':
+                    if 'step' in param_config:
+                        # Use step if it is provided
+                        params[param_name] = trial.suggest_float(
+                            param_name,
+                            param_config['low'],
+                            param_config['high'],
+                            step=param_config['step'],
+                            log=param_config.get('log', False)
+                        )
+                    else:
+                        params[param_name] = trial.suggest_float(
+                            param_name,
+                            param_config['low'],
+                            param_config['high'],
+                            log=param_config.get('log', False)
+                        )
+                elif param_config['type'] == 'int':
+                    if 'step' in param_config:
+                        params[param_name] = trial.suggest_int(
+                            param_name,
+                            param_config['low'],
+                            param_config['high'],
+                            step=param_config['step']
+                        )
+                    else:
+                        params[param_name] = trial.suggest_int(
+                            param_name,
+                            param_config['low'],
+                            param_config['high']
+                        )
             
-            # Set MLflow tags
+            # Train model and get metrics
+            model, metrics = train_model(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                params
+            )
+            
+            recall = metrics.get('recall', 0.0)
+            precision = metrics.get('precision', 0.0)
+            
+            # Optimize for precision while maintaining minimum recall
+            score = precision if recall >= min_recall else 0.0
+            
+            for metric_name, metric_value in metrics.items():
+                trial.set_user_attr(metric_name, metric_value)
+            return score
+            
+        except Exception as e:
+            logger.error(f"Trial failed: {str(e)}")
+            return 0.0
+    
+    try:
+        # Use dynamic sampler to expand the search space after 200 trials
+        # sampler = DynamicTPESampler(
+        #     dynamic_threshold=200,
+        #     dynamic_search_space={
+        #         "learning_rate": lambda orig: optuna.distributions.FloatDistribution(low=0.005, high=0.05, step=0.005),
+        #         "max_depth": lambda orig: optuna.distributions.IntDistribution(low=5, high=10, step=1),
+        #         "min_child_weight": lambda orig: optuna.distributions.IntDistribution(low=200, high=500, step=5),
+        #         "colsample_bytree": lambda orig: optuna.distributions.FloatDistribution(low=0.60, high=0.90, step=0.01),
+        #         "subsample": lambda orig: optuna.distributions.FloatDistribution(low=0.55, high=0.95, step=0.01),
+        #         "gamma": lambda orig: optuna.distributions.FloatDistribution(low=0.02, high=1.5, step=0.02),
+        #         "lambda": lambda orig: optuna.distributions.FloatDistribution(low=1.0, high=8.0, step=0.01),
+        #         "alpha": lambda orig: optuna.distributions.FloatDistribution(low=10.0, high=70.0, step=0.1),
+        #         "early_stopping_rounds": lambda orig: optuna.distributions.IntDistribution(low=400, high=1200, step=20),
+        #         "scale_pos_weight": lambda orig: optuna.distributions.FloatDistribution(low=2.0, high=5.0, step=0.05)
+        #     },
+        #     n_startup_trials=200,
+        #     prior_weight=0.2,
+        #     warn_independent_sampling=False
+        # )
+        cmaes_sampler = optuna.samplers.CmaEsSampler(
+            x0={'learning_rate': 0.025, 'max_depth': 7, 'min_child_weight': 350,
+                'colsample_bytree': 0.75, 'subsample': 0.75, 'gamma': 0.5,
+                'lambda': 4.0, 'alpha': 40.0, 'early_stopping_rounds': 800,
+                'scale_pos_weight': 3.5},
+            sigma0=0.1,
+            seed=42,
+            n_startup_trials=2000
+        )
+        random_sampler = optuna.samplers.RandomSampler(
+            seed=19
+        )
+        study = optuna.create_study(
+            study_name='xgboost_optimization',
+            direction='maximize',
+            sampler=random_sampler
+        )
+        
+        # Optimize
+        best_score = -float('inf')  # Initialize with worst possible score
+        best_params = {}
+        top_trials = []
+
+        def callback(study, trial):
+            nonlocal best_score
+            nonlocal best_params
+            nonlocal top_trials
+            logger.info(f"Current best score: {best_score:.4f}")
+            if trial.value > best_score:
+                best_score = trial.value
+                best_params = trial.params
+                logger.info(f"New best score found in trial {trial.number}: {best_score:.4f}")
+            # Create a record for the current trial
+            current_run = (trial.value, trial.params, trial.number)
+            
+            # Append the trial's record to the list
+            top_trials.append(current_run)
+            
+            # Sort the list in descending order by score (trial.value)
+            top_trials.sort(key=lambda x: x[0], reverse=True)
+            
+            # Keep only the top 10 best trials
+            top_trials = top_trials[:10]
+            # Log top trials as a table every 10 trials
+            if trial.number % 9 == 0:
+                table_header = "| Rank | Trial # | Score | Parameters |"
+                table_separator = "|------|---------|-------|------------|"
+                table_rows = [f"| {i+1} | {trial[2]} | {trial[0]:.4f} | {trial[1]} |" for i, trial in enumerate(top_trials)]
+                
+                logger.info("Top 10 trials:")
+                logger.info(table_header)
+                logger.info(table_separator)
+                for row in table_rows:
+                    logger.info(row)
+            return best_score
+        
+        study.optimize(
+            objective, 
+            n_trials=n_trials, 
+            timeout=10000,  # 10000 seconds as in notebook
+            show_progress_bar=True,
+            callbacks=[callback]
+        )
+        
+        best_params.update(base_params)
+        
+        logger.info(f"Best trial value: {best_score}")
+        logger.info(f"Best parameters found: {best_params}")
+        return best_params
+            
+    except Exception as e:
+        logger.error(f"Error in hyperparameter optimization: {str(e)}")
+        raise
+
+def hypertune_xgboost(experiment_name: str):
+    """
+    Main training function with MLflow tracking.
+    Updated name from hypertune_mlp to hypertune_xgboost to match notebook.
+    
+    Args:
+        experiment_name (str): Experiment name for MLflow tracking
+        
+    Returns:
+        tuple: (best_params, best_metrics)
+    """
+    try:
+        # Start MLflow run
+        with mlflow.start_run(run_name=f"xgboost_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
+            # Set tags
             mlflow.set_tags({
                 "model_type": "xgboost_base",
                 "training_mode": "global",
-                "cpu_only": True,
-                "tree_method": "hist"
+                "cpu_only": True
             })
             
-            # Train model with precision target
-            precision = 0
-            highest_precision = 0
-            best_seed = 0
-            best_model = None
+            # Load hyperparameter space
+            hyperparameter_space = load_hyperparameter_space()
             
-            while precision < 0.48:
-                for random_seed in range(1, 5):
-                    exp_logger.info(f"Using sequential random seed: {random_seed}")
-                    os.environ['PYTHONHASHSEED'] = str(random_seed)
-                    np.random.seed(random_seed)
-                    random.seed(random_seed)
-                    model = XGBoostModel()
-                    model.model = model._create_model(**model_params)
-                    model_params['random_state'] = random_seed
-                    metrics = model._train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, **model_params)
-                    precision = metrics['precision']
-                    threshold = metrics['threshold']
-                    
-                    if precision > highest_precision:
-                        highest_precision = precision
-                        best_seed = random_seed
-                        best_model = model
-                        best_threshold = threshold
-                    if precision >= 0.48:
-                        exp_logger.info(f"Target precision achieved: {precision:.4f}")
-                        break
-                    exp_logger.info(f"Current precision: {precision:.4f}, target: 0.4800 highest precision: {highest_precision:.4f} best seed: {best_seed}")
-                
-                # If target not reached, use best model
-                if precision < 0.48:
-                    exp_logger.info(f"Target precision not reached, using best seed: {best_seed}")
-                    model = best_model
-                    precision = highest_precision
-                    threshold = best_threshold
-                    break
-
-            # Log validation metrics
-            val_metrics = model.evaluate(X_eval, y_eval)
-            for metric_name, metric_value in val_metrics.items():
-                mlflow.log_metric(f"val_{metric_name}", metric_value)
-
-            # Create and log model signature
-            try:
-                input_example = X_train.head(1).copy().astype('float64')
-                signature = infer_signature(
-                    model_input=input_example,
-                    model_output=model.predict(input_example)
-                )
-                
-                mlflow.xgboost.log_model(
-                    xgb_model=model,
-                    artifact_path="xgboost_base_model",
-                    registered_model_name=f"xgboost_base_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                    signature=signature
-                )
-            except Exception as e:
-                exp_logger.error(f"Error in model logging: {str(e)}")
-                mlflow.xgboost.log_model(
-                    xgb_model=model,
-                    artifact_path="xgboost_base_model",
-                    registered_model_name=f"xgboost_base_{datetime.now().strftime('%Y%m%d_%H%M')}"
-                )
-
-            exp_logger.info("Base model training completed successfully")
-            exp_logger.info(f"MLflow run ID: {mlflow.active_run().info.run_id}")
+            # Run hyperparameter optimization
+            logger.info("Starting hyperparameter optimization")
+            best_params = optimize_hyperparameters(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                hyperparameter_space=hyperparameter_space
+            )
             
-            return precision
+            # Train final model with best parameters
+            logger.info("Training final model with best parameters")
+            model, metrics = train_model(
+                X_train, y_train,
+                X_test, y_test,
+                X_eval, y_eval,
+                best_params
+            )
+            
+            # Log final metrics
+            mlflow.log_metrics({
+                "precision": metrics.get('precision', 0.0),
+                "recall": metrics.get('recall', 0.0),
+                "f1": metrics.get('f1', 0.0),
+                "auc": metrics.get('auc', 0.0),
+                "threshold": metrics.get('threshold', 0.5)
+            })
+            
+            # Log model
+            # Create input example with a sample from evaluation data
+            # Handle integer columns by converting them to float64 to properly manage missing values
+            input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, 'iloc') else X_eval[:5].copy()
+            
+            # Identify and convert integer columns to float64 to prevent schema enforcement errors
+            if hasattr(input_example, 'dtypes'):
+                for col in input_example.columns:
+                    if input_example[col].dtype.kind == 'i':
+                        logger.info(f"Converting integer column '{col}' to float64 to handle potential missing values")
+                        input_example[col] = input_example[col].astype('float64')
+            # Log best parameters to MLflow
+            logger.info("Logging best parameters to MLflow")
+            for param_name, param_value in best_params.items():
+                mlflow.log_param(param_name, param_value)
+                
+            # Infer signature with proper handling for integer columns with potential missing values
+            signature = mlflow.models.infer_signature(
+                input_example,
+                model.predict(input_example)
+            )
+            
+            # Log warning about integer columns in signature
+            logger.info("Model signature created - check logs for any warnings about integer columns")
+            # When saving model, explicitly specify requirements
+            mlflow.xgboost.log_model(
+                model,
+                "model",
+                pip_requirements=pip_requirements,  # Explicitly set requirements
+                registered_model_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}",
+                signature=signature
+            )
+            
+            return best_params, metrics
+            
+    except Exception as e:
+        logger.error(f"Error in hyperparameter tuning: {str(e)}")
+        return None, None
 
-        except Exception as e:
-            exp_logger.error(f"Error in training main: {str(e)}")
-            raise
+def log_to_mlflow(model, metrics, params, experiment_name):
+    """
+    Log trained model, metrics, and parameters to MLflow.
+    
+    Args:
+        model: Trained XGBoost model
+        metrics: Model evaluation metrics
+        params: Model parameters
+        experiment_name: Experiment name
+        
+    Returns:
+        str: Run ID
+    """
+    try:
+        # Set up MLflow tracking
+        mlflow.set_experiment(experiment_name)
+        
+        # Start a new run
+        with mlflow.start_run(run_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
+            # Log parameters
+            for param_name, param_value in params.items():
+                mlflow.log_param(param_name, param_value)
+            
+            # Log metrics
+            for metric_name, metric_value in metrics.items():
+                mlflow.log_metric(metric_name, metric_value)
+            
+            # Log model
+            model_info = mlflow.xgboost.log_model(
+                model,
+                "model",
+                registered_model_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            )
+            
+            # Log feature importance using the shared utility
+            importance_df = calculate_feature_importance(
+                model, 
+                feature_names=X_train.columns if hasattr(X_train, 'columns') else None
+            )
+            
+            if not importance_df.empty:
+                # Save to CSV and log as artifact
+                importance_path = "feature_importance.csv"
+                importance_df.to_csv(importance_path, index=False)
+                mlflow.log_artifact(importance_path)
+                os.remove(importance_path)
+            
+            logger.info(f"Model logged to MLflow: {model_info.model_uri}")
+            logger.info(f"Run ID: {run.info.run_id}")
+            return run.info.run_id
+            
+    except Exception as e:
+        logger.error(f"Error logging to MLflow: {str(e)}")
+        return None
+
+def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
+    """
+    Train XGBoost model with focus on precision target.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_test: Testing features
+        y_test: Testing labels
+        X_eval: Evaluation features
+        y_eval: Evaluation labels
+        
+    Returns:
+        tuple: (best_model, best_metrics)
+    """
+    try:
+        # Run hyperparameter tuning
+        logger.info("Running hyperparameter tuning")
+        best_params, _ = hypertune_xgboost(experiment_name)
+        
+        if not best_params:
+            logger.warning("Hyperparameter tuning failed. Using default parameters.")
+            best_params = base_params.copy()
+            best_params.update({
+                'learning_rate': 0.05,
+                'max_depth': 6,
+                'min_child_weight': 20,
+                'colsample_bytree': 0.8,
+                'subsample': 0.8,
+                'alpha': 0.1,
+                'lambda': 0.1,
+                'gamma': 0.01
+            })
+        
+        # Train final model with best parameters
+        logger.info("Training final model with best parameters")
+        model, metrics = train_model(
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, y_eval,
+            best_params
+        )
+        
+        # Log to MLflow
+        log_to_mlflow(model, metrics, best_params, experiment_name)
+        
+        # Save model locally
+        model_path = f"models/StackedEnsemble/base/tree_based/xgboost_model_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl"
+        save_model(model, model_path, metrics.get('threshold', 0.5))
+        
+        return model, metrics
+        
+    except Exception as e:
+        logger.error(f"Error in precision-focused training: {str(e)}")
+        return None, None
+
+def main():
+    """
+    Main execution function.
+    """
+    try:
+        logger.info("Starting XGBoost model training")
+        
+        # Import data at runtime to avoid global scope issues
+        from models.StackedEnsemble.shared.data_loader import DataLoader
+        
+        global X_train, y_train, X_test, y_test, X_eval, y_eval
+        
+        # Load data
+        dataloader = DataLoader()
+        X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
+        
+        # Log data shapes
+        logger.info(f"Training data shape: {X_train.shape}")
+        logger.info(f"Testing data shape: {X_test.shape}")
+        logger.info(f"Evaluation data shape: {X_eval.shape}")
+        logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
+        
+        # Update base parameters to use aucpr and custom precision metric
+        base_params['eval_metric'] =  ['aucpr', 'error', 'logloss']
+        
+        logger.info(f"Current base parameters: {base_params}")
+        
+        current_params, current_metrics = hypertune_xgboost(experiment_name)
+        
+        logger.info(f"Run completed with parameters: {current_params}")
+        logger.info(f"Run metrics: {current_metrics}")
+    except Exception as e:
+        logger.error(f"Error in main execution: {str(e)}")
 
 if __name__ == "__main__":
-    train_main(experiment_name)
+    main() 

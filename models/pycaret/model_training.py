@@ -165,7 +165,7 @@ def compare_models_for_precision(n_select=3, include=None, exclude=None, fold=5,
     
     # Define models to include/exclude
     if include is None:
-        include = ['xgboost', 'lightgbm', 'catboost', 'rf']
+        include = ['xgboost', 'lightgbm', 'catboost']
     
     # Compare models - updated for PyCaret 3.3.2
     try:
@@ -588,6 +588,9 @@ def train_xgboost_with_validation(base_model, validation_data, optimize='Prec', 
     import xgboost as xgb
     from xgboost import XGBClassifier
     from pycaret.classification import get_config
+    from utils.logger import ExperimentLogger
+    
+    logger = ExperimentLogger()
     
     # Get training data from PyCaret
     train_X = get_config('X_train_transformed')
@@ -607,7 +610,7 @@ def train_xgboost_with_validation(base_model, validation_data, optimize='Prec', 
             'n_jobs': -1,                   # Use all available cores
             'objective': 'binary:logistic', # Binary classification
             'learning_rate': 0.05,          # Conservative learning rate
-            'n_estimators': 500,            # Reduced from original 793
+            'n_estimators': 500,            # Maximum number of trees
             'max_depth': 6,                 # Reduced to avoid overfitting
             'colsample_bytree': 0.7,        # Feature subsampling
             'gamma': 0.8,                   # Minimum loss reduction for split
@@ -624,7 +627,9 @@ def train_xgboost_with_validation(base_model, validation_data, optimize='Prec', 
             'learning_rate': 0.1,
             'n_estimators': 100,
             'subsample': 0.8,
-            'colsample_bytree': 0.8
+            'colsample_bytree': 0.8,
+            'tree_method': 'hist',          # CPU-optimized algorithm
+            'device': 'cpu'                 # Enforce CPU usage
         }
     
     # Map PyCaret metrics to XGBoost metrics
@@ -639,42 +644,21 @@ def train_xgboost_with_validation(base_model, validation_data, optimize='Prec', 
     }
     xgb_metric = metric_mapping.get(optimize, 'aucpr')
     
-    # Create DMatrix objects
-    dtrain = xgb.DMatrix(train_X, label=train_y)
-    dval = xgb.DMatrix(val_X, label=val_y)
+    # Create XGBoost classifier
+    model = XGBClassifier(**xgb_params)
     
-    # Configure training parameters
-    params = {
-        'objective': 'binary:logistic',
-        'eval_metric': xgb_metric,
-        'tree_method': 'hist',  # CPU-optimized as per requirements
-        'seed': 42
-    }
-    params.update(xgb_params)
-    
-    # Train model with early stopping (this returns a native Booster)
-    native_model = xgb.train(
-        params,
-        dtrain,
-        num_boost_round=1000,
-        evals=[(dtrain, 'train'), (dval, 'val')],
-        early_stopping_rounds=50,
-        verbose_eval=100
+    # Train model with early stopping
+    model.fit(
+        train_X, 
+        train_y,
+        eval_set=[(val_X, val_y)],
+        eval_metric=xgb_metric,
+        early_stopping_rounds=300,  # As per requirements (300-500 early stopping rounds)
+        verbose=100
     )
     
-    # Create scikit-learn compatible wrapper
-    sklearn_wrapper = XGBClassifier(**params)
-    sklearn_wrapper._Booster = native_model
-    sklearn_wrapper._n_features = train_X.shape[1]
-    
-    # Copy important parameters to the wrapper
-    sklearn_wrapper.n_estimators = native_model.best_ntree_limit
-    sklearn_wrapper.objective = params.get('objective', 'binary:logistic')
-    sklearn_wrapper.learning_rate = params.get('learning_rate', 0.1)
-    sklearn_wrapper.max_depth = params.get('max_depth', 6)
-    
-    logger.info(f"XGBoost training complete with {native_model.best_ntree_limit} trees (converted to scikit-learn wrapper)")
-    return sklearn_wrapper
+    logger.info(f"XGBoost training complete with {model.get_booster().best_ntree_limit} trees")
+    return model
 
 def train_lightgbm_with_validation(base_model, validation_data, optimize='Prec', n_iter=50):
     """
@@ -689,7 +673,6 @@ def train_lightgbm_with_validation(base_model, validation_data, optimize='Prec',
     Returns:
         object: Trained LightGBM model
     """
-    import lightgbm as lgb
     from lightgbm import LGBMClassifier
     from pycaret.classification import get_config
 
@@ -730,7 +713,8 @@ def train_lightgbm_with_validation(base_model, validation_data, optimize='Prec',
             'n_estimators': 100,
             'num_leaves': 31,
             'subsample': 0.8,
-            'colsample_bytree': 0.8
+            'colsample_bytree': 0.8,
+            'device': 'cpu'                 # Enforce CPU usage
         }
     
     # Map PyCaret metrics to LightGBM metrics
@@ -745,44 +729,26 @@ def train_lightgbm_with_validation(base_model, validation_data, optimize='Prec',
     }
     lgb_metric = metric_mapping.get(optimize, 'auc')
     
-    # Configure training parameters
-    params = {
-        'objective': 'binary',
-        'metric': lgb_metric,
-        'verbosity': -1,
-        'seed': 42
-    }
-    params.update(lgb_params)
-    
-    # Create dataset objects
-    train_data = lgb.Dataset(train_X, label=train_y)
-    val_data = lgb.Dataset(val_X, label=val_y, reference=train_data)
-    
-    # Train model with early stopping
-    model = lgb.train(
-        params,
-        train_data,
-        num_boost_round=1000,  # Will be limited by early stopping
-        valid_sets=[train_data, val_data],
-        valid_names=['train', 'val'],
-        early_stopping_rounds=50,
-        verbose_eval=100
+    # Create LightGBM classifier
+    model = LGBMClassifier(
+        **lgb_params,
+        objective='binary',
+        metric=lgb_metric,
+        random_state=42
     )
     
-    # Create scikit-learn compatible wrapper
-    sklearn_wrapper = LGBMClassifier(**params)
-    sklearn_wrapper._Booster = model
-    sklearn_wrapper._n_features = train_X.shape[1]
+    # Train model with early stopping
+    model.fit(
+        train_X, 
+        train_y,
+        eval_set=[(val_X, val_y)],
+        eval_metric=lgb_metric,
+        early_stopping_rounds=300,  # As per requirements (300-500 early stopping rounds)
+        verbose=100
+    )
     
-    # Copy important parameters to the wrapper
-    sklearn_wrapper.n_estimators = model.best_iteration
-    sklearn_wrapper.objective = params.get('objective', 'binary')
-    sklearn_wrapper.learning_rate = params.get('learning_rate', 0.1) 
-    sklearn_wrapper.max_depth = params.get('max_depth', -1)
-    sklearn_wrapper.num_leaves = params.get('num_leaves', 31)
-    
-    logger.info(f"LightGBM training complete with {model.best_iteration} iterations (converted to scikit-learn wrapper)")
-    return sklearn_wrapper
+    logger.info(f"LightGBM training complete with {model.best_iteration_} iterations")
+    return model
 
 def train_catboost_with_validation(base_model, validation_data, optimize='Prec', n_iter=50):
     """

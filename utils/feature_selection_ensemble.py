@@ -44,7 +44,7 @@ mlruns_dir = setup_mlflow_tracking(experiment_name)
 def select_features(
     X: pd.DataFrame,
     y: pd.Series,
-    top_k: Optional[int] = 100,
+    top_k: Optional[int] = 120,
     verbose: bool = True) -> List[str]:
     """
     Select features based on composite importance scores from XGBoost, CatBoost, and LightGBM.
@@ -227,7 +227,7 @@ def select_features_differentiated(
             metric='binary_logloss',
             boosting_type='gbdt',
             device_type='cpu',
-            verbose=100,
+            verbose=-1,
             learning_rate=0.0037460291406696956,
             max_depth=6,
             reg_lambda=0.4103475806096283,
@@ -238,7 +238,7 @@ def select_features_differentiated(
             bagging_freq=2,
             min_child_samples=28,
             bagging_fraction=0.7718378995036574,
-            feature_fraction_bynode=0.9996212749980057
+            feature_fraction_bynode=0.9996212749980057  
         )
     }
     
@@ -246,10 +246,10 @@ def select_features_differentiated(
     # For each model, fit on the entire dataset and get sorted features by importance.
     for name, model in models.items():
         if name == "xgb":
-            model.fit(X, y, eval_set=[(X_val, y_val)], verbose=100)
+            model.fit(X, y, eval_set=[(X_val, y_val)], verbose=False)
             imp = np.array(model.feature_importances_)
         elif name == "cat":
-            model.fit(X, y, eval_set=[(X_val, y_val)], verbose=100)
+            model.fit(X, y, eval_set=[(X_val, y_val)], verbose=False)
             imp = model.get_feature_importance()
         elif name == "lgbm":
             model.fit(X, y, eval_set=[(X_val, y_val)])
@@ -312,6 +312,13 @@ if __name__ == "__main__":
     # Load data using utility functions
     features_train, target_train, features_test, target_test = import_training_data_ensemble()
     features_val, target_val = create_ensemble_evaluation_set()
+    # Drop referee and league_name columns from all datasets
+    columns_to_drop = ['referee', 'league_name']
+    logger.info(f"Dropping columns as per requirements: {columns_to_drop}")
+    features_train = features_train.drop(columns=columns_to_drop, errors='ignore')
+    features_test = features_test.drop(columns=columns_to_drop, errors='ignore')
+    features_val = features_val.drop(columns=columns_to_drop, errors='ignore')
+
     # Validate that all columns exist in both training and validation sets
     missing_train = [col for col in features_val.columns if col not in features_train.columns]
     missing_val = [col for col in features_train.columns if col not in features_val.columns]

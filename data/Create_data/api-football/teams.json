@@ -10525,18 +10525,18 @@
             "name": "Sarmiento de La Banda",
             "code": null,
             "country": "Argentina",
-            "founded": null,
+            "founded": 1909,
             "national": false,
             "logo": "https://media.api-sports.io/football/teams/23255.png"
         },
         "venue": {
-            "id": null,
-            "name": null,
+            "id": 21658,
+            "name": "Estadio Ciudad de La Banda",
             "address": null,
-            "city": null,
-            "capacity": null,
-            "surface": null,
-            "image": null
+            "city": "La Banda, Provincia de Santiago del Estero",
+            "capacity": 8000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/21658.png"
         }
     },
     {
@@ -10585,7 +10585,7 @@
             "name": "Santamarina",
             "code": "SAN",
             "country": "Argentina",
-            "founded": null,
+            "founded": 1913,
             "national": false,
             "logo": "https://media.api-sports.io/football/teams/475.png"
         },
@@ -10705,7 +10705,7 @@
             "name": "San Martin Formosa",
             "code": null,
             "country": "Argentina",
-            "founded": null,
+            "founded": 1941,
             "national": false,
             "logo": "https://media.api-sports.io/football/teams/1935.png"
         },
@@ -10745,18 +10745,18 @@
             "name": "Sol de Mayo",
             "code": null,
             "country": "Argentina",
-            "founded": null,
+            "founded": 1920,
             "national": false,
             "logo": "https://media.api-sports.io/football/teams/1941.png"
         },
         "venue": {
-            "id": 20630,
-            "name": "Estadio San Juan del Bicentenario",
-            "address": "RN 40, Pocito, S\u00e1nchez de Loria",
-            "city": "San Juan, Provincia de San Juan",
-            "capacity": 27836,
+            "id": 1771,
+            "name": "Estadio Sol De Mayo",
+            "address": "Avenida Francisco de Viedma 1057",
+            "city": "Viedma, Provincia de R\u00edo Negro",
+            "capacity": 5000,
             "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/20630.png"
+            "image": "https://media.api-sports.io/football/venues/1771.png"
         }
     },
     {
@@ -11165,7 +11165,7 @@
             "name": "Ciudad de Bol\u00edvar",
             "code": null,
             "country": "Argentina",
-            "founded": null,
+            "founded": 1947,
             "national": false,
             "logo": "https://media.api-sports.io/football/teams/16612.png"
         },
@@ -11185,18 +11185,18 @@
             "name": "Argentino Monte Ma\u00edz",
             "code": null,
             "country": "Argentina",
-            "founded": null,
+            "founded": 1925,
             "national": false,
             "logo": "https://media.api-sports.io/football/teams/18764.png"
         },
         "venue": {
-            "id": 19438,
-            "name": "Estadio Olimpo de Laborde",
-            "address": "Daniel Ascona Lamadrid, San Mart\u00edn y",
-            "city": "Laborde, C\u00f3rdoba",
-            "capacity": 1000,
+            "id": 21657,
+            "name": "Estadio Modesto Marrone",
+            "address": "San Juan 1911, Departamento Uni\u00f3n",
+            "city": "Monte Ma\u00edz, Provincia de C\u00f3rdoba",
+            "capacity": 3500,
             "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/19438.png"
+            "image": "https://media.api-sports.io/football/venues/21657.png"
         }
     },
     {
@@ -11285,18 +11285,18 @@
             "name": "Sarmiento de La Banda",
             "code": null,
             "country": "Argentina",
-            "founded": null,
+            "founded": 1909,
             "national": false,
             "logo": "https://media.api-sports.io/football/teams/23255.png"
         },
         "venue": {
-            "id": null,
-            "name": null,
+            "id": 21658,
+            "name": "Estadio Ciudad de La Banda",
             "address": null,
-            "city": null,
-            "capacity": null,
-            "surface": null,
-            "image": null
+            "city": "La Banda, Provincia de Santiago del Estero",
+            "capacity": 8000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/21658.png"
         }
     },
     {

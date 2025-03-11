@@ -371,25 +371,22 @@ def update_api_data_for_draws():
         data_path = "data/prediction/api_prediction_data.xlsx"
         data_path_new = "data/prediction/api_prediction_data_new.xlsx"
         data = pd.read_excel(data_path)
-
         # Initialize the feature engineer
         feature_engineer = AdvancedGoalFeatureEngineer()
-
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
         logger.info(updated_data.shape)
         
         # Filter data for dates before 2024-11-01
-        api_training_data = updated_data[updated_data['Date'] < '2024-11-01']
+        api_training_data = updated_data[updated_data['Date'] < '2025-01-01']
         # Add is_draw column for training data
-        api_training_data['is_draw'] = (api_training_data['match_outcome'] == 2).astype(int)
+        api_training_data.loc[:, 'is_draw'] = (api_training_data['match_outcome'] == 2).astype(int)
         logger.info("Added is_draw column to training data")
         # Filter data for dates after 2024-11-01 where match_outcome is not blank
         api_prediction_eval = updated_data[
-            (updated_data['Date'] >= '2024-11-01') &
+            (updated_data['Date'] >= '2025-01-01') &
             (updated_data['match_outcome'].notna())
         ]
-
         # Filter data for dates after 2024-11-01 where match_outcome is blank
         api_prediction_data = updated_data[
             (updated_data['Date'] >= '2025-01-15') &
@@ -416,10 +413,8 @@ def update_api_data_for_draws():
         api_prediction_data.to_excel("data/prediction/api_predictions_data.xlsx", index=False)
         create_parquet_files(api_prediction_data, "data/prediction/api_predictions_data.parquet")
         logger.info(f"api_predictions_data.xlsx and .parquet updated")
-
         # Save updated data back to Excel
         updated_data.to_excel(data_path_new, index=False)
-
     except Exception as e:
         logger.info(f"Error updating training data for draws: {str(e)}")
 
@@ -1259,10 +1254,8 @@ def import_training_data_ensemble():
     else:
         data = pd.read_excel(data_path)
         logger.info(f"Loaded training data from Excel: {data_path}")
-
         # Create target variable
         data['is_draw'] = (data['match_outcome'] == 2).astype(int)
-
         # Select features and target
         columns_to_drop = [
             'match_outcome',
@@ -1278,6 +1271,8 @@ def import_training_data_ensemble():
             'away_win', 
             'Date',
             'date',
+            'referee',
+            'league_name',
             'referee_draw_rate', 
             'referee_draws', 
             'referee_match_count',
@@ -1288,7 +1283,6 @@ def import_training_data_ensemble():
             'mid_season_factor' 
         ]
         data = data.drop(columns=columns_to_drop, errors='ignore')
-
         # Convert all numeric-like columns (excluding problematic_cols that have
         # already been handled)
         data = convert_numeric_columns(
@@ -1298,7 +1292,6 @@ def import_training_data_ensemble():
             fill_value=0.0,
             verbose=True
         )
-
         # Define integer columns that should remain as int64
         int_columns = [
             'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
@@ -1562,11 +1555,3 @@ if __name__ == "__main__":
     # logger.info("Training data updated successfully")
     update_api_data_for_draws()
     logger.info("Prediction data updated successfully")
-    # try:
-    #     run_id = "bc2a97417edb42d48967315de091d12d"
-    #     selected_features = get_selected_columns_from_mlflow_run(run_id)
-    #     logger.info(f"Selected features for run {run_id}:")
-    #     for feature in selected_features:
-    #         logger.info(f"- {feature}")
-    # except Exception as e:
-    #     logger.info(f"Error retrieving features: {str(e)}")

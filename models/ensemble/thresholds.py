@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import precision_score, recall_score, f1_score
 import mlflow
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, List, Tuple, Optional, Union, Any
 from utils.logger import ExperimentLogger
 
 def tune_threshold(probs: np.ndarray, targets: pd.Series, 
@@ -154,7 +154,7 @@ def tune_threshold_for_precision(y_prob: np.ndarray, y_true: pd.Series,
                                 min_threshold: float = 0.1,
                                 max_threshold: float = 0.9,
                                 step: float = 0.01,
-                                logger: ExperimentLogger = None) -> float:
+                                logger: ExperimentLogger = None) -> Dict[str, Any]:
     """
     Tune the threshold to achieve a target precision with a minimum recall requirement.
     
@@ -169,7 +169,7 @@ def tune_threshold_for_precision(y_prob: np.ndarray, y_true: pd.Series,
         logger: Logger instance
         
     Returns:
-        Optimal threshold for the target precision with minimum recall
+        Tuple of (optimal_threshold, metrics_at_threshold)
     """
     if logger is None:
         logger = ExperimentLogger(experiment_name="ensemble_model_thresholds",
@@ -229,9 +229,9 @@ def tune_threshold_for_precision(y_prob: np.ndarray, y_true: pd.Series,
         logger.info(f"  Recall: {optimal_recall:.4f}")
         logger.info(f"  F1 Score: {optimal_f1:.4f}")
         metrics = {
-            'precision': optimal_precision,
-            'recall': optimal_recall,
-            'f1': optimal_f1
+            'precision': optimal_precision if optimal_precision is not None else 0,
+            'recall': optimal_recall if optimal_recall is not None else 0,
+            'f1': optimal_f1 if optimal_f1 is not None else 0
         }
     # Log to MLflow
     mlflow.log_metrics({

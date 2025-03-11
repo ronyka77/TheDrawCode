@@ -9,6 +9,7 @@ import sys
 import numpy as np
 import pandas as pd
 import mlflow
+import mlflow.sklearn
 from pathlib import Path
 import argparse
 from datetime import datetime
@@ -38,9 +39,11 @@ logger = ExperimentLogger(experiment_name=experiment_name,
 from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 
 from models.ensemble.ensemble_model import EnsembleModel
+from models.ensemble.data_utils import balance_and_clean_dataset
+
 
 def run_ensemble(extra_base_model_type: str = 'mlp',
-                meta_learner_type: str = 'mlp',
+                meta_learner_type: str = 'lgb',
                 calibrate: bool = True,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
@@ -64,7 +67,6 @@ def run_ensemble(extra_base_model_type: str = 'mlp',
     
     # Set up MLflow tracking
     mlruns_dir = setup_mlflow_tracking(experiment_name)
-
     try:
         # Start MLflow run
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -84,40 +86,14 @@ def run_ensemble(extra_base_model_type: str = 'mlp',
             
             logger.info("Starting ensemble model execution...")
             
-            # Import data
-            if time_based_split:
-                # Time-based data loading
-                try:
-                    logger.info("Loading data with time-based splits...")
-                    from models.StackedEnsemble.shared.data_loader import DataLoader
-                    # X_train, y_train = historical data (oldest)
-                    # X_test, y_test = intermediate data (for tuning)
-                    # X_val, y_val = most recent data (for final evaluation)
-                    X_train, y_train, X_test, y_test, X_val, y_val = DataLoader().load_data()
-                except Exception as e:
-                    logger.error(f"Error loading time-based data: {str(e)}")
-                    logger.info("Falling back to standard data loading...")
-                    time_based_split = False
-            
-            if not time_based_split:
-                # Standard data loading
-                logger.info("Loading data with random splits...")
-                # Import selected features and data
-                from utils.create_evaluation_set import load_training_data
-                df = load_training_data()
-                
-                # Split features and target
-                X = df.drop('target', axis=1)
-                y = df['target']
-                
-                # Split into train/test/val
-                from sklearn.model_selection import train_test_split
-                X_train, X_temp, y_train, y_temp = train_test_split(
-                    X, y, test_size=0.3, random_state=42, stratify=y
-                )
-                X_test, X_val, y_test, y_val = train_test_split(
-                    X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
-                )
+            try:
+                logger.info("Loading data with time-based splits...")
+                from models.StackedEnsemble.shared.data_loader import DataLoader
+                X_train, y_train, X_test, y_test, X_val, y_val = DataLoader().load_data()
+            except Exception as e:
+                logger.error(f"Error loading time-based data: {str(e)}")
+                logger.info("Falling back to standard data loading...")
+                time_based_split = False
             
             # Log dataset sizes
             logger.info(f"Dataset sizes - Training: {X_train.shape}, Test: {X_test.shape}, Validation: {X_val.shape}")
@@ -138,7 +114,15 @@ def run_ensemble(extra_base_model_type: str = 'mlp',
             X_train_filtered = X_train[selected_features]
             X_test_filtered = X_test[selected_features]
             X_val_filtered = X_val[selected_features]
+            # Convert all columns to float64 for consistent data types
+            logger.info("Converting all feature columns to float64 for consistency...")
+            X_train_filtered = X_train_filtered.astype('float64')
+            X_test_filtered = X_test_filtered.astype('float64')
+            X_val_filtered = X_val_filtered.astype('float64')
             
+            # Log the conversion
+            mlflow.log_param('data_type_conversion', 'all_columns_to_float64')
+            logger.info(f"Data types after conversion: {X_train_filtered.dtypes.value_counts().to_dict()}")
             # Create ensemble with configuration
             ensemble_model = EnsembleModel(
                 logger=logger,
@@ -147,7 +131,8 @@ def run_ensemble(extra_base_model_type: str = 'mlp',
                 calibrate=calibrate,
                 dynamic_weighting=dynamic_weighting,
                 target_precision=target_precision,
-                required_recall=required_recall
+                required_recall=required_recall,
+                X_train=X_train_filtered
             )
             
             # Train the model
@@ -177,6 +162,66 @@ def run_ensemble(extra_base_model_type: str = 'mlp',
                     logger.info(f"  {metric}: {value:.4f}")
             
             logger.info("Ensemble model execution completed successfully.")
+            # Save model with signature to MLflow
+            logger.info("Saving ensemble model with signature to MLflow...")
+            
+            # Create an input example for signature inference
+            input_example = X_val_filtered.iloc[0:1].copy()
+            best_threshold = training_results['threshold']
+            # Get prediction for output example
+            output_example = ensemble_model.predict_proba(input_example)
+            
+            # Infer model signature from input and output examples
+            signature = mlflow.models.infer_signature(
+                input_example,
+                output_example,
+                {"optimal_threshold": best_threshold}
+            )
+            
+            # Register model with timestamp-based name following project guidelines
+            model_name = f"ensemble_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            
+            # Create a scikit-learn compatible wrapper for the ensemble model
+            from sklearn.base import BaseEstimator, ClassifierMixin
+            class EnsembleModelWrapper(BaseEstimator, ClassifierMixin):
+                def __init__(self, model):
+                    self.model = model
+                    
+                def fit(self, X, y):
+                    # This is just a wrapper, actual fitting is done elsewhere
+                    return self
+                
+                def predict(self, X):
+                    # Return class predictions (0 or 1)
+                    probas = self.model.predict(X)
+                    return probas
+                
+                def predict_proba(self, X):
+                    # Return probability estimates
+                    return self.model.predict_proba(X)
+                
+                def get_params(self, deep=True):
+                    # Required for scikit-learn compatibility
+                    return {"model": self.model}
+                
+                def set_params(self, **parameters):
+                    # Required for scikit-learn compatibility
+                    for parameter, value in parameters.items():
+                        setattr(self, parameter, value)
+                    return self
+            
+            # Wrap the ensemble model in a scikit-learn compatible wrapper
+            model_wrapper = EnsembleModelWrapper(ensemble_model)
+            
+            # Log model with signature
+            mlflow.sklearn.log_model(
+                sk_model=model_wrapper,
+                artifact_path="ensemble_model",
+                signature=signature,
+                registered_model_name=model_name,
+                pip_requirements=["scikit-learn==1.4.2"]
+            )
+            logger.info(f"Model saved with signature and registered as: {model_name}")
             return ensemble_model
             
     except Exception as e:
@@ -188,7 +233,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the ensemble model training and evaluation.")
     parser.add_argument("--extra-model", type=str, default="mlp", choices=["random_forest", "svm", "mlp"],
                         help="Type of fourth base model")
-    parser.add_argument("--meta-learner", type=str, default="xgb", choices=["xgb", "logistic", "mlp"],
+    parser.add_argument("--meta-learner", type=str, default="lgb", choices=["xgb", "logistic", "mlp", "lgb"],
                         help="Type of meta-learner")
     parser.add_argument("--calibrate", action="store_true", default=True,
                         help="Whether to calibrate base model probabilities")
