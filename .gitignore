@@ -320,3 +320,8 @@ h2o/h2o/python/README.txt
 =2.0.1
 =
 .env
+data/Create_data/create_excels/
+models/MLjar/
+models/pycaret/configs/experiments.yaml
+data/Create_data/pipeline/config/
+models/pycaret/install_with_uv.sh
