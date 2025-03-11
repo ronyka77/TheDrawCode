@@ -234,77 +234,6 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         logger.error(f"Error training XGBoost model: {str(e)}")
         raise
 
-def save_model(model, path, threshold=0.5):
-    """
-    Save XGBoost model to specified path.
-    Updated to match notebook implementation using joblib.
-    
-    Args:
-        model: Trained XGBoost model
-        path: Path to save model
-        threshold: Optimal decision threshold
-    """
-    if model is None:
-        raise RuntimeError("No model to save")
-        
-    try:
-        # Create directory if it doesn't exist
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Save model
-        joblib.dump(model, path)
-        
-        # Save threshold
-        threshold_path = path.parent / "threshold.json"
-        with open(threshold_path, 'w') as f:
-            json.dump({
-                'threshold': threshold,
-                'model_type': 'xgboost',
-                'params': model.get_params()
-            }, f, indent=2)
-            
-        logger.info(f"Model saved to {path}")
-        
-    except Exception as e:
-        logger.error(f"Error saving model: {str(e)}")
-        raise
-
-def load_model(path):
-    """
-    Load XGBoost model from specified path.
-    Updated to match notebook implementation using joblib.
-    
-    Args:
-        path: Path to load model from
-        
-    Returns:
-        tuple: (model, threshold)
-    """
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"No model file found at {path}")
-        
-    try:
-        # Load model
-        model = joblib.load(path)
-        
-        # Load threshold
-        threshold_path = path.parent / "threshold.json"
-        if threshold_path.exists():
-            with open(threshold_path, 'r') as f:
-                data = json.load(f)
-                threshold = data.get('threshold', 0.5)
-        else:
-            threshold = 0.5
-            
-        logger.info(f"Model loaded from {path}")
-        return model, threshold
-        
-    except Exception as e:
-        logger.error(f"Error loading model: {str(e)}")
-        raise
-
 def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
     """
     Run hyperparameter optimization with Optuna.
@@ -418,7 +347,6 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             seed=42,
             n_startup_trials=2000
         )
-<<<<<<< HEAD
         random_sampler = optuna.samplers.RandomSampler(
             seed=19
         )
@@ -426,12 +354,6 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             study_name='xgboost_optimization',
             direction='maximize',
             sampler=random_sampler
-=======
-        study = optuna.create_study(
-            study_name='xgboost_optimization',
-            direction='maximize',
-            sampler=cmaes_sampler
->>>>>>> 3798e304ba09a95ae05e21747b9f93b4e52eb5fd
         )
         
         # Optimize
