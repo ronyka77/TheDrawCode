@@ -324,6 +324,13 @@ h2o/h2o/python/README.txt
 .ariana.json
 .vault_secret_key
 .traces/
-data/Create_data/PowerBI_pbix/Old_files/api_training_final.pbix
-data/Create_data/PowerBI_pbix/Old_files/api_training.pbix
-.jupyter/desktop-workspaces/default-37a8.jupyterlab-workspace
+data/Create_data/pipeline/
+data/Create_data/create_excels/
+models/MLjar/
+models/pycaret/configs/experiments.yaml
+models/pycaret/install_with_uv.sh
+data/Create_data/predictors/predict_ensemble_api.py
+data/Create_data/predictors/predict_pycaret.py
+data/Create_data/predictors/predict_xgboost_api.py
+data/Create_data/scraping/
+.jupyter/

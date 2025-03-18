@@ -341,6 +341,7 @@ def main():
     
     # Save best model results
     output_path = Path("./data/prediction/ensemble/predictions_ensemble_best.xlsx")
+    output_path = Path("./data/prediction/ensemble/predictions_ensemble_best.xlsx")
     predicted_df.to_excel(output_path, index=False)
     print(f"\nBest model predictions saved to: {output_path}")
 
