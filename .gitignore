@@ -324,3 +324,5 @@ h2o/h2o/python/README.txt
 .ariana.json
 .vault_secret_key
 .traces/
+data/Create_data/PowerBI_pbix/Old_files/api_training_final.pbix
+data/Create_data/PowerBI_pbix/Old_files/api_training.pbix
