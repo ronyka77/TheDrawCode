@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 import pymongo
 from datetime import datetime, timedelta
 import time
-
+import pandas as pd
 
 # Add project root to Python path
 try:
@@ -46,6 +46,7 @@ class ApiFootball:
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]  # Database name
         self.fixtures_collection = self.db["fixtures"] # Collection name
+        self.predictions_collection = self.db["predictions"] # Collection name
         self.leagues_collection = self.db["leagues"] # Collection name
         self.venues_collection = self.db["venues"] # Collection name
 
@@ -88,10 +89,8 @@ class ApiFootball:
     def get_leagues(self, league_id: int = None) -> List[Dict]:
         """
         Retrieves all available leagues from the API and stores them in MongoDB.
-
         Args:
             league_id (int, optional): The ID of a specific league to retrieve. Defaults to None.
-
         Returns:
             List[Dict]: A list of available leagues.
         """
@@ -136,7 +135,6 @@ class ApiFootball:
         try:
             with open(leagues_file_path, 'r') as f:
                 leagues_data = json.load(f)
-
             league_info = []
             for item in leagues_data:
                 league_id = item['league']['id']
@@ -147,7 +145,6 @@ class ApiFootball:
                     'league_name': league_name,
                     'country': country_name
                 })
-
             self._save_json(league_info, 'league_ids.json')
         except Exception as e:
             self.logger.error(f"Error processing leagues data: {e}")
@@ -274,7 +271,6 @@ class ApiFootball:
                     statistics['home']['team_id'] = raw_statistics[0]['team']['id']
                     statistics['home']['team_name'] = raw_statistics[0]['team']['name']
                     statistics['home']['team_logo'] = raw_statistics[0]['team']['logo']
-
                     statistics['away']['team_id'] = raw_statistics[1]['team']['id']
                     statistics['away']['team_name'] = raw_statistics[1]['team']['name']
                     statistics['away']['team_logo'] = raw_statistics[1]['team']['logo']
@@ -291,7 +287,6 @@ class ApiFootball:
                 self.logger.error(f"Error processing statistics for fixture {fixture_id}: {e}")
                 time.sleep(3)
                 return {}
-
             # Insert simplified statistics into MongoDB
             try:
                 self.fixtures_collection.update_one(
@@ -301,20 +296,19 @@ class ApiFootball:
                 self.logger.info(f"Statistics for fixture {fixture_id} inserted into MongoDB.")
             except Exception as e:
                 self.logger.error(f"Error inserting statistics for fixture {fixture_id} into MongoDB: {e}")
-
             return statistics
         else:
             self.logger.warning(f"No statistics found for fixture {fixture_id}")
             try:
                 fixture_date_str = self.fixtures_collection.find_one({"fixture_id": fixture_id}, {"date": 1})["date"]
                 fixture_date = datetime.strptime(fixture_date_str, '%Y-%m-%d %H:%M')
-                if fixture_date < datetime(2025, 2, 1):
+                if fixture_date < datetime(2025, 2, 15):
                     self.fixtures_collection.delete_one({"fixture_id": fixture_id})
                     self.logger.info(f"Fixture {fixture_id} dropped from MongoDB due to date constraint.")
                     return {}
             except Exception as e:
                 self.logger.error(f"Error checking date for fixture {fixture_id}: {e}")
-            time.sleep(3)
+            time.sleep(1)
             return {}
 
     def get_fixture_ids_without_statistics(self) -> List[int]:
@@ -342,6 +336,33 @@ class ApiFootball:
         fixture_ids = [fixture["fixture_id"] for fixture in fixtures]
         self.logger.info(f"Found {len(fixture_ids)} fixtures without statistics for league IDs {target_league_ids}.")
         return fixture_ids
+
+    def get_fixture_ids_without_predictions(self) -> List[int]:
+        """
+        Retrieves fixture IDs from MongoDB where there is no corresponding prediction document,
+        the date is today or earlier, and the league ID is one of the specified IDs.
+        
+        Returns:
+            List[int]: List of fixture IDs without predictions that meet the criteria.
+        """
+        # Read fixture IDs from Excel file
+        excel_path=os.path.join(project_root, 'data', 'Create_data', 'data_files', 'base', 'api_future_matches.xlsx')
+        try:
+            df = pd.read_excel(excel_path)
+            fixture_ids = df['fixture_id'].tolist()
+            self.logger.info(f"Successfully read {len(fixture_ids)} fixture IDs from Excel file")
+        except Exception as e:
+            self.logger.error(f"Error reading fixture IDs from Excel file: {e}")
+            fixture_ids = []
+        
+        # Get fixture IDs that already have predictions
+        existing_predictions = self.predictions_collection.distinct("fixture_id", {"fixture_id": {"$in":    fixture_ids}})
+        
+        # Get difference between all fixtures and those with predictions
+        fixtures_without_predictions = list(set(fixture_ids) - set(existing_predictions))
+        
+        self.logger.info(f"Found {len(fixtures_without_predictions)} fixtures without predictions.")
+        return fixtures_without_predictions
 
     def get_fixtures_for_leagues(self) -> None:
         """
@@ -377,7 +398,7 @@ class ApiFootball:
         Retrieves statistics for each fixture ID found in the fixtures.json files.
         """
         fixture_ids = self.get_fixture_ids_without_statistics()
-
+        prediction_ids = self.get_fixture_ids_without_predictions()
         fixture_id_count = len(fixture_ids)
         request_count = 0
         all_request_count = 0
@@ -393,6 +414,26 @@ class ApiFootball:
             if request_count >= 250:
                 elapsed_time = time.time() - start_time
                 
+                # If less than a minute has passed, wait
+                if elapsed_time < 60:
+                    print(f"Waiting for {60 - elapsed_time} seconds")
+                    time.sleep(60 - elapsed_time)
+                    
+                # Reset the counter and start time
+                request_count = 0
+                start_time = time.time()
+        request_count = 0
+        all_request_count = 0
+        start_time = time.time()
+        for fixture_id in prediction_ids:
+            self.get_predictions_for_fixture(fixture_id)
+            request_count += 1
+            all_request_count += 1
+            print(f"Processed {all_request_count} of {fixture_id_count} fixtures")
+            
+            # Check if we've made 250 requests
+            if request_count >= 250:
+                elapsed_time = time.time() - start_time
                 # If less than a minute has passed, wait
                 if elapsed_time < 60:
                     print(f"Waiting for {60 - elapsed_time} seconds")
@@ -602,21 +643,96 @@ class ApiFootball:
         except Exception as e:
             self.logger.error(f"Error processing league IDs: {e}")
 
+    def get_predictions_for_fixture(self, fixture_id):
+        """
+        Get prediction data for a specific fixture ID and upsert to MongoDB
+        
+        Args:
+            fixture_id (int): The ID of the fixture to get predictions for
+        """
+        try:
+            # Make API request
+            url = f"/predictions?fixture={fixture_id}"
+            response = requests.get(
+                f"{self.base_url}{url}",
+                headers=self.headers
+            )
+            if response.status_code == 200:
+                predictions_data = response.json()
+                
+                if predictions_data.get('response'):
+                    prediction = predictions_data['response'][0]
+                    
+                    # Create prediction document
+                    prediction_doc = {
+                        'fixture_id': fixture_id,
+                        'predictions': {
+                            'winner': prediction.get('predictions', {}).get('winner', {}),
+                            'win_or_draw': prediction.get('predictions', {}).get('win_or_draw'),
+                            'under_over': prediction.get('predictions', {}).get('under_over'),
+                            'goals': prediction.get('predictions', {}).get('goals', {}),
+                            'advice': prediction.get('predictions', {}).get('advice'),
+                            'percent': prediction.get('predictions', {}).get('percent', {})
+                        },
+                        'league': {
+                            'id': prediction.get('league', {}).get('id'),
+                            'name': prediction.get('league', {}).get('name'),
+                            'country': prediction.get('league', {}).get('country'),
+                            'logo': prediction.get('league', {}).get('logo'),
+                            'flag': prediction.get('league', {}).get('flag'),
+                            'season': prediction.get('league', {}).get('season')
+                        },
+                        'teams': {
+                            'home': {
+                                'id': prediction.get('teams', {}).get('home', {}).get('id'),
+                                'name': prediction.get('teams', {}).get('home', {}).get('name'),
+                                'logo': prediction.get('teams', {}).get('home', {}).get('logo'),
+                                'last_5': prediction.get('teams', {}).get('home', {}).get('last_5', {}),
+                                'league': prediction.get('teams', {}).get('home', {}).get('league', {})
+                            },
+                            'away': {
+                                'id': prediction.get('teams', {}).get('away', {}).get('id'),
+                                'name': prediction.get('teams', {}).get('away', {}).get('name'),
+                                'logo': prediction.get('teams', {}).get('away', {}).get('logo'),
+                                'last_5': prediction.get('teams', {}).get('away', {}).get('last_5', {}),
+                                'league': prediction.get('teams', {}).get('away', {}).get('league', {})
+                            }
+                        },
+                        'comparison': prediction.get('comparison', {}),
+                        'h2h': prediction.get('h2h', []),
+                        'updated_at': datetime.now()
+                    }
+                    
+                    # Upsert to predictions collection
+                    self.predictions_collection.update_one(
+                        {'fixture_id': fixture_id},
+                        {'$set': prediction_doc},
+                        upsert=True
+                    )
+                    
+                    self.logger.info(f"Updated prediction data for fixture ID: {fixture_id}")
+                    
+                else:
+                    self.logger.warning(f"No prediction data found for fixture ID: {fixture_id}")
+            else:
+                self.logger.error(f"Error getting prediction data for fixture ID {fixture_id}: {response.status_code}")
+                
+        except Exception as e:
+            self.logger.error(f"Error getting prediction data for fixture ID {fixture_id}: {e}")
+
 def main():
     api_key = '9d97f6f9804b592c86be814e246a077d'
     if not api_key:
         print("API_FOOTBALL_KEY not found.")
         return
-    
+
     logger = ExperimentLogger()
     api_football = ApiFootball(api_key, logger)
-    
+
     api_football.get_fixtures_for_leagues()
-    
+
     api_football.get_statistics_for_fixtures()
-    
-    # api_football.get_league_statistics_from_mongodb()
-    
+
     api_football.delete_fixtures_not_in_leagues()
 
     api_football.get_teams_for_leagues()

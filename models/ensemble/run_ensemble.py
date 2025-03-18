@@ -42,8 +42,8 @@ from models.ensemble.ensemble_model import EnsembleModel
 from models.ensemble.data_utils import balance_and_clean_dataset
 
 
-def run_ensemble(extra_base_model_type: str = 'random_forest',
-                meta_learner_type: str = 'xgb',
+def run_ensemble(extra_base_model_type: str = 'mlp',
+                meta_learner_type: str = 'lgb',
                 calibrate: bool = True,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
@@ -131,7 +131,8 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 calibrate=calibrate,
                 dynamic_weighting=dynamic_weighting,
                 target_precision=target_precision,
-                required_recall=required_recall
+                required_recall=required_recall,
+                X_train=X_train_filtered
             )
             
             # Train the model
@@ -217,7 +218,8 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 sk_model=model_wrapper,
                 artifact_path="ensemble_model",
                 signature=signature,
-                registered_model_name=model_name
+                registered_model_name=model_name,
+                pip_requirements=["scikit-learn==1.4.2"]
             )
             logger.info(f"Model saved with signature and registered as: {model_name}")
             return ensemble_model
@@ -231,7 +233,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the ensemble model training and evaluation.")
     parser.add_argument("--extra-model", type=str, default="mlp", choices=["random_forest", "svm", "mlp"],
                         help="Type of fourth base model")
-    parser.add_argument("--meta-learner", type=str, default="sgd", choices=["xgb", "logistic", "mlp", "sgd"],
+    parser.add_argument("--meta-learner", type=str, default="lgb", choices=["xgb", "logistic", "mlp", "lgb"],
                         help="Type of meta-learner")
     parser.add_argument("--calibrate", action="store_true", default=True,
                         help="Whether to calibrate base model probabilities")

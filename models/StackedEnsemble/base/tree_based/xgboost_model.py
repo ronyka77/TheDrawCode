@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 import mlflow
-import joblib
 import optuna
 from optuna.integration import XGBoostPruningCallback
 from sklearn.metrics import (
@@ -213,12 +212,19 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         
         # Create model with remaining parameters
         model = create_model(model_params)
+        # Combine training and validation data while preserving indexes
+        X_combined = pd.concat([X_train, X_test], axis=0)
+        y_combined = pd.concat([y_train, y_test], axis=0)
         
+        # Reset indexes to ensure proper alignment
+        X_combined.reset_index(drop=True, inplace=True)
+        y_combined.reset_index(drop=True, inplace=True)
+
         # Create eval set for early stopping
-        eval_set = [(X_test, y_test)]
+        eval_set = [(X_eval, y_eval)]
         # Fit model with early stopping
         model.fit(
-            X_train, y_train,
+            X_combined, y_combined,
             eval_set=eval_set,
             verbose=False
         )
@@ -232,77 +238,6 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         
     except Exception as e:
         logger.error(f"Error training XGBoost model: {str(e)}")
-        raise
-
-def save_model(model, path, threshold=0.5):
-    """
-    Save XGBoost model to specified path.
-    Updated to match notebook implementation using joblib.
-    
-    Args:
-        model: Trained XGBoost model
-        path: Path to save model
-        threshold: Optimal decision threshold
-    """
-    if model is None:
-        raise RuntimeError("No model to save")
-        
-    try:
-        # Create directory if it doesn't exist
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Save model
-        joblib.dump(model, path)
-        
-        # Save threshold
-        threshold_path = path.parent / "threshold.json"
-        with open(threshold_path, 'w') as f:
-            json.dump({
-                'threshold': threshold,
-                'model_type': 'xgboost',
-                'params': model.get_params()
-            }, f, indent=2)
-            
-        logger.info(f"Model saved to {path}")
-        
-    except Exception as e:
-        logger.error(f"Error saving model: {str(e)}")
-        raise
-
-def load_model(path):
-    """
-    Load XGBoost model from specified path.
-    Updated to match notebook implementation using joblib.
-    
-    Args:
-        path: Path to load model from
-        
-    Returns:
-        tuple: (model, threshold)
-    """
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"No model file found at {path}")
-        
-    try:
-        # Load model
-        model = joblib.load(path)
-        
-        # Load threshold
-        threshold_path = path.parent / "threshold.json"
-        if threshold_path.exists():
-            with open(threshold_path, 'r') as f:
-                data = json.load(f)
-                threshold = data.get('threshold', 0.5)
-        else:
-            threshold = 0.5
-            
-        logger.info(f"Model loaded from {path}")
-        return model, threshold
-        
-    except Exception as e:
-        logger.error(f"Error loading model: {str(e)}")
         raise
 
 def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
@@ -418,10 +353,13 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             seed=42,
             n_startup_trials=2000
         )
+        random_sampler = optuna.samplers.RandomSampler(
+            seed=19
+        )
         study = optuna.create_study(
             study_name='xgboost_optimization',
             direction='maximize',
-            sampler=cmaes_sampler
+            sampler=random_sampler
         )
         
         # Optimize
@@ -670,10 +608,6 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         
         # Log to MLflow
         log_to_mlflow(model, metrics, best_params, experiment_name)
-        
-        # Save model locally
-        model_path = f"models/StackedEnsemble/base/tree_based/xgboost_model_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl"
-        save_model(model, model_path, metrics.get('threshold', 0.5))
         
         return model, metrics
         

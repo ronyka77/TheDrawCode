@@ -1,7 +1,7 @@
 import pymongo
 from typing import List, Dict
 import pandas as pd
-
+import os
 try:
     # Set the configuration key
     pd.set_option('future.no_silent_downcasting', True)
@@ -22,13 +22,12 @@ class MongoDBFeatures:
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]
         self.fixtures_collection = self.db["fixtures"]
+        self.predictions_collection = self.db["predictions"]
         self.venues_collection = self.db["venues"]
 
     def get_fixtures_with_home_stats(self) -> List[Dict]:
         """
         Retrieves all fixtures from the MongoDB fixtures collection where home.stats is not empty.
-
-
         Returns:
             List[Dict]: List of fixtures with home.stats.
         """
@@ -43,13 +42,109 @@ class MongoDBFeatures:
         print(f"Found {len(fixture_list)} fixtures with home.stats.")
         return fixture_list
 
+    def get_fixtures_with_predictions(self) -> List[Dict]:
+        """
+        Retrieves all fixtures from the MongoDB fixtures collection where there is a corresponding prediction document.
+        Returns:
+            List[Dict]: List of fixtures with predictions.
+        """
+        query = {
+            "fixture_id": {"$ne": None}
+        }
+        fixtures = self.predictions_collection.find(query)
+        fixture_list = list(fixtures)
+        print(f"Found {len(fixture_list)} fixtures with predictions.")
+        return fixture_list
+
+    def normalize_predictions_data(self, fixtures_with_predictions: List[Dict]) -> pd.DataFrame:
+        """
+        Normalizes the prediction data and returns a pandas DataFrame.
+        
+        Args:
+            fixtures_with_predictions (List[Dict]): List of fixtures with predictions
+            
+        Returns:
+            pd.DataFrame: Normalized prediction data
+        """
+        try:
+            normalized_data = []
+            error_count = 0
+            
+            for fixture in fixtures_with_predictions:
+                # Extract prediction data with safety checks
+                predictions = fixture.get('predictions', {})
+                if not predictions:
+                    error_count += 1
+                    continue
+                    
+                # Extract key prediction fields
+                fixture_data = {
+                    'fixture_id': fixture.get('fixture_id'),
+                    'winner_id': predictions.get('winner', {}).get('id'),
+                    'winner_name': predictions.get('winner', {}).get('name'),
+                    'win_or_draw': predictions.get('win_or_draw'),
+                    'under_over': predictions.get('under_over'),
+                    'goals_home': predictions.get('goals', {}).get('home'),
+                    'goals_away': predictions.get('goals', {}).get('away'),
+                    'advice': predictions.get('advice'),
+                    'home_win_percent': predictions.get('percent', {}).get('home', '0%').rstrip('%'),
+                    'draw_percent': predictions.get('percent', {}).get('draw', '0%').rstrip('%'),
+                    'away_win_percent': predictions.get('percent', {}).get('away', '0%').rstrip('%'),
+                    'updated_at': fixture.get('updated_at')
+                }
+                
+                # Add comparison data
+                comparison = fixture.get('comparison', {})
+                for category in ['form', 'att', 'def', 'poisson_distribution', 'h2h', 'goals', 'total']:
+                    if category in comparison:
+                        fixture_data[f'comparison_home_{category}'] = comparison[category].get('home', '0%').rstrip('%')
+                        fixture_data[f'comparison_away_{category}'] = comparison[category].get('away', '0%').rstrip('%')
+                
+                # Add h2h data
+                h2h_matches = fixture.get('h2h', [])
+                if h2h_matches:
+                    # Calculate h2h stats
+                    home_wins = 0
+                    away_wins = 0
+                    draws = 0
+                    total_matches = len(h2h_matches)
+                    
+                    for match in h2h_matches:
+                        if match['teams']['home']['winner'] is True:
+                            home_wins += 1
+                        elif match['teams']['away']['winner'] is True:
+                            away_wins += 1
+                        else:
+                            draws += 1
+                            
+                    fixture_data['h2h_home_wins'] = home_wins
+                    fixture_data['h2h_away_wins'] = away_wins
+                    fixture_data['h2h_draws'] = draws
+                    fixture_data['h2h_total_matches'] = total_matches
+                
+                normalized_data.append(fixture_data)
+                
+            if error_count > 0:
+                print(f"Skipped {error_count} fixtures due to missing prediction data")
+            # Export normalized data to Excel file
+            if len(normalized_data) > 0:
+                df = pd.DataFrame(normalized_data)
+                output_file = 'data/Create_data/data_files/base/predictions.xlsx'
+                self.export_to_excel(df, output_file)
+                print(f"Successfully exported {len(normalized_data)} predictions to {output_file}")
+            else:
+                print("No data to export to Excel")
+            return df
+            
+        except Exception as e:
+            print(f"Error normalizing prediction data: {e}")
+            return pd.DataFrame()
+
     def normalize_fixtures_data(self, fixtures_with_stats: List[Dict]) -> pd.DataFrame:
         """
         Normalizes the fixtures data and returns a pandas DataFrame.
-
         Args:
             fixtures_with_stats (List[Dict]): List of fixtures with home.stats.
-
         Returns:
             pd.DataFrame: Normalized fixtures data.
         """
@@ -237,7 +332,6 @@ class MongoDBFeatures:
     def export_to_excel(self, fixtures_dataframe: pd.DataFrame, file_path: str) -> None:
         """
         Exports the DataFrame to an Excel file, handling data types and formatting.
-
         Args:
             fixtures_dataframe (pd.DataFrame): The DataFrame to export.
             file_path (str): The path to save the Excel file.
@@ -251,10 +345,8 @@ class MongoDBFeatures:
     def add_features(self, fixtures_dataframe: pd.DataFrame) -> pd.DataFrame:
         """
         Adds features to the fixtures DataFrame.
-
         Args:
             fixtures_dataframe (pd.DataFrame): The DataFrame to add features to.
-
         Returns:
             pd.DataFrame: The DataFrame with added features.
         """
@@ -620,7 +712,6 @@ class MongoDBFeatures:
                 (home_df['week_of_year'] == week) &
                 (home_df['year'] == year)
             ][home_column].sum()
-
             team_away_results_new = away_df[
                 (away_df['away_encoded'] == team) & 
                 (away_df['league_encoded'] == league) & 
@@ -628,7 +719,6 @@ class MongoDBFeatures:
                 (away_df['week_of_year'] == week) &
                 (away_df['year'] == year)
             ][away_column].sum()
-
             if team_home_results_new != 0 and team_away_results_new != 0:
                 # Calculate rolling value
                 rolling_value = (team_home_results_new + team_away_results_new) / 2
@@ -636,7 +726,6 @@ class MongoDBFeatures:
                 rolling_value = team_home_results_new + team_away_results_new
                 
             return rolling_value
-
         except Exception as e:
             print(f"Error calculating rolling values(probably column not in rolling_colums list): {e}")
             return 0
@@ -645,7 +734,6 @@ class MongoDBFeatures:
         """
         Retrieves all future fixtures from the MongoDB fixtures collection where score.fulltime.home is blank
         and returns them as a pandas DataFrame with specific columns.
-
         Returns:
             pd.DataFrame: DataFrame containing future fixtures with selected columns.
         """
@@ -759,7 +847,6 @@ class MongoDBFeatures:
         """
         Exports venue data from MongoDB to an Excel file in the base folder.
         Normalizes the nested team and venue structure before exporting.
-
         Returns:
             pd.DataFrame: DataFrame containing normalized venue data
         """
@@ -821,8 +908,6 @@ class MongoDBFeatures:
                 self.logger.error(f"Error exporting venues data: {e}")
             return pd.DataFrame()
 
-
-
 def main():
     mongodb_features = MongoDBFeatures()
     print("Getting fixtures with stats")
@@ -840,6 +925,11 @@ def main():
     print("Getting future matches")
     future_matches = mongodb_features.get_future_matches(fixtures_dataframe_final)
     print(f"Future matches shape: {future_matches.shape}")
+    
+    print("Exporting predictions")
+    fixtures_with_predictions = mongodb_features.get_fixtures_with_predictions()
+    predictions = mongodb_features.normalize_predictions_data(fixtures_with_predictions)
+    print(f"Predictions shape: {predictions.shape}")
     
     # print("Exporting venues")
     # venues = mongodb_features.export_venues()

@@ -13,6 +13,9 @@ from sklearn.svm import SVC
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.linear_model import SGDClassifier
 from sklearn.base import BaseEstimator, ClassifierMixin
 from typing import Dict, List, Tuple, Optional, Union
 import os
@@ -20,6 +23,10 @@ import sys
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+import random
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers, regularizers, callbacks
 
 # Add project root to Python path
 try:
@@ -49,6 +56,13 @@ from models.ensemble.training import initialize_meta_learner, train_base_models,
 from models.ensemble.weights import compute_dynamic_weights, compute_precision_focused_weights
 from models.ensemble.thresholds import tune_threshold_for_precision, tune_threshold, tune_individual_threshold
 
+# Set random seeds for reproducibility
+random_seed = 19
+random.seed(random_seed)
+np.random.seed(random_seed)
+tf.random.set_seed(random_seed)
+os.environ['PYTHONHASHSEED'] = str(random_seed)
+
 class EnsembleModel(BaseEstimator, ClassifierMixin):
     """
     EnsembleModel trains a soft voting ensemble (XGBoost, CatBoost, LGBM) combined with stacking
@@ -72,7 +86,8 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 sampling_strategy: float = 0.7,
                 complexity_penalty: float = 0.01,
                 target_precision: float = 0.50,
-                required_recall: float = 0.25):
+                required_recall: float = 0.25,
+                X_train: pd.DataFrame = None):
         """
         Initialize the EnsembleModel with configuration parameters.
         
@@ -104,18 +119,18 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             device='cpu',
             nthread=-1,
             objective='binary:logistic',
-            eval_metric=['aucpr', 'error', 'logloss'],
+            eval_metric=['aucpr', 'logloss', 'auc'],
             verbosity=0,
-            learning_rate=0.065,
-            max_depth=9,
-            min_child_weight=450,
-            subsample=0.6,
-            colsample_bytree=0.63,
-            reg_alpha=56.2,
-            reg_lambda=8.61,
-            gamma=3.9000000000000004,
-            early_stopping_rounds=770,
-            scale_pos_weight=2.73,
+            learning_rate=0.03791741758266303,
+            max_depth=6,
+            min_child_weight=221,
+            subsample=0.6321181883147767,
+            colsample_bytree=0.8665027477545583,
+            reg_alpha=0.009258121536305803,
+            reg_lambda=10.625988960745355,
+            gamma=1.3607609856733809,
+            early_stopping_rounds=634,
+            scale_pos_weight=3.8790295965457644,
             seed=19
         )
         self.model_cat = CatBoostClassifier( #39.7%
@@ -135,27 +150,26 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             thread_count=-1,
             verbose=-1
         )
-        self.model_lgb = LGBMClassifier( #40.1%
+        self.model_lgb = LGBMClassifier( #41.7%
             objective='binary',
-            metric=['average_precision', 'auc'],
+            metric=['binary_logloss', 'average_precision', 'auc'],
             verbose=-1,
             n_jobs=-1,
             random_state=19,
             device='cpu',
-            learning_rate=0.07808365732227378,
-            num_leaves=49,
-            max_depth=5,
-            min_child_samples=186,
-            feature_fraction=0.7362414908665876,
-            bagging_fraction=0.566329378803412,
+            learning_rate=0.071,
+            num_leaves=87,
+            max_depth=9,
+            min_child_samples=319,
+            feature_fraction=0.6,
+            bagging_fraction=0.55,
             bagging_freq=7,
-            reg_alpha=10.381624688086854,
-            reg_lambda=8.247369065806053,
-            min_split_gain=0.0759612454859611,
-            early_stopping_rounds=368,
-            path_smooth=0.003311033349450048,
-            cat_smooth=6.238451219805991,
-            max_bin=586
+            reg_alpha=5.4,
+            reg_lambda=1.23,
+            min_split_gain=0.17,
+            path_smooth=0.488,
+            cat_smooth=13.7,
+            max_bin=645
         )
         
         # Initialize the extra base model based on the selected type with reduced complexity
@@ -185,22 +199,34 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             )
             self.logger.info("Extra base model initialized as SVC.")
         elif self.extra_base_model_type == 'mlp':
-            self.model_extra = MLPClassifier(
-                hidden_layer_sizes=(50,),
-                activation='logistic',
-                solver='adam',
-                alpha=0.007712811947156352,
-                learning_rate='adaptive',
-                learning_rate_init=0.00029662989987000704,
-                max_iter=324,
-                early_stopping=True,
-                validation_fraction=0.18566223936114976,
-                beta_1=0.8760785048616898,
-                beta_2=0.995612771975695,
-                epsilon=2.33262447559419e-08,
-                batch_size=64,
-                tol=1.6435497475111308e-05,
-                random_state=253
+            self.model_extra = keras.Sequential()
+            self.model_extra.add(layers.InputLayer(shape=(X_train.shape[1],)))
+            
+            # Add hidden layers
+            for _ in range(1):  # 1 hidden layer
+                self.model_extra.add(layers.Dense(
+                    120,  # 120 neurons per layer
+                    activation='tanh',
+                    kernel_regularizer=regularizers.l1_l2(
+                        l1=0.0006252292488020048, 
+                        l2=0.0010179804312458536
+                    )
+                ))
+                self.model_extra.add(layers.BatchNormalization())
+                self.model_extra.add(layers.Dropout(0.2685783444324335))  # Updated dropout rate
+            
+            # Output layer for binary classification
+            self.model_extra.add(layers.Dense(1, activation='sigmoid'))
+            optimizer = keras.optimizers.Adam(
+                learning_rate=0.0008586241362721754,
+                beta_1=0.9,
+                beta_2=0.999,
+                epsilon=1e-8
+            )
+            self.model_extra.compile(
+                optimizer=optimizer,
+                loss='binary_crossentropy',
+                metrics=['accuracy', keras.metrics.AUC(name='auc')]
             )
             self.logger.info("Extra base model initialized as MLPClassifier.")
         elif self.extra_base_model_type == 'sgd':
@@ -360,10 +386,20 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         # Get predictions
         if self.extra_base_model_type in ['mlp', 'svm'] and self.extra_model_scaler is not None:
+            # Scale validation, training, and test data using the fitted scaler
             X_val_scaled = self.extra_model_scaler.transform(X_val_prepared)
-            p_extra = extra_model.predict_proba(X_val_scaled)[:, 1]
-            p_extra_train = extra_model.predict_proba(X_train_prepared)[:, 1]
-            p_extra_test = extra_model.predict_proba(X_test_prepared)[:, 1]
+            X_train_scaled = self.extra_model_scaler.transform(X_train_prepared)
+            X_test_scaled = self.extra_model_scaler.transform(X_test_prepared)
+            
+            # Get probabilities from scaled data
+            if self.extra_base_model_type == 'mlp':
+                p_extra = extra_model.predict(X_val_scaled, verbose=0).flatten()
+                p_extra_train = extra_model.predict(X_train_scaled, verbose=0).flatten()
+                p_extra_test = extra_model.predict(X_test_scaled, verbose=0).flatten()
+            else:  # SVM case
+                p_extra = extra_model.predict_proba(X_val_scaled)[:, 1]
+                p_extra_train = extra_model.predict_proba(X_train_scaled)[:, 1]
+                p_extra_test = extra_model.predict_proba(X_test_scaled)[:, 1]
         else:
             p_extra = extra_model.predict_proba(X_val_prepared)[:, 1]
             p_extra_train = extra_model.predict_proba(X_train_prepared)[:, 1]
@@ -384,12 +420,15 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # Step 7: Optionally calculate dynamic weights based on validation performance
         if self.dynamic_weighting:
             self.logger.info("Computing dynamic weights based on validation performance...")
+            self.logger.info(f"Calculating precision-focused weights for validation data...")
             self.dynamic_weights = compute_precision_focused_weights(
                 p_xgb, p_cat, p_lgb, p_extra, y_val, self.target_precision, self.required_recall, self.logger
             )
+            self.logger.info(f"Calculating precision-focused weights for training data...")
             self.dynamic_weights_train = compute_precision_focused_weights(
                 p_xgb_train, p_cat_train, p_lgb_train, p_extra_train, y_train, self.target_precision, self.required_recall, self.logger
             )
+            self.logger.info(f"Calculating precision-focused weights for test data...")
             self.dynamic_weights_test = compute_precision_focused_weights(
                 p_xgb_test, p_cat_test, p_lgb_test, p_extra_test, y_test, self.target_precision, self.required_recall, self.logger
             )
@@ -447,7 +486,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.logger.info("Ensemble model training completed successfully.")
         
         return eval_results
-    
+
     def predict_proba(self, X) -> np.ndarray:
         """
         Generate probability predictions from the ensemble.
@@ -474,7 +513,10 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # Get predictions
         if self.extra_base_model_type in ['mlp', 'svm'] and self.extra_model_scaler is not None:
             X_scaled = self.extra_model_scaler.transform(X_prepared)
-            p_extra = extra_model.predict_proba(X_scaled)[:, 1]
+            if self.extra_base_model_type == 'mlp':
+                p_extra = extra_model.predict(X_scaled, verbose=0).flatten()
+            else:  # SVM case
+                p_extra = extra_model.predict_proba(X_scaled)[:, 1]
         else:
             p_extra = extra_model.predict_proba(X_prepared)[:, 1]
         
@@ -492,7 +534,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         meta_probs = self.meta_learner.predict_proba(meta_features)
         
         return meta_probs[:, 1]
-    
+
     def predict(self, X) -> np.ndarray:
         """
         Generate binary predictions using the optimal threshold.
@@ -508,7 +550,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         # Apply threshold
         return (probabilities >= self.optimal_threshold).astype(int)
-    
+
     def explain_predictions(self, X_val) -> Dict:
         """
         Generate feature importance explanations using SHAP values.
@@ -520,7 +562,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             Dictionary with explanation results
         """
         return explain_predictions(self, X_val, self.logger)
-    
+
     def analyze_prediction_errors(self, X_val, y_val) -> Dict:
         """
         Analyze prediction errors on the validation set.

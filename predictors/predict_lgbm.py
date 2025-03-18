@@ -78,6 +78,7 @@ class DrawPredictor:
             # Handle different model types (PyFuncModel doesn't have predict_proba)
             try:
                 if hasattr(self.model, 'predict_proba'):
+                    print(f"Model has predict_proba method")
                     pos_probas = self.model.predict_proba(df)[:, 1]
                     predictions = (pos_probas >= self.threshold).astype(int)
                 else:
@@ -95,6 +96,7 @@ class DrawPredictor:
             pos_probas = np.zeros(len(df))
         results = {
             'predictions': predictions.tolist(),
+            'draw_probabilities': pos_probas.tolist(),
             'num_predictions': len(predictions),
             'positive_predictions': int(np.sum(predictions)),
             'prediction_rate': float(np.mean(predictions))
@@ -249,6 +251,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Add predictions to dataframe using .loc to avoid SettingWithCopyWarning
         prediction_df = prediction_df.copy()  # Create explicit copy
         prediction_df.loc[:, 'draw_predicted'] = results['predictions']
+        prediction_df.loc[:, 'draw_probability'] = [round(prob, 2) for prob in results['draw_probabilities']]
         # Get real scores and merge - this is where the error occurs
         if 'fixture_id' in prediction_data.columns:
             print(f"prediction_data.columns: {prediction_data.shape}")
@@ -337,15 +340,16 @@ def main():
     # Model URIs to evaluate
     model_uris = [
         # '46ffff13478741c0a4ae0fbe90d78bcf',
-        '9fcbae498c7f405fac064b49300ffde1',
-        '3aad6290935b47d8879446259159c74d',
+        # '9fcbae498c7f405fac064b49300ffde1',
+        # '3aad6290935b47d8879446259159c74d',
         # '459e32871ab94727a4118fecf3d7f28d',
         # '4b3dc29cc6874b4d939bc21b4e8fbd18',
         # '55877ba9e4e14cbba346c6865a5c5298',
         # 'e28bae0f155a4cbba406335f25742036',
-        '75838e5e45942d9b9210e2ad034e9c3',
+        # '75838e5e45942d9b9210e2ad034e9c3',
         '33f216cc24734df8869a6b049106a2d9',
-        'cfec65e216bf46ad93e93e299c8a11c4'
+        'cfec65e216bf46ad93e93e299c8a11c4',
+        'ebcc972890b44f96b36e4e01d5698b42'
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
@@ -372,10 +376,10 @@ def main():
                 continue
                 
             # Save individual model predictions
-            model_output_path = Path(f"./data/prediction/predictions_model_{uri}.xlsx")
+            model_output_path = Path(f"./data/prediction/lightgbm/predictions_model_{uri}.xlsx")
             # Reorder columns to place draw_predicted and draw_probability last
-            cols = [col for col in predicted_df.columns if col not in ['draw_predicted']]
-            cols.extend(['draw_predicted'])
+            cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
+            cols.extend(['draw_predicted', 'draw_probability'])
             predicted_df = predicted_df[cols]
             predicted_df.to_excel(model_output_path, index=False)
             print(f"Predictions for model {uri} saved to: {model_output_path}")
@@ -395,12 +399,12 @@ def main():
     # Handle empty predictions
     if best_predictions.empty:
         print("Warning: No valid predictions generated. Creating empty result.")
-        predicted_df = pd.DataFrame(columns=['fixture_id', 'draw_predicted'])
+        predicted_df = pd.DataFrame(columns=['fixture_id', 'draw_predicted', 'draw_probability'])
     else:
         predicted_df = best_predictions
         # Reorder columns to place draw_predicted and draw_probability last
-        cols = [col for col in predicted_df.columns if col not in ['draw_predicted']]
-        cols.extend(['draw_predicted'])
+        cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
+        cols.extend(['draw_predicted', 'draw_probability'])
         predicted_df = predicted_df[cols]
 
 

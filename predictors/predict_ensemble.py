@@ -19,10 +19,8 @@ from utils.create_evaluation_set import get_real_api_scores_from_excel, setup_ml
 experiment_name = "ensemble_model_new"
 mlruns_dir = setup_mlflow_tracking(experiment_name)
 
-
 class DrawPredictor:
     """Predictor class for draw predictions using the stacked model."""
-
     def __init__(self, model_uri: str):
         """Initialize predictor with model URI."""
         # Set up MLflow tracking URI based on current environment
@@ -159,7 +157,6 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Initialize predictor
         predictor = DrawPredictor(model_uri)
         prediction_df = prediction_data.copy()
-        # print(f"Prediction data len(prediction_df): {len(prediction_df)}")
         
         # Ensure data types are compatible with model expectations
         # Convert numeric columns to float64 to match model expectations
@@ -281,12 +278,10 @@ def main():
     # Model URIs to evaluate
     model_uris = [
         'f04b93479ee249f6bc77204e5c4b206f',
-        # '8abc7269aeba4436a5d23ed2bd13e4d4',
-        '5befa2bf2b5d4ae6866f3cc177c7b68f', 
         '035abdf986654b1e8b551d0ce044c929',
         '8d80522037ae4a9790b72129c06851a4',
         'd3c066618b4d425fbb2ffff99a478238',
-        # 'acded8143d6d4a1cb3ba14cd959949e3'
+        'ba00bb0f799c4d5aaa1f2ab803a9827a'
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
@@ -313,7 +308,7 @@ def main():
                 continue
                 
             # Save individual model predictions
-            model_output_path = Path(f"./data/prediction/predictions_model_{uri}.xlsx")
+            model_output_path = Path(f"./data/prediction/ensemble/predictions_model_{uri}.xlsx")
             # Reorder columns to place draw_predicted and draw_probability last
             cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
             cols.extend(['draw_predicted', 'draw_probability'])
@@ -345,7 +340,7 @@ def main():
         predicted_df = predicted_df[cols]
     
     # Save best model results
-    output_path = Path("./data/prediction/predictions_ensemble_best.xlsx")
+    output_path = Path("./data/prediction/ensemble/predictions_ensemble_best.xlsx")
     predicted_df.to_excel(output_path, index=False)
     print(f"\nBest model predictions saved to: {output_path}")
 

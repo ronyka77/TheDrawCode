@@ -63,8 +63,6 @@ from models.StackedEnsemble.shared.data_loader import DataLoader
 # Global settings
 min_recall = 0.20  # Minimum acceptable recall
 n_trials = 2000  # Number of hyperparameter optimization trials as in notebook
-SEED = 42  # Global seed for reproducibility
-DEVICE = 'cpu'  # Enforce CPU training
 
 # Base parameters as in the notebook
 base_params = {
@@ -88,99 +86,99 @@ def load_hyperparameter_space():
     hyperparameter_space = {
         'learning_rate': {
             'type': 'float',
-            'low': 0.01,
-            'high': 0.11,
+            'low': 0.06,
+            'high': 0.08,
             'log': False,
-            'step': 0.005
+            'step': 0.001
         },
         'num_leaves': {
             'type': 'int',
-            'low': 50,
-            'high': 200,
+            'low': 80,
+            'high': 100,
             'log': False,
-            'step': 2
+            'step': 1
         },
         'max_depth': {
             'type': 'int',
-            'low': 5,
-            'high': 10,  # Fixed at 5 based on top trials
+            'low': 8,
+            'high': 10,
             'log': False,
             'step': 1
         },
         'min_child_samples': {
             'type': 'int',
-            'low': 250,
-            'high': 500,
+            'low': 300,
+            'high': 320,
             'log': False,
-            'step': 5
+            'step': 1
         },
         'feature_fraction': {
             'type': 'float',
-            'low': 0.6,
-            'high': 0.8,
+            'low': 0.58,
+            'high': 0.62,
             'log': False,
             'step': 0.01
         },
         'bagging_fraction': {
             'type': 'float',
-            'low': 0.4,
-            'high': 0.8,
+            'low': 0.55,
+            'high': 0.57,
             'log': False,
-            'step': 0.01
+            'step': 0.005
         },
         'bagging_freq': {
             'type': 'int',
-            'low': 6,
-            'high': 10,  # Fixed at 7 based on top trials
+            'low': 7,
+            'high': 9,
             'log': False,
             'step': 1
         },
         'reg_alpha': {
             'type': 'float',
-            'low': 0.1,
-            'high': 10.5,
+            'low': 4.5,
+            'high': 5.5,
             'log': False,
             'step': 0.1
         },
         'reg_lambda': {
             'type': 'float',
-            'low': 0.1,
-            'high': 9.0,
+            'low': 1.2,
+            'high': 1.4,
             'log': False,
-            'step': 0.05
+            'step': 0.01
         },
         'min_split_gain': {
             'type': 'float',
-            'low': 0.1,
-            'high': 0.55,
+            'low': 0.15,
+            'high': 0.17,
             'log': False,
             'step': 0.01
         },
         'early_stopping_rounds': {
             'type': 'int',
-            'low': 400,
-            'high': 800,
+            'low': 350,
+            'high': 400,
             'log': False,
             'step': 10
         },
         'path_smooth': {
             'type': 'float',
-            'low': 0.005,
-            'high': 0.8,
+            'low': 0.45,
+            'high': 0.49,
             'log': False,
-            'step': 0.005
+            'step': 0.001
         },
         'cat_smooth': {
             'type': 'float',
-            'low': 1.0,
-            'high': 30.0,
+            'low': 13.5,
+            'high': 14.5,
             'log': False,
-            'step': 0.5
+            'step': 0.1
         },
         'max_bin': {
             'type': 'int',
-            'low': 200,
-            'high': 700,
+            'low': 630,
+            'high': 650,
             'log': False,
             'step': 5
         }
@@ -238,7 +236,7 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         model = create_model(model_params)
         
         # Create eval set for early stopping
-        eval_set = [(X_test, y_test)]
+        eval_set = [(X_eval, y_eval)]
         
         # Fit model with early stopping
         model.fit(
@@ -256,77 +254,6 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         
     except Exception as e:
         logger.error(f"Error training LightGBM model: {str(e)}")
-        raise
-
-def save_model(model, path, threshold=0.5):
-    """
-    Save LightGBM model to specified path.
-    Updated to match notebook implementation using joblib.
-    
-    Args:
-        model: Trained LightGBM model
-        path: Path to save model
-        threshold: Optimal decision threshold
-    """
-    if model is None:
-        raise RuntimeError("No model to save")
-        
-    try:
-        # Create directory if it doesn't exist
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Save model
-        joblib.dump(model, path)
-        
-        # Save threshold
-        threshold_path = path.parent / "threshold.json"
-        with open(threshold_path, 'w') as f:
-            json.dump({
-                'threshold': threshold,
-                'model_type': 'lightgbm',
-                'params': model.get_params()
-            }, f, indent=2)
-            
-        logger.info(f"Model saved to {path}")
-        
-    except Exception as e:
-        logger.error(f"Error saving model: {str(e)}")
-        raise
-
-def load_model(path):
-    """
-    Load LightGBM model from specified path.
-    Updated to match notebook implementation using joblib.
-    
-    Args:
-        path: Path to load model from
-        
-    Returns:
-        tuple: (model, threshold)
-    """
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"No model file found at {path}")
-        
-    try:
-        # Load model
-        model = joblib.load(path)
-        
-        # Load threshold
-        threshold_path = path.parent / "threshold.json"
-        if threshold_path.exists():
-            with open(threshold_path, 'r') as f:
-                data = json.load(f)
-                threshold = data.get('threshold', 0.5)
-        else:
-            threshold = 0.5
-            
-        logger.info(f"Model loaded from {path}")
-        return model, threshold
-        
-    except Exception as e:
-        logger.error(f"Error loading model: {str(e)}")
         raise
 
 def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
@@ -440,10 +367,13 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             prior_weight=0.2,
             warn_independent_sampling=False
         )
+        random_sampler = optuna.samplers.RandomSampler(
+            seed=19
+        )
         study = optuna.create_study(
             study_name='lightgbm_optimization',
             direction='maximize',
-            sampler=sampler
+            sampler=random_sampler
         )
         
         # Optimize
@@ -688,10 +618,6 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         
         # Log to MLflow
         log_to_mlflow(model, metrics, best_params, experiment_name)
-        
-        # Save model locally
-        model_path = f"models/StackedEnsemble/base/tree_based/lightgbm_model_{datetime.now().strftime('%Y%m%d_%H%M')}.pkl"
-        save_model(model, model_path, metrics.get('threshold', 0.5))
         
         return model, metrics
         
