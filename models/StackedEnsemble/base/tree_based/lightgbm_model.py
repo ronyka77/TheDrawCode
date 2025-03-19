@@ -229,6 +229,13 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         tuple: (trained_model, metrics)
     """
     try:
+        # Combine training and validation data while preserving indexes
+        X_combined = pd.concat([X_train, X_test], axis=0)
+        y_combined = pd.concat([y_train, y_test], axis=0)
+        
+        # Reset indexes to ensure proper alignment
+        X_combined.reset_index(drop=True, inplace=True)
+        y_combined.reset_index(drop=True, inplace=True)
         # Extract early stopping rounds if present
         early_stopping_rounds = model_params.pop('early_stopping_rounds', 100)
         
@@ -240,7 +247,7 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         
         # Fit model with early stopping
         model.fit(
-            X_train, y_train,
+            X_combined, y_combined,
             eval_set=eval_set,
             callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)]
         )

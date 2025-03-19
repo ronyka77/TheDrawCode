@@ -150,6 +150,11 @@
         "country": "Scotland"
     },
     {
+        "league_id": 180,
+        "league_name": "Championship",
+        "country": "Scotland"
+    },
+    {
         "league_id": 188,
         "league_name": "A-League",
         "country": "Australia"
@@ -208,7 +213,11 @@
         "league_id": 283,
         "league_name": "Liga I",
         "country": "Romania"
+    },
+    {
+        "league_id": 172,
+        "league_name": "First League",
+        "country": "Bulgaria"
     }
-    
     
 ]

@@ -63,26 +63,27 @@ def select_features(
     """
     # Initialize models with minimal training iterations for quick evaluation
     xgb_model = XGBClassifier(
-        random_state=42,
+        random_state=19,
         tree_method='hist',
-        n_estimators=1373,
-        verbosity=0,
-        learning_rate=0.032124519390481394,
-        early_stopping_rounds=171,
-        min_child_weight=246,
-        gamma=0.01746785914240033,
-        subsample=0.3873734494018223,
-        colsample_bytree=0.9797308349068996,
-        scale_pos_weight=2.278590445962556,
-        reg_alpha=0.00018435065186835382,
-        reg_lambda=4.962042446245311,
-        max_depth=4,
         device='cpu',
-        eval_metric=['error', 'auc', 'aucpr'],
-        nthread=-1
+        nthread=-1,
+        objective='binary:logistic',
+        eval_metric=['aucpr', 'logloss', 'auc'],
+        verbosity=0,
+        learning_rate=0.03791741758266303,
+        max_depth=6,
+        min_child_weight=221,
+        subsample=0.6321181883147767,
+        colsample_bytree=0.8665027477545583,
+        reg_alpha=0.009258121536305803,
+        reg_lambda=10.625988960745355,
+        gamma=1.3607609856733809,
+        early_stopping_rounds=634,
+        scale_pos_weight=3.8790295965457644,
+        seed=19
     )
     cat_model = CatBoostClassifier(
-        random_seed=42,
+        random_seed=19,
         iterations=4901,
         verbose=0,
         loss_function='Logloss',
@@ -90,32 +91,32 @@ def select_features(
         task_type='CPU',
         auto_class_weights='Balanced',
         grow_policy='SymmetricTree',
-        learning_rate=0.013288620619359776,
-        depth=7,
-        l2_leaf_reg=11.152891877342054,
+        learning_rate=0.05747334517009464,
+        depth=6,
+        l2_leaf_reg=1.0342319632749895,
         border_count=128,
-        subsample=0.7437647532474002,
+        subsample=0.7152201908359026,
         random_strength=0.14171788543304523,
-        min_data_in_leaf=47,
-        early_stopping_rounds=996
+        min_data_in_leaf=26,
+        early_stopping_rounds=201
     )
     lgbm_model = LGBMClassifier(
         random_state=42,
         objective='binary',
-        metric='binary_logloss',
+        metric=['binary_logloss', 'average_precision', 'auc'],
         boosting_type='gbdt',
         device_type='cpu',
-        verbose=100,
-        learning_rate=0.0037460291406696956,
-        max_depth=6,
-        reg_lambda=0.4103475806096283,
+        verbose=-1,
+        learning_rate=0.071,
+        max_depth=9,
+        reg_lambda=1.23,
         n_estimators=3577,
-        num_leaves=67,
+        num_leaves=87,
         early_stopping_rounds=291,
-        feature_fraction=0.8037822667865142,
-        bagging_freq=2,
-        min_child_samples=28,
-        bagging_fraction=0.7718378995036574,
+        feature_fraction=0.6,
+        bagging_freq=7,
+        min_child_samples=319,
+        bagging_fraction=0.55,
         feature_fraction_bynode=0.9996212749980057
     )
     models = {
@@ -169,42 +170,40 @@ def select_features_differentiated(
     """
     Select features separately for XGBoost, CatBoost, and LightGBM, then provide the union
     of the selected features with the fixed features always included.
-    
     Args:
         X (pd.DataFrame): Input feature dataframe.
         y (pd.Series): Target variable.
         top_k_per_model (int): Number of top features to select for each model.
         fixed_features (Optional[List[str]]): Features that will be included in all sets.
         verbose (bool): If True, prints the selected feature lists.
-    
     Returns:
         Dict[str, List[str]]: Dictionary with keys 'xgb', 'cat', 'lgbm', and 'union'.
     """
     
     fixed_features = fixed_features or []
-    
     models = {
         "xgb": XGBClassifier(
-            random_state=42,
-            tree_method='hist',
-            n_estimators=1373,
-            verbosity=0,
-            learning_rate=0.032124519390481394,
-            early_stopping_rounds=171,
-            min_child_weight=246,
-            gamma=0.01746785914240033,
-            subsample=0.3873734494018223,
-            colsample_bytree=0.9797308349068996,
-            scale_pos_weight=2.278590445962556,
-            reg_alpha=0.00018435065186835382,
-            reg_lambda=4.962042446245311,
-            max_depth=4,
+            random_state=19,
+            tree_method='hist',  # Required for CPU-only training per project rules
             device='cpu',
-            eval_metric=['error', 'auc', 'aucpr'],
-            nthread=-1
+            nthread=-1,
+            objective='binary:logistic',
+            eval_metric=['aucpr', 'logloss', 'auc'],
+            verbosity=0,
+            learning_rate=0.03791741758266303,
+            max_depth=6,
+            min_child_weight=221,
+            subsample=0.6321181883147767,
+            colsample_bytree=0.8665027477545583,
+            reg_alpha=0.009258121536305803,
+            reg_lambda=10.625988960745355,
+            gamma=1.3607609856733809,
+            early_stopping_rounds=634,
+            scale_pos_weight=3.8790295965457644,
+            seed=19
         ),
         "cat": CatBoostClassifier(
-            random_seed=42,
+            random_seed=19,
             iterations=4901,
             verbose=0,
             loss_function='Logloss',
@@ -212,33 +211,33 @@ def select_features_differentiated(
             task_type='CPU',
             auto_class_weights='Balanced',
             grow_policy='SymmetricTree',
-            learning_rate=0.013288620619359776,
-            depth=7,
-            l2_leaf_reg=11.152891877342054,
+            learning_rate=0.05747334517009464,
+            depth=6,
+            l2_leaf_reg=1.0342319632749895,
             border_count=128,
-            subsample=0.7437647532474002,
+            subsample=0.7152201908359026,
             random_strength=0.14171788543304523,
-            min_data_in_leaf=47,
-            early_stopping_rounds=996
+            min_data_in_leaf=26,
+            early_stopping_rounds=201
         ),
         "lgbm": LGBMClassifier(
             random_state=42,
             objective='binary',
-            metric='binary_logloss',
+            metric=['binary_logloss', 'average_precision', 'auc'],
             boosting_type='gbdt',
             device_type='cpu',
             verbose=-1,
-            learning_rate=0.0037460291406696956,
-            max_depth=6,
-            reg_lambda=0.4103475806096283,
+            learning_rate=0.071,
+            max_depth=9,
+            reg_lambda=1.23,
             n_estimators=3577,
-            num_leaves=67,
+            num_leaves=87,
             early_stopping_rounds=291,
-            feature_fraction=0.8037822667865142,
-            bagging_freq=2,
-            min_child_samples=28,
-            bagging_fraction=0.7718378995036574,
-            feature_fraction_bynode=0.9996212749980057  
+            feature_fraction=0.6,
+            bagging_freq=7,
+            min_child_samples=319,
+            bagging_fraction=0.55,
+            feature_fraction_bynode=0.9996212749980057
         )
     }
     

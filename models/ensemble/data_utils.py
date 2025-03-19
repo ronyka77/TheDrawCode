@@ -42,9 +42,10 @@ def prepare_data(X: pd.DataFrame, selected_features: List[str]) -> pd.DataFrame:
     for col in X_selected.columns:
         # Use mean for numeric columns
         if np.issubdtype(X_selected[col].dtype, np.number):
-            X_selected[col] = X_selected[col].fillna(X_selected[col].mean())
+            X_selected[col].fillna(X_selected[col].mean(), inplace=True)
         else:
-            X_selected[col] = X_selected[col].fillna(X_selected[col].mode()[0])
+            # Use mode for categorical columns
+            X_selected[col].fillna(X_selected[col].mode()[0], inplace=True)
     
     return X_selected
 

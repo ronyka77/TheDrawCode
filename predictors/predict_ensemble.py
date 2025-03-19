@@ -19,6 +19,7 @@ from utils.create_evaluation_set import get_real_api_scores_from_excel, setup_ml
 experiment_name = "ensemble_model_new"
 mlruns_dir = setup_mlflow_tracking(experiment_name)
 
+
 class DrawPredictor:
     """Predictor class for draw predictions using the stacked model."""
     def __init__(self, model_uri: str):
@@ -264,6 +265,11 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                 print("Warning: No real scores data available")
                 matches_with_results = prediction_df.copy()
             matches_with_results = matches_with_results.loc[:, ~matches_with_results.columns.duplicated(keep='last')]
+        # Filter matches with results for date >= 2025-03-01 and order by date descending
+        if 'Date' in matches_with_results.columns:
+            matches_with_results['Date'] = pd.to_datetime(matches_with_results['Date'])
+            matches_with_results = matches_with_results[matches_with_results['Date'] >= '2025-03-01']
+            matches_with_results = matches_with_results.sort_values(by='Date', ascending=False)
         return matches_with_results, precision, draws_recall
     except Exception as e:
         print(f"Error during prediction: {str(e)}")
@@ -278,10 +284,15 @@ def main():
     # Model URIs to evaluate
     model_uris = [
         'f04b93479ee249f6bc77204e5c4b206f',
-        '035abdf986654b1e8b551d0ce044c929',
-        '8d80522037ae4a9790b72129c06851a4',
-        'd3c066618b4d425fbb2ffff99a478238',
-        'ba00bb0f799c4d5aaa1f2ab803a9827a'
+        '035abdf986654b1e8b551d0ce044c929', #57, 58, 59, 61
+        '8d80522037ae4a9790b72129c06851a4', #45, 47 
+        'd3c066618b4d425fbb2ffff99a478238', #59, 60, 64, 65, 66, 69
+        '7c12f45bc2c442818cf09c497eef4176', #32, 33
+        '58f6a2c94ced4c1a9c724d19224cca8c', #32, 34, 36, 37, 38
+        '1b64ed01857f4abf9892de9c22707151', #KEEP 30, 32
+        '1fb56805b3ef405192d50acad015fd79', #KEEP 31, 35, 36
+        'b850fb10b2f04741ad787aebee0307a4', #30, 31, 34
+        'ee17cebf244e473ba8e661bcdd442d50', #KEEP 28, 29, 30, 36
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
@@ -340,7 +351,6 @@ def main():
         predicted_df = predicted_df[cols]
     
     # Save best model results
-    output_path = Path("./data/prediction/ensemble/predictions_ensemble_best.xlsx")
     output_path = Path("./data/prediction/ensemble/predictions_ensemble_best.xlsx")
     predicted_df.to_excel(output_path, index=False)
     print(f"\nBest model predictions saved to: {output_path}")

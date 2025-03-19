@@ -931,9 +931,9 @@ def main():
     predictions = mongodb_features.normalize_predictions_data(fixtures_with_predictions)
     print(f"Predictions shape: {predictions.shape}")
     
-    # print("Exporting venues")
-    # venues = mongodb_features.export_venues()
-    # print(f"Venues shape: {venues.shape}")
+    print("Exporting venues")
+    venues = mongodb_features.export_venues()
+    print(f"Venues shape: {venues.shape}")
 
 if __name__ == "__main__":
     main()

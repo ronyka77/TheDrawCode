@@ -13,9 +13,6 @@ from sklearn.svm import SVC
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
-from sklearn.linear_model import SGDClassifier
 from sklearn.base import BaseEstimator, ClassifierMixin
 from typing import Dict, List, Tuple, Optional, Union
 import os
@@ -119,31 +116,31 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             device='cpu',
             nthread=-1,
             objective='binary:logistic',
-            eval_metric=['aucpr', 'logloss', 'auc'],
+            eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.03791741758266303,
-            max_depth=6,
-            min_child_weight=221,
-            subsample=0.6321181883147767,
-            colsample_bytree=0.8665027477545583,
-            reg_alpha=0.009258121536305803,
-            reg_lambda=10.625988960745355,
-            gamma=1.3607609856733809,
-            early_stopping_rounds=634,
-            scale_pos_weight=3.8790295965457644,
+            learning_rate=0.049999999999999996,
+            max_depth=7,
+            min_child_weight=245,
+            subsample=0.6,
+            colsample_bytree=0.73,
+            reg_alpha=38.0,
+            reg_lambda=7.07,
+            gamma=0.04,
+            early_stopping_rounds=760,
+            scale_pos_weight=2.35,
             seed=19
         )
         self.model_cat = CatBoostClassifier( #39.7%
-            learning_rate=0.05747334517009464,
-            depth=6,
-            min_data_in_leaf=26,
-            subsample=0.7152201908359026,
-            colsample_bylevel=0.35094802393061786,
-            reg_lambda=1.0342319632749895,
-            leaf_estimation_iterations=4,
-            bagging_temperature=2.891201300013366,
-            scale_pos_weight=5.295897250279237,
-            early_stopping_rounds=201,
+            learning_rate=0.07846192040909378,
+            depth=9,
+            min_data_in_leaf=18,
+            subsample=0.7138627535418607,
+            colsample_bylevel=0.4689356247169103,
+            reg_lambda=0.5364369908816581,
+            leaf_estimation_iterations=6,
+            bagging_temperature=2.7219134152516724,
+            scale_pos_weight=12.701247011594266,
+            early_stopping_rounds=284,
             loss_function='Logloss',
             eval_metric='AUC',
             task_type='CPU',
@@ -157,18 +154,18 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             n_jobs=-1,
             random_state=19,
             device='cpu',
-            learning_rate=0.071,
-            num_leaves=87,
+            learning_rate=0.077,
+            num_leaves=89,
             max_depth=9,
-            min_child_samples=319,
-            feature_fraction=0.6,
-            bagging_fraction=0.55,
+            min_child_samples=314,
+            feature_fraction=0.61,
+            bagging_fraction=0.56,
             bagging_freq=7,
-            reg_alpha=5.4,
-            reg_lambda=1.23,
-            min_split_gain=0.17,
-            path_smooth=0.488,
-            cat_smooth=13.7,
+            reg_alpha=5.2,
+            reg_lambda=1.22,
+            min_split_gain=0.15,
+            path_smooth=0.481,
+            cat_smooth=14.0,
             max_bin=645
         )
         
@@ -230,6 +227,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             )
             self.logger.info("Extra base model initialized as MLPClassifier.")
         elif self.extra_base_model_type == 'sgd':
+            
             self.model_extra = SGDClassifier(
                 loss='log_loss',
                 penalty='elasticnet',
@@ -304,7 +302,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         if split_validation or X_val is None or y_val is None:
             self.logger.info("Splitting training data for validation...")
             X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
-                X_train_prepared, y_train, test_size=val_size, random_state=42, stratify=y_train
+                X_train_prepared, y_train, test_size=val_size, random_state=19, stratify=y_train
             )
             X_train_prepared, y_train = X_train_split, y_train_split
             X_val_prepared, y_val = X_val_split, y_val_split
@@ -342,7 +340,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # Step 4: Train base models
         self.logger.info("Training base models...")
         trained_models = train_base_models(
-            base_models, X_train_resampled, y_train_resampled, X_test_prepared, y_test
+            base_models, X_train_resampled, y_train_resampled, X_test_prepared, y_test, X_val_prepared, y_val
         )
         
         # Update model references
@@ -359,7 +357,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.logger.info(f"Calibrating base models using {self.calibration_method} method...")
             calibration_results = calibrate_models(
                 trained_models, X_train_resampled, y_train_resampled, 
-                X_test_prepared, y_test, self.calibration_method, self.logger
+                X_val_prepared, y_val, self.calibration_method, self.logger
             )
             
             calibrated_models = calibration_results['calibrated_models']
@@ -372,7 +370,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             
             # Analyze calibration effectiveness
             cal_analysis = analyze_calibration(
-                calibration_results['calibration_results'], y_test, self.logger
+                calibration_results['calibration_results'], y_val, self.logger
             )
         
         # Step 6: Get base model predictions on validation data
@@ -383,54 +381,47 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         cat_model = self.model_cat_calibrated if self.calibrate else self.model_cat
         lgb_model = self.model_lgb_calibrated if self.calibrate else self.model_lgb
         extra_model = self.model_extra_calibrated if self.calibrate else self.model_extra
+        # Combine features and handle indexes
+        X_combined = pd.concat([X_train_prepared, X_test_prepared], axis=0)
+        y_combined = pd.concat([y_train, y_test], axis=0)
         
+        # Reset indexes to maintain proper alignment
+        X_combined.reset_index(drop=True, inplace=True)
+        y_combined.reset_index(drop=True, inplace=True)
         # Get predictions
         if self.extra_base_model_type in ['mlp', 'svm'] and self.extra_model_scaler is not None:
             # Scale validation, training, and test data using the fitted scaler
             X_val_scaled = self.extra_model_scaler.transform(X_val_prepared)
-            X_train_scaled = self.extra_model_scaler.transform(X_train_prepared)
-            X_test_scaled = self.extra_model_scaler.transform(X_test_prepared)
+            X_train_scaled = self.extra_model_scaler.transform(X_combined)
             
             # Get probabilities from scaled data
             if self.extra_base_model_type == 'mlp':
                 p_extra = extra_model.predict(X_val_scaled, verbose=0).flatten()
                 p_extra_train = extra_model.predict(X_train_scaled, verbose=0).flatten()
-                p_extra_test = extra_model.predict(X_test_scaled, verbose=0).flatten()
             else:  # SVM case
                 p_extra = extra_model.predict_proba(X_val_scaled)[:, 1]
                 p_extra_train = extra_model.predict_proba(X_train_scaled)[:, 1]
-                p_extra_test = extra_model.predict_proba(X_test_scaled)[:, 1]
         else:
             p_extra = extra_model.predict_proba(X_val_prepared)[:, 1]
-            p_extra_train = extra_model.predict_proba(X_train_prepared)[:, 1]
-            p_extra_test = extra_model.predict_proba(X_test_prepared)[:, 1]
+            p_extra_train = extra_model.predict_proba(X_combined)[:, 1]
         
         p_xgb = xgb_model.predict_proba(X_val_prepared)[:, 1]
-        p_xgb_train = xgb_model.predict_proba(X_train_prepared)[:, 1]
-        p_xgb_test = xgb_model.predict_proba(X_test_prepared)[:, 1]
+        p_xgb_train = xgb_model.predict_proba(X_combined)[:, 1]
         
         p_cat = cat_model.predict_proba(X_val_prepared)[:, 1]
-        p_cat_train = cat_model.predict_proba(X_train_prepared)[:, 1]
-        p_cat_test = cat_model.predict_proba(X_test_prepared)[:, 1]
-        
+        p_cat_train = cat_model.predict_proba(X_combined)[:, 1]
+
         p_lgb = lgb_model.predict_proba(X_val_prepared)[:, 1]
-        p_lgb_train = lgb_model.predict_proba(X_train_prepared)[:, 1]
-        p_lgb_test = lgb_model.predict_proba(X_test_prepared)[:, 1]
+        p_lgb_train = lgb_model.predict_proba(X_combined)[:, 1]
         
         # Step 7: Optionally calculate dynamic weights based on validation performance
         if self.dynamic_weighting:
             self.logger.info("Computing dynamic weights based on validation performance...")
-            self.logger.info(f"Calculating precision-focused weights for validation data...")
             self.dynamic_weights = compute_precision_focused_weights(
                 p_xgb, p_cat, p_lgb, p_extra, y_val, self.target_precision, self.required_recall, self.logger
             )
-            self.logger.info(f"Calculating precision-focused weights for training data...")
             self.dynamic_weights_train = compute_precision_focused_weights(
-                p_xgb_train, p_cat_train, p_lgb_train, p_extra_train, y_train, self.target_precision, self.required_recall, self.logger
-            )
-            self.logger.info(f"Calculating precision-focused weights for test data...")
-            self.dynamic_weights_test = compute_precision_focused_weights(
-                p_xgb_test, p_cat_test, p_lgb_test, p_extra_test, y_test, self.target_precision, self.required_recall, self.logger
+                p_xgb_train, p_cat_train, p_lgb_train, p_extra_train, y_combined, self.target_precision, self.required_recall, self.logger
             )
         
         # Step 8: Create meta-features from base model predictions
@@ -441,14 +432,10 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         meta_features_train = create_meta_features(
             p_xgb_train, p_cat_train, p_lgb_train, p_extra_train, self.dynamic_weights_train if self.dynamic_weighting else None
         )
-        meta_features_test = create_meta_features(
-            p_xgb_test, p_cat_test, p_lgb_test, p_extra_test, self.dynamic_weights_test if self.dynamic_weighting else None
-        )
-        
+
         # Convert to DataFrame for better interpretability
         meta_df = create_meta_dataframe(meta_features)
         meta_df_train = create_meta_dataframe(meta_features_train)
-        meta_df_test = create_meta_dataframe(meta_features_test)
         
         # Step 9: Initialize and train meta-learner
         self.logger.info(f"Initializing meta-learner of type {self.meta_learner_type}...")
@@ -457,7 +444,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # Train meta-learner
         self.logger.info("Training meta-learner...")
         # self.meta_learner = train_meta_learner(self.meta_learner, meta_df, y_val)
-        self.meta_learner = hypertune_meta_learner(meta_df_train, y_train, meta_df, y_val, 
+        self.meta_learner = hypertune_meta_learner(meta_df_train, y_combined, meta_df, y_val, 
                                                     meta_learner_type=self.meta_learner_type, target_precision=self.target_precision, min_recall=self.required_recall)
         # Step 10: Tune threshold for optimal precision-recall trade-off
         self.logger.info(f"Tuning threshold for target precision {self.target_precision}...")
@@ -482,7 +469,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         eval_results = evaluate_model(
             self.meta_learner, meta_df, y_val, self.optimal_threshold, self.logger
         )
-        
         self.logger.info("Ensemble model training completed successfully.")
         
         return eval_results
@@ -514,7 +500,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         if self.extra_base_model_type in ['mlp', 'svm'] and self.extra_model_scaler is not None:
             X_scaled = self.extra_model_scaler.transform(X_prepared)
             if self.extra_base_model_type == 'mlp':
-                p_extra = extra_model.predict(X_scaled, verbose=0).flatten()
+                p_extra = extra_model.predict(X_scaled).flatten()
             else:  # SVM case
                 p_extra = extra_model.predict_proba(X_scaled)[:, 1]
         else:

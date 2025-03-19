@@ -10,12 +10,12 @@ from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.linear_model import SGDClassifier
 from sklearn.neural_network import MLPClassifier
 from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-import lightgbm as lgb
 from typing import Dict, List, Tuple, Optional, Union
 import mlflow
 import time
 import random
+import xgboost as xgb
+import lightgbm as lgb
 import tensorflow as tf
 from tensorflow.keras import layers, regularizers, callbacks
 import os
@@ -187,6 +187,7 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
     return meta_learner
 
 def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series, 
+                    X_test: pd.DataFrame, y_test: pd.Series,
                     X_eval: pd.DataFrame, y_eval: pd.Series) -> Dict:
     """
     Train base models with early stopping using evaluation data.
@@ -206,12 +207,24 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
     
     for model_name, model in models.items():
         logger.info(f"Training base model: {model_name}")
-        
         try:
             # Prepare training and evaluation data
             X_train_copy = X_train.copy()
             X_eval_copy = X_eval.copy()
+            X_test_copy = X_test.copy()
+            y_test_copy = y_test.copy()
+            y_train_copy = y_train.copy()
+            y_eval_copy = y_eval.copy()
+            # Combine training and test data for comprehensive model training
+            X_combined = pd.concat([X_train_copy, X_test_copy], axis=0)
+            y_combined = pd.concat([y_train_copy, y_test_copy], axis=0)
             
+            # Reset indices to avoid any potential issues
+            X_combined.reset_index(drop=True, inplace=True)
+            y_combined.reset_index(drop=True, inplace=True)
+            X_train_copy = X_combined.copy()
+            y_train_copy = y_combined.copy()
+            logger.info(f"Combined training data shape: {X_train_copy.shape} and {y_train_copy.shape}")
             # Handle model fitting based on model name
             if model_name == 'extra':
                 # Apply scaling if needed (for MLP or SVM models)
@@ -223,33 +236,31 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
                     # Train with early stopping if model supports it
                     if hasattr(model, 'early_stopping_rounds'):
                         model.fit(
-                            X_train_scaled, y_train,
-                            eval_set=[(X_eval_scaled, y_eval)],
+                            X_train_scaled, y_train_copy,
+                            eval_set=[(X_eval_scaled, y_eval_copy)],
                             verbose=False
                         )
                     else:
-                        model.fit(X_train_scaled, y_train)
+                        model.fit(X_train_scaled, y_train_copy)
                     
                     trained_models[model_name] = model
                     trained_models['extra_scaler'] = scaler
                 else:
-                    model.fit(X_train_copy, y_train)
+                    model.fit(X_train_copy, y_train_copy)
                     trained_models[model_name] = model
-            
             elif model_name == 'xgb':
                 # XGBoost model with tree_method='hist' for CPU-only training
                 model.fit(
-                    X_train_copy, y_train,
-                    eval_set=[(X_eval_copy, y_eval)],
+                    X_train_copy, y_train_copy,
+                    eval_set=[(X_eval_copy, y_eval_copy)],
                     verbose=False
                 )
                 trained_models[model_name] = model
-            
             elif model_name == 'cat':
                 # CatBoost model
                 model.fit(
-                    X_train_copy, y_train,
-                    eval_set=(X_eval_copy, y_eval),
+                    X_train_copy, y_train_copy,
+                    eval_set=(X_eval_copy, y_eval_copy),
                     verbose=False
                 )
                 trained_models[model_name] = model
@@ -257,18 +268,16 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
             elif model_name == 'lgb':
                 # LightGBM model
                 model.fit(
-                    X_train_copy, y_train,
-                    eval_set=[(X_eval_copy, y_eval)]
+                    X_train_copy, y_train_copy,
+                    eval_set=[(X_eval_copy, y_eval_copy)]
                 )
                 trained_models[model_name] = model
-            
             else:
                 # Generic model without specific handling
-                model.fit(X_train_copy, y_train)
+                model.fit(X_train_copy, y_train_copy)
                 trained_models[model_name] = model
             
             logger.info(f"Successfully trained base model: {model_name}")
-            
         except Exception as e:
             logger.error(f"Error training base model {model_name}: {str(e)}")
             raise
@@ -302,9 +311,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
             meta_learner.fit(
                 meta_features, meta_targets,
                 X_val=eval_meta_features, 
-                y_val=eval_meta_targets,
-                target_precision=target_precision,
-                min_recall=min_recall
+                y_val=eval_meta_targets
             )
             # ResNet has its own threshold tuning internally
             best_threshold = meta_learner.threshold
@@ -602,7 +609,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                     eval_meta_targets, y_pred
                 )
                 metrics = {'precision': precision, 'recall': recall}
-                
+
             elif meta_learner_type == 'bayesian':
                 # Special handling for Bayesian meta-learner
                 meta_learner.train(meta_features, meta_targets, eval_meta_features, eval_meta_targets)
@@ -614,7 +621,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 best_threshold, metrics = tune_threshold_for_precision(
                     y_proba, eval_meta_targets, target_precision, min_recall
                 )
-                
+
             elif meta_learner_type == 'lgb':
                 # LightGBM specific early stopping
                 early_stopping_rounds = params.pop('early_stopping_rounds')
