@@ -40,7 +40,6 @@ class ApiFootball:
         self.project_root = project_root
         self.data_dir = os.path.join(self.project_root, "data", "create_data", "api-football")
         os.makedirs(self.data_dir, exist_ok=True)
-
         # MongoDB setup
         self.mongo_uri = 'mongodb://192.168.0.75:27017/'
         self.client = pymongo.MongoClient(self.mongo_uri)
@@ -53,11 +52,9 @@ class ApiFootball:
     def _get_request(self, endpoint: str, params: Dict = None) -> Dict:
         """
         Sends a GET request to the specified endpoint.
-
         Args:
             endpoint (str): The API endpoint to request.
             params (Dict, optional): Query parameters for the request. Defaults to None.
-
         Returns:
             Dict: The JSON response from the API.
         """
@@ -73,7 +70,6 @@ class ApiFootball:
     def _save_json(self, data: Any, filename: str) -> None:
             """
             Saves data to a JSON file in the data directory.
-
             Args:
                 data (Any): The data to save.
                 filename (str): The name of the file to save to.
@@ -274,7 +270,6 @@ class ApiFootball:
                     statistics['away']['team_id'] = raw_statistics[1]['team']['id']
                     statistics['away']['team_name'] = raw_statistics[1]['team']['name']
                     statistics['away']['team_logo'] = raw_statistics[1]['team']['logo']
-
                     # Process statistics for both teams
                     for i, team in enumerate(['home', 'away']):
                         for stat in raw_statistics[i]['statistics']:

@@ -152,10 +152,6 @@ class MongoDBFeatures:
             normalized_data = []
             error_count = 0
             for fixture in fixtures_with_stats:
-                # Debug print to see the structure
-                # print(f"Fixture structure: {fixture.keys()}")
-                # print(f"Home team data: {fixture['home'].keys()}")
-                
                 # Extract home team stats - add safety checks
                 home_stats = fixture.get('home', {}).get('stats', {})
                 if not home_stats:
@@ -337,6 +333,7 @@ class MongoDBFeatures:
             file_path (str): The path to save the Excel file.
         """
         try:
+            
             fixtures_dataframe.to_excel(file_path, index=False)
             print(f"Data exported to {file_path}")
         except Exception as e:

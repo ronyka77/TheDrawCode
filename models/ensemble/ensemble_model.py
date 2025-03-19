@@ -118,7 +118,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             objective='binary:logistic',
             eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.049999999999999996,
+            learning_rate=0.05,
             max_depth=7,
             min_child_weight=245,
             subsample=0.6,
@@ -410,7 +410,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         p_cat = cat_model.predict_proba(X_val_prepared)[:, 1]
         p_cat_train = cat_model.predict_proba(X_combined)[:, 1]
-
+        
         p_lgb = lgb_model.predict_proba(X_val_prepared)[:, 1]
         p_lgb_train = lgb_model.predict_proba(X_combined)[:, 1]
         
@@ -432,7 +432,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         meta_features_train = create_meta_features(
             p_xgb_train, p_cat_train, p_lgb_train, p_extra_train, self.dynamic_weights_train if self.dynamic_weighting else None
         )
-
         # Convert to DataFrame for better interpretability
         meta_df = create_meta_dataframe(meta_features)
         meta_df_train = create_meta_dataframe(meta_features_train)
