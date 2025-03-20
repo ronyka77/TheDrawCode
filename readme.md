@@ -1,137 +1,261 @@
-# Soccer Prediction Project v2.1
+# 🥅 Soccer Prediction Project v2.2
 
-## Overview
-A machine learning project for predicting soccer match outcomes, focusing on draw predictions and goal scoring patterns. The project uses advanced feature engineering, MLflow for experiment tracking, and comprehensive error handling.
+![GitHub](https://img.shields.io/github/license/username/soccer-prediction)
+![Python Version](https://img.shields.io/badge/python-3.9-blue.svg)
+![CPU Optimized](https://img.shields.io/badge/CPU-optimized-brightgreen.svg)
 
-## Features
-- Draw prediction model with CPU optimization
-- Goal prediction capabilities
-- Advanced feature engineering
-- Comprehensive error handling
-- MLflow integration
-- MongoDB data storage
+A machine learning system that accurately predicts soccer match draws and goal patterns using ensemble methods and advanced feature engineering techniques, with a focus on high-precision results for betting applications.
 
-## Installation
+## 📋 Table of Contents
+
+- [Key Features](#-key-features)
+- [Project Architecture](#-project-architecture)
+- [Installation](#-installation)
+- [Usage](#-usage)
+- [Model Pipeline](#-model-pipeline)
+- [Configuration](#-configuration)
+- [Extending the Model](#-extending-the-model)
+- [Troubleshooting](#-troubleshooting)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+## ✨ Key Features
+
+- **Ensemble Model Architecture**: Combines XGBoost, CatBoost, LightGBM, and neural networks for robust predictions
+- **High-Precision Focus**: Optimized for precision with customizable threshold tuning
+- **CPU-Only Optimization**: Designed to run efficiently without GPU requirements
+- **Reproducible Results**: Fixed seeds and deterministic operations for consistent outcomes
+- **MLflow Integration**: Comprehensive experiment tracking with model versioning
+- **Advanced Feature Engineering**: Soccer-specific feature development for improved accuracy
+
+## 🏗 Project Architecture
+
+![System Architecture](https://via.placeholder.com/800x400?text=Soccer+Prediction+Architecture)
+
+The system employs a multi-stage ensemble approach:
+
+## 🚀 Installation
+
+### Prerequisites
+
+- Python 3.9+
+- Windows 11
+- MongoDB (for data storage)
+
+### Setup
 
 ```bash
 # Clone the repository
 git clone https://github.com/username/soccer-prediction.git
 cd soccer-prediction
 
+# Create and activate virtual environment
+python -m venv venv
+venv\Scripts\activate
+
 # Install dependencies
 pip install -r requirements.txt
 
-# Set up MongoDB (if not already installed)
-# Windows: Download and install from MongoDB website
-# Linux: sudo apt-get install mongodb
-
-# Initialize MLflow
-python -m mlflow ui
+# Set up environment for reproducibility
+set PYTHONHASHSEED=19
+set TF_ENABLE_ONEDNN_OPTS=0
+set OMP_NUM_THREADS=4
+set MKL_NUM_THREADS=4
+set OPENBLAS_NUM_THREADS=4
 ```
 
-## Error Handling
+### Verification
 
-The project implements a comprehensive error handling system:
+Verify your installation with the following command:
 
-### Error Codes
-```python
-from utils.logger import ExperimentLogger
-logger = ExperimentLogger()
-
-try:
-    # Your code here
-    data = process_data()
-except FileNotFoundError as e:
-    logger.error("Data file not found", error_code="E001")
-    raise
-```
-
-### Retry Mechanism
-```python
-@retry_on_error(max_retries=3, delay=1.0)
-def load_data():
-    # Your code here
-    return data
-```
-
-### Error Documentation
-See [Error Handling Guide](docs/error_handling.md) for:
-- Complete error code reference
-- Best practices
-- Example implementations
-- Troubleshooting guides
-
-## Usage
-
-### Draw Prediction
-```python
-from models.draw_prediction import DrawPredictor
-
-# Initialize predictor
-predictor = DrawPredictor()
-
-# Make predictions
-predictions = predictor.predict(match_data)
-```
-
-### Goal Prediction
-```python
-from models.goal_prediction import GoalPredictor
-
-# Initialize predictor
-predictor = GoalPredictor(goal_type='total_goals')
-
-# Make predictions
-predictions = predictor.predict(match_data)
-```
-
-## Documentation
-- [Project Plan](docs/plan.md)
-- [Error Handling Guide](docs/error_handling.md)
-- [Architecture Guide](docs/architecture/README.md)
-- [API Documentation](docs/guides/api.md)
-- [Development Guide](docs/guides/development.md)
-
-## Development
-
-### Running Tests
 ```bash
-# Run all tests
-python -m unittest discover tests
-
-# Run specific test file
-python -m unittest tests/test_draw_prediction.py
+python -m python_tests.test_environment
 ```
 
-### Code Style
-- Follow PEP 8 guidelines
-- Use type hints
-- Add docstrings for all functions
-- Include error handling for all operations
+## 📊 Usage
 
-### Error Handling Guidelines
-1. Use standardized error codes
-2. Implement retry mechanisms for unstable operations
-3. Log all errors with context
-4. Clean up resources in error cases
-5. Validate input data early
+### Basic Prediction
 
-## Contributing
+```python
+from models.ensemble.ensemble_model import EnsembleModel
+from utils.logger import ExperimentLogger
+import pandas as pd
+
+# Initialize logger
+logger = ExperimentLogger(experiment_name="soccer_prediction")
+
+# Load dataset
+data = pd.read_csv("path/to/matches.csv")
+X_train, y_train, X_test, y_test = prepare_data(data)
+
+# Initialize and train ensemble model
+model = EnsembleModel(
+    logger=logger,
+    calibrate=True,
+    meta_learner_type='xgb',
+    target_precision=0.50,
+    required_recall=0.25,
+    X_train=X_train
+)
+
+# Train the model
+results = model.train(X_train, y_train, X_test, y_test)
+
+# Make predictions
+predictions = model.predict(X_test)
+probabilities = model.predict_proba(X_test)
+
+print(f"Optimized threshold: {model.optimal_threshold}")
+```
+
+### Running with MLflow Tracking
+
+```python
+from models.ensemble.run_ensemble import run_ensemble
+
+# Run ensemble with MLflow tracking
+model = run_ensemble(
+    extra_base_model_type='random_forest',
+    meta_learner_type='xgb',
+    calibrate=True, 
+    dynamic_weighting=True,
+    target_precision=0.50,
+    required_recall=0.25,
+    experiment_name="ensemble_experiment"
+)
+```
+
+### Viewing Experiments
+
+```bash
+# Start MLflow UI
+mlflow ui --port 5000
+```
+
+Then navigate to `http://localhost:5000` in your browser.
+
+## 🧪 Model Pipeline
+
+The system follows this workflow:
+
+1. **Data Preparation**: Feature engineering and validation
+2. **Base Model Training**: Training multiple models (XGBoost, CatBoost, LightGBM, etc.)
+3. **Probability Calibration**: Optional sigmoid/isotonic calibration
+4. **Meta-Feature Creation**: Converting base model predictions to meta-features
+5. **Meta-Learner Training**: Training a model to combine base predictions
+6. **Threshold Optimization**: Fine-tuning prediction threshold for precision/recall balance
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TF_ENABLE_ONEDNN_OPTS` | Enable/disable TensorFlow oneDNN optimizations | `0` |
+| `OMP_NUM_THREADS` | Number of OpenMP threads | `4` |
+| `MKL_NUM_THREADS` | Number of MKL threads | `4` |
+| `OPENBLAS_NUM_THREADS` | Number of OpenBLAS threads | `4` |
+| `PYTHONHASHSEED` | Python hash seed for reproducibility | `19` |
+
+### Model Parameters
+
+The ensemble model accepts the following parameters:
+
+```python
+EnsembleModel(
+    logger=None,                    # Logger instance
+    calibrate=False,                # Whether to calibrate probabilities
+    calibration_method="sigmoid",   # Calibration method
+    individual_thresholding=False,  # Use individual thresholds
+    meta_learner_type="xgb",        # Meta-learner type
+    dynamic_weighting=True,         # Use dynamic weighting
+    extra_base_model_type="mlp",    # Extra model type
+    sampling_strategy=0.7,          # Sampling strategy
+    complexity_penalty=0.01,        # Complexity penalty
+    target_precision=0.50,          # Target precision
+    required_recall=0.25,           # Required recall
+    X_train=None                    # Training features
+)
+```
+
+## 🧩 Extending the Model
+
+### Adding New Base Models
+
+To add a new model type to the ensemble:
+
+1. Implement the model in `models/StackedEnsemble/base/`
+2. Add the model type to `extra_base_model_type` options
+3. Update the initialization logic in `EnsembleModel.__init__()`
+
+Example for adding a new model type:
+
+```python
+# In ensemble_model.py, within __init__ method
+if self.extra_base_model_type == 'your_new_model':
+    self.model_extra = YourNewModel(
+        param1=value1,
+        param2=value2,
+        random_state=19
+    )
+    self.logger.info("Extra base model initialized as YourNewModel.")
+```
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### TensorFlow Numerical Differences
+
+**Problem**: Different numerical results on different machines due to oneDNN optimizations.
+
+**Solution**: Disable oneDNN optimizations by setting `TF_ENABLE_ONEDNN_OPTS=0` before importing TensorFlow:
+
+```python
+import os
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+import tensorflow as tf
+```
+
+#### Memory Issues with Large Models
+
+**Problem**: Out of memory errors when training models on large datasets.
+
+**Solution**: Reduce batch size, limit feature count, or use chunked processing:
+
+```python
+# Reduce batch size for neural networks
+model = EnsembleModel(
+    extra_base_model_type='mlp',
+    batch_size=32  # Smaller batch size
+)
+```
+
+## 👥 Contributing
+
+We welcome contributions to improve the prediction system! Please follow these steps:
+
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
 4. Add tests for new functionality
-5. Submit a pull request
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
-## License
+Please ensure your code follows our coding standards:
+- Pass all tests
+- Follow PEP 8 guidelines
+- Include proper documentation
+- Use type hints
+- Handle errors appropriately
+
+## 📄 License
+
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Acknowledgments
-- Data providers
-- Open source contributors
-- Research papers and references
+---
 
-## Contact
-- Author: Your Name
-- Email: your.email@example.com
-- Project Link: https://github.com/username/soccer-prediction
+*For more detailed documentation, please refer to the [docs](docs/) directory.*
+
+(づ｡◕‿‿◕｡)づ
