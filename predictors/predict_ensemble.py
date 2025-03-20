@@ -294,22 +294,23 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        'f04b93479ee249f6bc77204e5c4b206f', #59, 60
-        '035abdf986654b1e8b551d0ce044c929', #57, 58, 60, 61
-        '8d80522037ae4a9790b72129c06851a4', #45, 47 
-        'd3c066618b4d425fbb2ffff99a478238', #59, 60, 64, 65, 66, 69
-        '7c12f45bc2c442818cf09c497eef4176', #32, 33
-        '58f6a2c94ced4c1a9c724d19224cca8c', #32, 34, 36, 37
-        '1b64ed01857f4abf9892de9c22707151', #33, 34
-        'b850fb10b2f04741ad787aebee0307a4', #30, 31, 34
-        'ee17cebf244e473ba8e661bcdd442d50', #KEEP 29, 31, 36
-        'f20a9ef589a341bfb39941593e0af0ac', 
-        '5befa2bf2b5d4ae6866f3cc177c7b68f', #KEEP 30, 32
-        '8abc7269aeba4436a5d23ed2bd13e4d4', 
-        '79a717d959464732b4131d55bd29d2a0', #KEEP 29, 33, 36
-        '97207cdaab54477fa267d8cd29ce35e9', #31, 32, 34, 37
-        'ad904d636b114f589847f7223ea1d800', 
-        '90d0e5ef4309482e8e96b702681bd306', #33, 34, 35
+        # 'f04b93479ee249f6bc77204e5c4b206f', #59, 60
+        # '035abdf986654b1e8b551d0ce044c929', #57, 58, 60, 61
+        # '8d80522037ae4a9790b72129c06851a4', #45, 47 
+        # 'd3c066618b4d425fbb2ffff99a478238', #59, 60, 64, 65, 66, 69
+        # '7c12f45bc2c442818cf09c497eef4176', #32, 33
+        # '58f6a2c94ced4c1a9c724d19224cca8c', #32, 34, 36, 37
+        # '1b64ed01857f4abf9892de9c22707151', #33, 34
+        # 'b850fb10b2f04741ad787aebee0307a4', #30, 31, 34
+        # 'ee17cebf244e473ba8e661bcdd442d50', #KEEP 29, 31, 36
+        # 'f20a9ef589a341bfb39941593e0af0ac', 
+        # '5befa2bf2b5d4ae6866f3cc177c7b68f', #KEEP 30, 32
+        # '8abc7269aeba4436a5d23ed2bd13e4d4', 
+        # '79a717d959464732b4131d55bd29d2a0', #KEEP 29, 33, 36
+        # '97207cdaab54477fa267d8cd29ce35e9', #31, 32, 34, 37
+        # 'ad904d636b114f589847f7223ea1d800', 
+        # '90d0e5ef4309482e8e96b702681bd306', #33, 34, 35
+        'a5766987a6db458cb0bc63b998302388', #
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()

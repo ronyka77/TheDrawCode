@@ -17,6 +17,7 @@ from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -41,6 +42,17 @@ logger = ExperimentLogger(experiment_name=experiment_name, log_dir='./logs/featu
 from utils.create_evaluation_set import create_ensemble_evaluation_set, import_selected_features_ensemble, import_training_data_ensemble, setup_mlflow_tracking
 mlruns_dir = setup_mlflow_tracking(experiment_name)
 
+# Set fixed seed and hash seed for determinism
+SEED = 19
+os.environ["PYTHONHASHSEED"] = str(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+
+# Restrict parallel threads across various libraries
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
+
 def select_features(
     X: pd.DataFrame,
     y: pd.Series,
@@ -63,61 +75,63 @@ def select_features(
     """
     # Initialize models with minimal training iterations for quick evaluation
     xgb_model = XGBClassifier(
-        random_state=19,
         tree_method='hist',
         device='cpu',
-        nthread=-1,
+        nthread=4,
         objective='binary:logistic',
-        eval_metric=['aucpr', 'logloss', 'auc'],
+        eval_metric=['aucpr', 'error', 'logloss'],
         verbosity=0,
-        learning_rate=0.03791741758266303,
-        max_depth=6,
-        min_child_weight=221,
-        subsample=0.6321181883147767,
-        colsample_bytree=0.8665027477545583,
-        reg_alpha=0.009258121536305803,
-        reg_lambda=10.625988960745355,
-        gamma=1.3607609856733809,
-        early_stopping_rounds=634,
-        scale_pos_weight=3.8790295965457644,
+        learning_rate=0.055,
+        max_depth=8,
+        min_child_weight=390,
+        subsample=0.61,
+        colsample_bytree=0.78,
+        reg_alpha=34.1,
+        reg_lambda=6.69,
+        gamma=3.86,
+        early_stopping_rounds=1020,
+        scale_pos_weight=3.3,
         seed=19
     )
     cat_model = CatBoostClassifier(
-        random_seed=19,
-        iterations=4901,
-        verbose=0,
+        learning_rate=0.021289724174269435,
+        depth=6,
+        min_data_in_leaf=77,
+        subsample=0.5728544513714008,
+        colsample_bylevel=0.49610356838309444,
+        reg_lambda=2.13261884199673,
+        leaf_estimation_iterations=6,
+        bagging_temperature=1.5545831677860675,
+        scale_pos_weight=4.817574555909853,
+        early_stopping_rounds=479,
         loss_function='Logloss',
         eval_metric='AUC',
+        custom_metric=['Precision', 'Recall'],
         task_type='CPU',
-        auto_class_weights='Balanced',
-        grow_policy='SymmetricTree',
-        learning_rate=0.05747334517009464,
-        depth=6,
-        l2_leaf_reg=1.0342319632749895,
-        border_count=128,
-        subsample=0.7152201908359026,
-        random_strength=0.14171788543304523,
-        min_data_in_leaf=26,
-        early_stopping_rounds=201
+        thread_count=4,
+        verbose=-1
     )
     lgbm_model = LGBMClassifier(
-        random_state=42,
         objective='binary',
-        metric=['binary_logloss', 'average_precision', 'auc'],
-        boosting_type='gbdt',
-        device_type='cpu',
+        metric=['binary_logloss', 'auc'],
         verbose=-1,
-        learning_rate=0.071,
+        n_jobs=4,
+        random_state=19,
+        device='cpu',
+        learning_rate=0.14,
+        num_leaves=95,
         max_depth=9,
-        reg_lambda=1.23,
-        n_estimators=3577,
-        num_leaves=87,
-        early_stopping_rounds=291,
-        feature_fraction=0.6,
-        bagging_freq=7,
-        min_child_samples=319,
-        bagging_fraction=0.55,
-        feature_fraction_bynode=0.9996212749980057
+        min_child_samples=230,
+        feature_fraction=0.6000000000000001,
+        bagging_fraction=0.5950000000000001,
+        bagging_freq=10,
+        reg_alpha=1.7000000000000002,
+        reg_lambda=3.7,
+        min_split_gain=0.16,
+        early_stopping_rounds=660,
+        path_smooth=0.405,
+        cat_smooth=18.3,
+        max_bin=250
     )
     models = {
         "xgb": xgb_model,
@@ -164,7 +178,7 @@ def select_features_differentiated(
     y: pd.Series,
     X_val: pd.DataFrame,
     y_val: pd.Series,
-    top_k_per_model: int = 50,
+    top_k_per_model: int = 60,
     fixed_features: Optional[List[str]] = None,
     verbose: bool = True) -> Dict[str, List[str]]:
     """
@@ -185,60 +199,62 @@ def select_features_differentiated(
         "xgb": XGBClassifier(
             tree_method='hist',  # Required for CPU-only training per project rules
             device='cpu',
-            nthread=-1,
+            nthread=4,
             objective='binary:logistic',
             eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.05,
-            max_depth=7,
-            min_child_weight=245,
-            subsample=0.6,
-            colsample_bytree=0.73,
-            reg_alpha=38.0,
-            reg_lambda=7.07,
-            gamma=0.04,
-            early_stopping_rounds=760,
-            scale_pos_weight=2.35,
+            learning_rate=0.055,
+            max_depth=8,
+            min_child_weight=390,
+            subsample=0.61,
+            colsample_bytree=0.78,
+            reg_alpha=34.1,
+            reg_lambda=6.69,
+            gamma=3.86,
+            early_stopping_rounds=1020,
+            scale_pos_weight=3.3,
             seed=19
         ),
         "cat": CatBoostClassifier(
-            learning_rate=0.07846192040909378,
-            depth=9,
-            min_data_in_leaf=18,
-            subsample=0.7138627535418607,
-            colsample_bylevel=0.4689356247169103,
-            reg_lambda=0.5364369908816581,
+            learning_rate=0.021289724174269435,
+            depth=6,
+            min_data_in_leaf=77,
+            subsample=0.5728544513714008,
+            colsample_bylevel=0.49610356838309444,
+            reg_lambda=2.13261884199673,
             leaf_estimation_iterations=6,
-            bagging_temperature=2.7219134152516724,
-            scale_pos_weight=12.701247011594266,
-            early_stopping_rounds=284,
+            bagging_temperature=1.5545831677860675,
+            scale_pos_weight=4.817574555909853,
+            early_stopping_rounds=479,
             loss_function='Logloss',
             eval_metric='AUC',
+            custom_metric=['Precision', 'Recall'],
             task_type='CPU',
-            thread_count=-1,
+            thread_count=4,
             verbose=-1,
             random_seed=19
         ),
         "lgbm": LGBMClassifier(
             objective='binary',
-            metric=['binary_logloss', 'average_precision', 'auc'],
+            metric=['binary_logloss', 'auc'],
             verbose=-1,
-            n_jobs=-1,
+            n_jobs=4,
             random_state=19,
             device='cpu',
-            learning_rate=0.077,
-            num_leaves=89,
+            learning_rate=0.14,
+            num_leaves=95,
             max_depth=9,
-            min_child_samples=314,
-            feature_fraction=0.61,
-            bagging_fraction=0.56,
-            bagging_freq=7,
-            reg_alpha=5.2,
-            reg_lambda=1.22,
-            min_split_gain=0.15,
-            path_smooth=0.481,
-            cat_smooth=14.0,
-            max_bin=645
+            min_child_samples=230,
+            feature_fraction=0.6000000000000001,
+            bagging_fraction=0.5950000000000001,
+            bagging_freq=10,
+            reg_alpha=1.7000000000000002,
+            reg_lambda=3.7,
+            min_split_gain=0.16,
+            early_stopping_rounds=660,
+            path_smooth=0.405,
+            cat_smooth=18.3,
+            max_bin=250
         )
     }
     
@@ -326,5 +342,12 @@ if __name__ == "__main__":
     features_test, features_val = sync_columns(features_test, features_val, logger)
     logger.info("Starting feature selection...")
     features_train, features_val = sync_columns(features_train, features_val, logger)
-    selected_features = select_features_differentiated(features_train, target_train,features_val, target_val, verbose=True)
+    # Merge training and test features while maintaining column consistency
+    features_combined = pd.concat([features_train, features_test], axis=0)
+    # Ensure consistent column order and alignment
+    features_combined = features_combined[features_train.columns]
+    target_combined = pd.concat([target_train, target_test], axis=0)
+    # Log the merge operation
+    logger.info(f"Merged training and test features. Combined shape: {features_combined.shape}")
+    selected_features = select_features_differentiated(features_combined, target_combined, features_val, target_val, verbose=True)
     logger.info(f"Selected features: {selected_features}")
