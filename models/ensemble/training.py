@@ -39,6 +39,7 @@ os.environ['PYTHONHASHSEED'] = str(random_seed)
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
     """

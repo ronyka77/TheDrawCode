@@ -9,6 +9,7 @@ import sys
 import numpy as np
 import pandas as pd
 import mlflow
+import json
 import mlflow.sklearn
 from pathlib import Path
 import argparse
@@ -146,6 +147,7 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 y_val=y_val,
                 split_validation=False  # Don't split again, we already have splits
             )
+            log_all_model_params(ensemble_model)
             
             # Analyze prediction errors on validation set (most recent data)
             logger.info("Analyzing prediction errors on validation set...")
@@ -227,6 +229,64 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
     except Exception as e:
         logger.error(f"Error in ensemble model execution: {str(e)}")
         raise
+
+def get_model_params(model):
+        """Attempt to extract parameters from a model using a standard method."""
+        try:
+            if hasattr(model, "get_params"):
+                return model.get_params()
+            elif hasattr(model, "get_config"):
+                return model.get_config()
+            else:
+                # Fallback: serialize the model configuration to JSON if possible.
+                return json.loads(model.to_json())
+        except Exception as e:
+            return {"error": str(e)}
+
+def log_all_model_params(ensemble_model):
+    """
+    Extracts and logs parameters for each base and extra model in the ensemble.
+    
+    Args:
+        ensemble_model: Your trained ensemble model instance that contains attributes
+                        like model_xgb, model_cat, model_lgb, and model_extra.
+    """
+    params_dict = {}
+    
+    # Log parameters from each base model.
+    if hasattr(ensemble_model, "model_xgb"):
+        params_dict["XGBoost"] = ensemble_model.get_model_params(ensemble_model.model_xgb)
+    if hasattr(ensemble_model, "model_cat"):
+        params_dict["CatBoost"] = ensemble_model.get_model_params(ensemble_model.model_cat)
+    if hasattr(ensemble_model, "model_lgb"):
+        params_dict["LightGBM"] = ensemble_model.get_model_params(ensemble_model.model_lgb)
+    if hasattr(ensemble_model, "model_extra"):
+        params_dict["Extra"] = ensemble_model.get_model_params(ensemble_model.model_extra)
+    
+    # Optionally, log calibrated versions if available.
+    if hasattr(ensemble_model, "model_xgb_calibrated") and ensemble_model.model_xgb_calibrated is not None:
+        params_dict["XGBoost_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_xgb_calibrated)
+    if hasattr(ensemble_model, "model_cat_calibrated") and ensemble_model.model_cat_calibrated is not None:
+        params_dict["CatBoost_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_cat_calibrated)
+    if hasattr(ensemble_model, "model_lgb_calibrated") and ensemble_model.model_lgb_calibrated is not None:
+        params_dict["LightGBM_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_lgb_calibrated)
+    if hasattr(ensemble_model, "model_extra_calibrated") and ensemble_model.model_extra_calibrated is not None:
+        params_dict["Extra_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_extra_calibrated)
+    
+    # Log additional settings (such as meta-learner parameters) if applicable.
+    if hasattr(ensemble_model, "meta_learner") and ensemble_model.meta_learner is not None:
+        params_dict["MetaLearner"] = ensemble_model.get_model_params(ensemble_model.meta_learner)
+    
+    # Log the complete parameters dictionary as a JSON artifact to MLflow.
+    mlflow.log_dict(params_dict, "ensemble_model_parameters.json")
+    
+    # Optionally, also log some keys using mlflow.log_param for faster comparison in the UI.
+    for model_name, params in params_dict.items():
+        # For each top-level model, log a summary (e.g., only the first few keys).
+        if isinstance(params, dict):
+            for key, value in list(params.items())[:3]:
+                mlflow.log_param(f"{model_name}_{key}", str(value))
+
 
 if __name__ == "__main__":
     # Parse command line arguments
