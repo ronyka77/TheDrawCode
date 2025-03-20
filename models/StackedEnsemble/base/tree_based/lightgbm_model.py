@@ -362,32 +362,9 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             return 0.0
     
     try:
-        # Use dynamic sampler to expand the search space after 200 trials
-        sampler = DynamicTPESampler(
-            dynamic_threshold=200,
-            dynamic_search_space={
-                "learning_rate": lambda orig: optuna.distributions.FloatDistribution(low=0.01, high=0.11, step=0.005),
-                "num_leaves": lambda orig: optuna.distributions.IntDistribution(low=50, high=200, step=2),
-                "max_depth": lambda orig: optuna.distributions.IntDistribution(low=5, high=10, step=1),
-                "min_child_samples": lambda orig: optuna.distributions.IntDistribution(low=250, high=500, step=5),
-                "feature_fraction": lambda orig: optuna.distributions.FloatDistribution(low=0.6, high=0.8, step=0.01),
-                "bagging_fraction": lambda orig: optuna.distributions.FloatDistribution(low=0.4, high=0.8, step=0.01),
-                "bagging_freq": lambda orig: optuna.distributions.IntDistribution(low=6, high=10, step=1),
-                "reg_alpha": lambda orig: optuna.distributions.FloatDistribution(low=0.1, high=10.5, step=0.1),
-                "reg_lambda": lambda orig: optuna.distributions.FloatDistribution(low=0.1, high=9.0, step=0.05),
-                "min_split_gain": lambda orig: optuna.distributions.FloatDistribution(low=0.1, high=0.55, step=0.01),
-                "early_stopping_rounds": lambda orig: optuna.distributions.IntDistribution(low=400, high=800, step=10),
-                "path_smooth": lambda orig: optuna.distributions.FloatDistribution(low=0.005, high=0.8, step=0.005),
-                "cat_smooth": lambda orig: optuna.distributions.FloatDistribution(low=1.0, high=30.0, step=0.5),
-                "max_bin": lambda orig: optuna.distributions.IntDistribution(low=200, high=700, step=5)
-            },
-            n_startup_trials=200,
-            prior_weight=0.2,
-            warn_independent_sampling=False
-        )
-        random_sampler = optuna.samplers.RandomSampler(
-            seed=19
-        )
+        # Generate a seed based on the current time
+        random_seed = int(time.time())
+        random_sampler = optuna.samplers.RandomSampler(seed=random_seed)
         study = optuna.create_study(
             study_name='lightgbm_optimization',
             direction='maximize',

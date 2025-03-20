@@ -162,15 +162,15 @@ def load_hyperparameter_space():
         'early_stopping_rounds': {
             'type': 'int',
             'low': 400,                # kept lower bound as per project rules, widened upper bound
-            'high': 1200,
-            'step': 20
+            'high': 1500,
+            'step': 10
         },
         'scale_pos_weight': {
             'type': 'float',
-            'low': 2.0,                # narrowed based on top trials (1.8-2.28)
+            'low': 1.8,                # narrowed based on top trials (1.8-2.28)
             'high': 4.5,
             'log': False,
-            'step': 0.05
+            'step': 0.02
         }
     }
     return hyperparameter_space
@@ -335,9 +335,9 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             return 0.0
     
     try:
-        random_sampler = optuna.samplers.RandomSampler(
-            seed=19
-        )
+        # Generate a seed based on the current time
+        random_seed = int(time.time())
+        random_sampler = optuna.samplers.RandomSampler(seed=random_seed)
         study = optuna.create_study(
             study_name='xgboost_optimization',
             direction='maximize',

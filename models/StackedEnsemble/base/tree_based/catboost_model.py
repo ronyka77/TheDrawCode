@@ -16,6 +16,7 @@ import catboost as cb
 from catboost import Pool
 import optuna
 import mlflow
+import time
 from pathlib import Path
 from typing import Dict, Union, Any, List, Tuple
 from datetime import datetime
@@ -91,9 +92,10 @@ def load_hyperparameter_space():
         hyperparameter_space = {
             'learning_rate': {
                 'type': 'float',
-                'low': 0.001,
+                'low': 0.005,
                 'high': 0.1,
-                'log': True
+                'log': False,
+                'step': 0.005
             },
             'depth': {
                 'type': 'int',
@@ -104,7 +106,7 @@ def load_hyperparameter_space():
             'min_data_in_leaf': {
                 'type': 'int', 
                 'low': 10,
-                'high': 130,
+                'high': 200,
                 'step': 5
             },
             'subsample': {
@@ -141,11 +143,11 @@ def load_hyperparameter_space():
                 'type': 'float',
                 'low': 1.5,
                 'high': 5.0,
-                'step': 0.1
+                'step': 0.05
             },
             'early_stopping_rounds': {
                 'type': 'int',
-                'low': 100,
+                'low': 200,
                 'high': 700,
                 'step': 10
             }
@@ -303,10 +305,13 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             return 0.0
     
     try:
+        # Generate a seed based on the current time
+        random_seed = int(time.time())
+        random_sampler = optuna.samplers.RandomSampler(seed=random_seed)
         study = optuna.create_study(
             study_name='catboost_optimization',
             direction='maximize',
-            sampler=optuna.samplers.RandomSampler(seed=19)
+            sampler=random_sampler
         )
         # --- New: Initialize and add a callback function ---
         best_score = -float('inf')  # Initialize with worst possible score

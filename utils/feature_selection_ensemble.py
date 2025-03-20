@@ -20,6 +20,7 @@ import os
 import random
 import sys
 from pathlib import Path
+from sklearn.ensemble import RandomForestClassifier
 
 # Add project root to Python path
 try:
@@ -182,7 +183,7 @@ def select_features_differentiated(
     fixed_features: Optional[List[str]] = None,
     verbose: bool = True) -> Dict[str, List[str]]:
     """
-    Select features separately for XGBoost, CatBoost, and LightGBM, then provide the union
+    Select features separately for XGBoost, CatBoost, LightGBM and Random Forest, then provide the union
     of the selected features with the fixed features always included.
     Args:
         X (pd.DataFrame): Input feature dataframe.
@@ -191,7 +192,7 @@ def select_features_differentiated(
         fixed_features (Optional[List[str]]): Features that will be included in all sets.
         verbose (bool): If True, prints the selected feature lists.
     Returns:
-        Dict[str, List[str]]: Dictionary with keys 'xgb', 'cat', 'lgbm', and 'union'.
+        Dict[str, List[str]]: Dictionary with keys 'xgb', 'cat', 'lgbm', 'rf' and 'union'.
     """
     
     fixed_features = fixed_features or []
@@ -255,6 +256,17 @@ def select_features_differentiated(
             path_smooth=0.405,
             cat_smooth=18.3,
             max_bin=250
+        ),
+        "rf": RandomForestClassifier(
+            n_estimators=700,
+            max_depth=13,
+            min_samples_split=4,
+            min_samples_leaf=26,
+            max_features=0.8,
+            bootstrap=True,
+            class_weight="balanced_subsample",
+            random_state=19,
+            n_jobs=4
         )
     }
     
@@ -269,6 +281,9 @@ def select_features_differentiated(
             imp = model.get_feature_importance()
         elif name == "lgbm":
             model.fit(X, y, eval_set=[(X_val, y_val)])
+            imp = np.array(model.feature_importances_)
+        elif name == "rf":
+            model.fit(X, y)
             imp = np.array(model.feature_importances_)
         else:
             imp = np.zeros(X.shape[1])
@@ -302,6 +317,7 @@ def select_features_differentiated(
         "xgb": selected["xgb"],
         "cat": selected["cat"],
         "lgbm": selected["lgbm"],
+        "rf": selected["rf"],
         "union": union_features
     }
 

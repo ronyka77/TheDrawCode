@@ -157,27 +157,27 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             thread_count=4,
             verbose=-1
         )
-        self.model_lgb = LGBMClassifier( #38.2%
+        self.model_lgb = LGBMClassifier( #39.1%
             objective='binary',
             metric=['binary_logloss', 'auc'],
             verbose=-1,
             n_jobs=4,
             random_state=19,
             device='cpu',
-            learning_rate=0.14,
-            num_leaves=95,
+            learning_rate=0.11,
+            num_leaves=145,
             max_depth=9,
-            min_child_samples=230,
-            feature_fraction=0.6000000000000001,
-            bagging_fraction=0.5950000000000001,
-            bagging_freq=10,
-            reg_alpha=1.7000000000000002,
-            reg_lambda=3.7,
-            min_split_gain=0.16,
-            early_stopping_rounds=660,
-            path_smooth=0.405,
-            cat_smooth=18.3,
-            max_bin=250
+            min_child_samples=170,
+            feature_fraction=0.62,
+            bagging_fraction=0.635,
+            bagging_freq=8,
+            reg_alpha=2.7,
+            reg_lambda=8.3,
+            min_split_gain=0.11,
+            early_stopping_rounds=610,
+            path_smooth=0.125,
+            cat_smooth=16.8,
+            max_bin=590
         )
         self.xgb_features = import_selected_features_ensemble(model_type='xgb')
         self.cat_features = import_selected_features_ensemble(model_type='cat')
@@ -186,13 +186,13 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.extra_base_model_type = extra_base_model_type.lower()
         if self.extra_base_model_type == 'random_forest':
             self.model_extra = RandomForestClassifier(
-                n_estimators=700,
+                n_estimators=180,
                 max_depth=13,
-                min_samples_split=4,
-                min_samples_leaf=26,
-                max_features=0.8,
+                min_samples_split=10,
+                min_samples_leaf=6,
+                max_features=0.4,
                 bootstrap=True,
-                class_weight=2.1,
+                class_weight={0: 1.0, 1: 2.0},
                 criterion='entropy',
                 random_state=19,
                 n_jobs=4

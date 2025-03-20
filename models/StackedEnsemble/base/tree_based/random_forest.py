@@ -53,7 +53,7 @@ experiment_name = "random_forest_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
 from utils.dynamic_sampler import DynamicTPESampler
-from utils.create_evaluation_set import setup_mlflow_tracking
+from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
 # Import shared utility functions
@@ -78,7 +78,8 @@ pip_requirements = [
 base_params = {
     'random_state': 19,
     'n_jobs': 4,
-    'verbose': 0
+    'verbose': 0,
+    'criterion': 'entropy'
 }
 # Set fixed seed and hash seed for determinism
 SEED = 19
@@ -130,8 +131,15 @@ def load_hyperparameter_space():
             'type': 'float',
             'low': 1.8,
             'high': 5.0,
-            'step': 0.1
+            'step': 0.05
         }
+        # 'min_impurity_decrease': {
+        #     'type': 'float',
+        #     'low': 0.01,
+        #     'high': 0.5,
+        #     'step': 0.01
+        # }
+        
         # 'ccp_alpha': {
         #     'type': 'float',
         #     'low': 0.002,
@@ -154,12 +162,10 @@ def create_model(model_params):
     try:
         params = base_params.copy()
         params.update(model_params)
-        
         # Convert class_weight parameter to dictionary format
         if 'class_weight' in params:
             class_weight_value = params.pop('class_weight')
             params['class_weight'] = {0: 1.0, 1: class_weight_value}
-        
         model = RandomForestClassifier(**params)
         return model
         
@@ -268,6 +274,17 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
                             param_config['low'],
                             param_config['high']
                         )
+                elif param_config['type'] == 'str':
+                    if 'choices' in param_config:
+                        params[param_name] = trial.suggest_categorical(
+                            param_name,
+                            param_config['choices']
+                        )
+                    else:
+                        params[param_name] = trial.suggest_categorical(
+                            param_name,
+                            [param_config['value']]
+                        )
             
             # Train model and get metrics
             model, metrics = train_model(
@@ -292,9 +309,9 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             return 0.0
     
     try:
-        random_sampler = optuna.samplers.RandomSampler(
-            seed=19
-        )
+        # Generate a seed based on the current time
+        random_seed = int(time.time())
+        random_sampler = optuna.samplers.RandomSampler(seed=random_seed)
         study = optuna.create_study(
             study_name='xgboost_optimization',
             direction='maximize',
@@ -558,7 +575,10 @@ def main():
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        
+        features = import_selected_features_ensemble(model_type='rf')
+        X_train = X_train[features]
+        X_test = X_test[features]
+        X_eval = X_eval[features]
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
