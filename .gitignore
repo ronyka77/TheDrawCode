@@ -26,6 +26,7 @@ wandb/
 Temp/
 Prospector/
 log/
+archive/
 
 evaluation/confidence_evaluator.py
 evaluation/evaluator.py
@@ -101,3 +102,6 @@ data/api_training_final.xlsx
 data/api_training_final.parquet
 models/StackedEnsemble/base/tree_based/archive/
 python_tests/
+two_staged_xgboost.py
+cursor_settings.md
+Templates.txt
