@@ -1,0 +1,73 @@
+hyperparameters:
+  # Learning parameters
+  learning_rate:
+    distribution: log_uniform
+    min: 0.001
+    max: 0.1
+  
+  iterations:
+    distribution: int_uniform
+    min: 200
+    max: 1000
+  
+  early_stopping_rounds:
+    distribution: int_uniform
+    min: 100
+    max: 500
+
+  scale_pos_weight:
+    distribution: log_uniform
+    min: 2.0
+    max: 3.0
+  
+  # Tree structure parameters
+  max_depth:
+    distribution: int_uniform
+    min: 3
+    max: 8  # Limited for CPU optimization
+  min_data_in_leaf:
+    distribution: int_uniform
+    min: 20
+    max: 200
+  
+  # Sampling parameters
+  subsample:
+    distribution: uniform
+    min: 0.5
+    max: 1.0
+  colsample_bylevel:
+    distribution: uniform
+    min: 0.5
+    max: 1.0
+  
+  # Regularization parameters
+  reg_lambda:
+    distribution: log_uniform
+    min: 1.0e-8
+    max: 10.0
+  random_strength:
+    distribution: log_uniform
+    min: 1.0e-8
+    max: 10.0
+  
+  # CPU-specific parameters (fixed)
+  task_type: CPU
+  thread_count: -1
+  verbose: 0
+  bootstrap_type: Bernoulli
+  grow_policy: SymmetricTree
+  loss_function: Logloss
+  eval_metric: AUC
+
+search_strategy:
+  name: bayesian
+  settings:
+    max_trials: 40
+    metric: precision
+    mode: max
+    early_stopping:
+      type: asha
+      grace_period: 500
+      reduction_factor: 2
+      max_t: 3000
+      brackets: 1 

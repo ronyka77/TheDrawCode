@@ -1,0 +1,27 @@
+model:
+  name: catboost_classifier
+  version: "2.1.0"
+  experiment_name: catboost_experiment
+  cpu_config:
+    task_type: CPU
+    thread_count: -1
+    devices: CPU
+    bootstrap_type: Bernoulli
+    grow_policy: SymmetricTree
+  logging:
+    log_dir: logs/catboost
+    metrics_tracking:
+      - precision
+      - recall
+      - f1_score
+      - auc
+      - average_precision
+      - brier_score
+  params:
+    loss_function: Logloss
+    eval_metric: AUC
+    random_seed: 19
+    early_stopping_rounds: 100
+    boosting_type: Plain
+    bootstrap_type: Bernoulli
+    use_best_model: True 

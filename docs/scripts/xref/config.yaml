@@ -1,0 +1,66 @@
+# Cross-reference validation configuration
+
+# Directories to scan for references
+scan_directories:
+  primary:
+    - docs/
+    - guides/
+  api:
+    - docs/api/
+  examples:
+    - docs/examples/
+
+# Reference types and their file extensions
+reference_types:
+  internal:
+    - .md
+    - .py
+    - .yaml
+  api:
+    - .swagger
+    - .openapi
+  code:
+    - .py
+    - .json
+    - .yaml
+
+# Validation rules
+validation_rules:
+  bidirectional: true
+  version_check: true
+  anchor_validation: true
+  code_reference: true
+
+# Output settings
+output:
+  graph_file: docs/xref/reference_graph.dot
+  report_file: docs/xref/validation_report.json
+  format: json
+
+# Validation settings
+settings:
+  check_external_links: false
+  max_depth: 5
+  ignore_patterns:
+    - "**/.git/**"
+    - "**/node_modules/**"
+    - "**/__pycache__/**"
+  cache_timeout: 3600  # 1 hour
+
+# Reporting
+reporting:
+  email:
+    enabled: false
+    recipients:
+      - team@example.com
+  dashboard:
+    enabled: true
+    update_frequency: "daily"
+    path: docs/xref/dashboard.html
+
+# Error handling
+error_handling:
+  max_retries: 3
+  retry_delay: 1.0
+  ignore_errors: false
+  log_level: INFO 

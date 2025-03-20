@@ -1,8 +1,17 @@
 ---
-description: Python coding
-globs: .py
+description: 
+globs: 
+alwaysApply: false
 ---
-## System Design
+---
+title: Architecture Rules
+description: Core architectural principles and technical decisions
+author: Development Team
+created: 2024-02-01
+updated: 2024-02-01
+version: 2.1.0
+tags: [architecture, mlops, cpu-only]
+---
 
 ### Component Relationships
 
@@ -13,7 +22,7 @@ B --> C[(Model Registry)]
 C --> D[Prediction Service]
 ```
 
-### Data Flow
+## Data Flow
 
 1. **Input Handling**:
    - Type conversion guards (numeric fields)

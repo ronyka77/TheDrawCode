@@ -43,7 +43,7 @@ class PoissonXGCalculator:
         ]
         
         self.all_features = (self.form_features + self.team_quality_features + 
-                           self.historical_features)
+                            self.historical_features)
         
         self.scaler = StandardScaler()
         self.home_model = None
@@ -69,7 +69,7 @@ class PoissonXGCalculator:
         problematic_cols = missing_pct[missing_pct > 0.1].index
         if not problematic_cols.empty:
             self.logger.warning(f"Columns with >10% missing values: {problematic_cols}")
-            
+
     def _prepare_features(self, df: pd.DataFrame, is_training: bool = True) -> pd.DataFrame:
         """Prepare features for model training or prediction."""
         try:
@@ -83,7 +83,6 @@ class PoissonXGCalculator:
                     feature_cols.append(col)
             
             X = df[feature_cols].copy()
-            
             # Convert string numbers with commas to float
             for col in self.all_features:
                 if X[col].dtype == 'object':
@@ -145,7 +144,7 @@ class PoissonXGCalculator:
         except Exception as e:
             self.logger.error(f"Error in feature preparation: {str(e)}")
             raise
-        
+
     def fit(self, df: pd.DataFrame) -> None:
         """Fit separate Poisson regression models for home and away goals."""
         try:
@@ -197,7 +196,7 @@ class PoissonXGCalculator:
         except Exception as e:
             self.logger.error(f"Error in model fitting: {str(e)}")
             raise   
-            
+
     def predict(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate separate home and away xG predictions for matches."""
         try:
@@ -259,9 +258,9 @@ class PoissonXGCalculator:
         except Exception as e:
             self.logger.error(f"Error in prediction: {str(e)}")
             raise
-    
-    def add_poisson_xG(self, df: pd.DataFrame, type: str) -> pd.DataFrame:
-         # Sort by date if available
+
+    def add_poisson_xG(self, df: pd.DataFrame, base_df: pd.DataFrame, type: str) -> pd.DataFrame:
+        # Sort by date if available
         if 'Datum' in df.columns:
             df['Datum'] = pd.to_datetime(df['Datum'])
             df = df.sort_values('Datum')
@@ -294,6 +293,14 @@ class PoissonXGCalculator:
         self.logger.info(f"Generating predictions for {type} dataset...")
         df_with_xg = self.predict(df)
         
+        # Merge with base dataframe
+        df_with_xg = pd.merge(
+            base_df,
+            df_with_xg[['fixture_id', 'home_poisson_xG', 'away_poisson_xG']],
+            on='fixture_id',
+            how='left'
+        )
+        
         # Export results
         try:
             if output_path.endswith('.xlsx'):
@@ -308,9 +315,8 @@ class PoissonXGCalculator:
                 alt_path = output_path.replace('.xlsx', '.csv')
                 df_with_xg.to_csv(alt_path, index=False)
                 self.logger.info(f"Exported {type} data to alternative format: {alt_path}")
-    
         self.logger.info("Data processing completed successfully")
-            
+
     def process_data(self):
         """Process all data files using a single trained model."""
         try:
@@ -323,13 +329,12 @@ class PoissonXGCalculator:
             # merged_path = './data_files/PowerBI/merged_data_prediction.csv'
             api_prediction_path = './data_files/PowerBI/api_data_prediction.xlsx'
             api_training_path = './data_files/PowerBI/api_data_training.xlsx'
-            api_future_path = './data_files/PowerBI/api_football_future.csv'
+            api_future_path = './data_files/PowerBI/api_football_future.xlsx'
             
             # training_data = pd.read_csv(training_path)
             # training_data_new = pd.read_csv(training_path_new)
             # prediction_data = pd.read_csv(prediction_path)
             # merged_data = pd.read_csv(merged_path)
-   
 
             # Read Excel files with openpyxl, treating 'Infinity' and similar strings as NaN
             self.logger.info(f"Loading prediction data from {api_prediction_path}")
@@ -347,9 +352,11 @@ class PoissonXGCalculator:
             ).replace([np.inf, -np.inf], np.nan)
             
             self.logger.info(f"Loading future data from {api_future_path}")
-            api_future_data = pd.read_csv(api_future_path, 
-                                        na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
-                                        ).replace([np.inf, -np.inf], np.nan)
+            api_future_data = pd.read_excel(
+                api_future_path,
+                engine='openpyxl',
+                na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
+            ).replace([np.inf, -np.inf], np.nan)
             
             api_training_data = api_training_data.rename(columns={
                 'home_possession_mean': 'Home_possession_mean',
@@ -377,15 +384,14 @@ class PoissonXGCalculator:
             # self.add_poisson_xG(training_data_new, 'training_new')
             # self.add_poisson_xG(prediction_data, 'prediction')
             # self.add_poisson_xG(merged_data, 'merged')
-            self.add_poisson_xG(api_training_data, 'api_training')
-            self.add_poisson_xG(api_prediction_data, 'api_prediction')
-            self.add_poisson_xG(api_future_data, 'api_future')
-           
+            self.add_poisson_xG(api_training_data, api_training_data, 'api_training')
+            self.add_poisson_xG(api_prediction_data, api_prediction_data, 'api_prediction')
+            self.add_poisson_xG(api_future_data, api_future_data, 'api_future')
             
         except Exception as e:
             self.logger.error(f"Error in data processing: {str(e)}")
             raise
-            
+
     def save_models(self) -> None:
         """Save fitted models and scaler."""
         try:
@@ -400,7 +406,7 @@ class PoissonXGCalculator:
         except Exception as e:
             self.logger.error(f"Error saving models: {str(e)}")
             raise
-            
+
     def load_models(self) -> None:
         """Load saved models and scaler."""
         try:
@@ -418,53 +424,20 @@ class PoissonXGCalculator:
 
 def main():
     """Main execution function."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('./log/poisson_xg.log'),
-            logging.StreamHandler()
-        ]
-    )
-    logger = logging.getLogger(__name__)
     
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
     try:
         calculator = PoissonXGCalculator(logger=logger)
         calculator.process_data()
         
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
-        raise
-
-def predict_new_data():
-    """Prediction function."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('./log/poisson_xg_prediction.log'),
-            logging.StreamHandler()
-        ]
-    )
-    logger = logging.getLogger(__name__)
-    
-    try:
-        calculator = PoissonXGCalculator(logger=logger)
-        calculator.load_models()
-        prediction_data = pd.read_csv('./data_files/merged_data_prediction.csv')  # Replace with actual path
-        prepared_data = calculator._prepare_features(prediction_data, is_training=False)
-        
-        home_goals_pred = calculator.home_model.predict(prepared_data)
-        away_goals_pred = calculator.away_model.predict(prepared_data)
-        
-        prediction_data['home_poisson_xG'] = home_goals_pred
-        prediction_data['away_poisson_xG'] = away_goals_pred
-
-        prediction_data.to_csv('./data_files/merged_data_prediction_newPoisson.csv', index=False)  # Replace with actual path
-        logger.info("Predictions saved successfully")
-        
-    except Exception as e:
-        logger.error(f"Error in prediction execution: {str(e)}")
         raise
 
 if __name__ == "__main__":

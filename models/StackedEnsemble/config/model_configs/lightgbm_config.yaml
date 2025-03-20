@@ -1,0 +1,68 @@
+model:
+  name: lightgbm_classifier
+  version: "2.1.0"
+  experiment_name: lightgbm_experiment
+  cpu_config:
+    device: cpu
+    num_threads: -1
+    verbosity: -1
+  logging:
+    log_dir: logs/lightgbm
+    metrics_tracking:
+      - precision
+      - recall
+      - f1_score
+      - auc
+      - average_precision
+      - brier_score
+  params:
+    objective: binary
+    metric:
+      - binary_logloss
+      - auc
+    boosting_type: gbdt
+    random_state: 19
+    early_stopping_rounds: 100
+
+  # Training configuration
+  training:
+    objective: binary
+    metric: 
+      - binary_logloss
+      - auc
+    early_stopping_rounds: 100
+    verbose_eval: 50
+    first_metric_only: true
+    
+  # Logging configuration
+  logging:
+    log_dir: logs/lightgbm
+    metrics_tracking:
+      - precision
+      - recall
+      - f1
+      - auc
+      - average_precision
+      - training_time
+    
+  # Feature importance tracking
+  feature_importance:
+    types:
+      - split
+      - gain
+    top_k: 20
+    
+  # Model persistence
+  persistence:
+    save_native_format: true
+    save_joblib_format: true
+    checkpoint_frequency: 10
+
+  validation:
+    cv_folds: 5
+    stratified: true
+    metrics:
+      precision:
+        min_threshold: 0.35
+      recall:
+        min_threshold: 0.20 

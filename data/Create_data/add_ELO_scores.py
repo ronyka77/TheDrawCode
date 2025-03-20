@@ -48,15 +48,15 @@ class ELOCalculator:
             
             # Calculate league competitiveness metrics
             win_rate_std = np.std(pd.concat([league_data['home_win_rate'], 
-                                           league_data['away_win_rate']]))
+                                        league_data['away_win_rate']]))
                 
             points_std = np.std(pd.concat([league_data['home_average_points'], 
-                                         league_data['away_average_points']]))
+                                        league_data['away_average_points']]))
             
             goal_diff_std = np.std(pd.concat([league_data['Home_goal_difference_cum'], 
-                                            league_data['Away_goal_difference_cum']]) / 
-                                 pd.concat([league_data['Home_team_matches'], 
-                                          league_data['Away_team_matches']]))
+                                        league_data['Away_goal_difference_cum']]) / 
+                                    pd.concat([league_data['Home_team_matches'], 
+                                        league_data['Away_team_matches']]))
             
             # Normalize each metric between 0 and 1
             win_rate_factor = 1 - (win_rate_std / 0.5)  # 0.5 is max possible std for win rate
@@ -100,30 +100,26 @@ class ELOCalculator:
             all_teams = pd.concat([matches['home_encoded'], matches['away_encoded']]).unique()
             for team in all_teams:
                 self.elo_ratings[team] = self.INITIAL_ELO
-
             # Add columns for ELO ratings
             matches['home_team_elo'] = 0.0
             matches['away_team_elo'] = 0.0
             elo_count = 0
             # Process matches chronologically
-            for index, row in matches.sort_values('Datum').iterrows():
+            for index, row in matches.sort_values('Date').iterrows():
                 # Check for season change
                 if row['season_encoded'] != self.current_season:
                     self.current_season = row['season_encoded']
                     league_teams = matches[matches['league_encoded'] == row['league_encoded']]
                     league_teams = pd.concat([league_teams['home_encoded'], 
-                                           league_teams['away_encoded']]).unique()
+                                            league_teams['away_encoded']]).unique()
                     self.reset_season_ratings(league_teams)
-
                 home_team = row['home_encoded']
                 away_team = row['away_encoded']
                 league = row['league_encoded']
                 k_factor = self.league_k_factors.get(league, 30)
-
                 # Get current ELO ratings
                 home_elo = self.elo_ratings[home_team]
                 away_elo = self.elo_ratings[away_team]
-
                 # Store pre-match ELO ratings
                 matches.at[index, 'home_team_elo'] = home_elo
                 matches.at[index, 'away_team_elo'] = away_elo
@@ -132,7 +128,6 @@ class ELOCalculator:
                 if 'home_goals' in row and 'away_goals' in row:
                     home_goals = row['home_goals']
                     away_goals = row['away_goals']
-
                     # Determine match outcome
                     if home_goals > away_goals:
                         home_score, away_score = 1, 0
@@ -181,7 +176,6 @@ class ELOCalculator:
                     if col in df.columns:
                         df[col] = df[col].apply(lambda x: float(str(x).replace(',', '.')) if isinstance(x, str) else float(x))
                 return df
-
             # # Process training data
             # self.logger.info("Processing training data...")
             # training_data = pd.read_excel(self.training_data_path)
@@ -190,7 +184,6 @@ class ELOCalculator:
             # training_data = self.add_elo_scores(training_data)
             # training_data.to_excel(self.training_export_path, index=False)
             # self.logger.info("Training data processed and saved")
-            
             # # Process new training data with Poisson
             # self.logger.info("Processing new training data with Poisson...")
             # training_data_new = pd.read_excel(self.training_data_path_new)
@@ -199,7 +192,6 @@ class ELOCalculator:
             # training_data_new = self.add_elo_scores(training_data_new)
             # training_data_new.to_excel(self.training_export_path_new, index=False)
             # self.logger.info("Training data with Poisson processed and saved")
-
             # # Process prediction data
             # self.logger.info("Processing prediction data...")
             # prediction_data = pd.read_excel(self.prediction_data_path)
@@ -212,19 +204,31 @@ class ELOCalculator:
             # Process API data
             self.logger.info("Processing API prediction data...")
             api_prediction_data = pd.read_excel(self.api_prediction_data_path)
+            api_prediction_copy = api_prediction_data.copy()
             api_prediction_data = convert_numeric_columns(api_prediction_data)
-            api_prediction_data = api_prediction_data.sort_values('Datum')
+            api_prediction_data = api_prediction_data.sort_values('Date')
             api_prediction_data = self.add_elo_scores(api_prediction_data)
-            api_prediction_data.to_excel(self.api_prediction_export_path, index=False)
+            api_prediction_copy = api_prediction_copy.merge(
+                api_prediction_data[['fixture_id', 'home_team_elo', 'away_team_elo']],
+                on='fixture_id',
+                how='left'
+            )
+            api_prediction_copy.to_excel(self.api_prediction_export_path, index=False)
             self.logger.info("API prediction data processed and saved")
 
             # Process API training data
             self.logger.info("Processing API training data...")
             api_training_data = pd.read_excel(self.api_training_data_path)
+            api_training_copy = api_training_data.copy()
             api_training_data = convert_numeric_columns(api_training_data)
-            api_training_data = api_training_data.sort_values('Datum')
+            api_training_data = api_training_data.sort_values('Date')
             api_training_data = self.add_elo_scores(api_training_data)
-            api_training_data.to_excel(self.api_training_export_path, index=False)
+            api_training_copy = api_training_copy.merge(
+                api_training_data[['fixture_id', 'home_team_elo', 'away_team_elo']],
+                on='fixture_id',
+                how='left'
+            )
+            api_training_copy.to_excel(self.api_training_export_path, index=False)
             self.logger.info("API training data processed and saved")
             
         except Exception as e:

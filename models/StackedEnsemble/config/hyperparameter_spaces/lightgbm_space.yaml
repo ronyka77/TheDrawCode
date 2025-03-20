@@ -1,0 +1,61 @@
+hyperparameters:
+  # Learning parameters
+  learning_rate:
+    distribution: log_uniform
+    min: 0.001
+    max: 0.1
+  
+  # Tree structure parameters
+  num_leaves:
+    distribution: int_uniform
+    min: 20
+    max: 100
+  max_depth:
+    distribution: int_uniform
+    min: 3
+    max: 8  # Limited for CPU optimization
+  min_child_samples:
+    distribution: int_uniform
+    min: 20
+    max: 200
+  
+  # Sampling parameters
+  feature_fraction:
+    distribution: uniform
+    min: 0.5
+    max: 1.0
+  bagging_fraction:
+    distribution: uniform
+    min: 0.5
+    max: 1.0
+  bagging_freq:
+    distribution: int_uniform
+    min: 1
+    max: 7
+  
+  # Regularization parameters
+  reg_alpha:
+    distribution: log_uniform
+    min: 1.0e-8
+    max: 10.0
+  reg_lambda:
+    distribution: log_uniform
+    min: 1.0e-8
+    max: 10.0
+  min_split_gain:
+    distribution: log_uniform
+    min: 0.001
+    max: 1.0
+
+search_strategy:
+  name: bayesian
+  settings:
+    max_trials: 40
+    metric: precision
+    mode: max
+    early_stopping:
+      type: asha
+      grace_period: 500
+      reduction_factor: 2
+      max_t: 3000
+      brackets: 1 

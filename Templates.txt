@@ -1,0 +1,116 @@
+##BUGFIX
+I need help fixing a bug in [file_path] related to [brief description]. 
+
+Context:
+- The file is part of our Soccer Prediction Project
+- Error message/unexpected behavior: [paste exact error or describe behavior]
+- The error should include specific details like error type, line number, and stack trace
+- For unexpected behavior, describe what was expected vs. what actually happened
+- Include any relevant log entries or console output
+- Note any patterns (e.g., "only happens with certain data types" or "occurs after system idle")
+- The code should enforce CPU usage with tree_method='hist' for XGBoost models
+- The issue may be related to model training configuration, data preprocessing, or MLflow integration
+- Environment details: Windows 11, CPU-only training environment
+- Relevant documentation: See docs/architecture/model_training.md for standard configurations
+
+Relevant code section:
+
+What I've tried:
+[describe any attempted fixes]
+
+Please provide a surgical fix that:
+1. Changes only what's necessary to resolve the issue while maintaining code stability
+2. Maintains our existing logging standards with structured JSON and appropriate log levels
+3. Preserves MLflow integration including proper model registration and artifact logging
+4. References the relevant section in our project plan (plan #XX from docs/plan.md)
+5. Ensures CPU-only training configuration with tree_method='hist' 
+6. Includes appropriate error handling with standard error codes
+7. Validates any data transformations according to our validation rules
+
+Please explain your reasoning for the changes and any potential impacts on other components.
+
+## NEW FUNCTION
+I need to create a new function in [file_path] with the following requirements:
+
+Function purpose: [describe what the function should do]
+Input parameters: [list expected parameters]
+Expected output: [describe return value(s)]
+Integration points: [describe how it fits with existing code]
+
+Project context:
+- This is for our Soccer Prediction Project
+- We use ExperimentLogger for structured JSON logging
+- We track metrics and parameters in MLflow
+- Model training requires CPU-only configurations
+- This implements plan item #[plan_number] from docs/plan.md
+
+Related existing code:
+```python
+[paste similar/related functions]
+```
+
+Please provide a complete implementation with:
+1. Proper docstrings following our standards
+2. Error handling with standard error codes
+3. Appropriate logging at key points
+4. Any necessary data validation steps
+
+## NEW FILE
+I need to create a new file at [file_path] according to our plan.
+
+Plan reference: Plan #[plan_number] from docs/plan.md
+Plan details: [paste relevant plan section]
+
+File purpose: 
+[describe what this file should do]
+
+Project context:
+- Soccer Prediction Project using XGBoost models
+- CPU-only training with tree_method='hist'
+- MLflow tracking required for all model metrics
+- Requires standard logging using ExperimentLogger
+- Must validate data with minimum 1000 samples
+
+Related files:
+- [list related files with brief descriptions]
+
+Required imports and dependencies:
+[list key imports needed]
+
+Please create the complete file with:
+1. Proper header docstring explaining file purpose
+2. Required function implementations
+3. Standard error handling
+4. Appropriate logging
+5. Consistency with our architecture guidelines
+6. Test suggestions or examples if applicable
+
+I need a detailed implementation plan for the following requirements:
+
+
+# NEW Implementation
+Requirements:
+[paste or describe requirements]
+
+Project context:
+- Soccer Prediction Project using XGBoost for draw predictions
+- 50% precision / 20% recall target metrics
+- CPU-only training environment (Windows 11)
+- MLflow tracking for all experiments
+- Standard logging required (JSON format, ISO 8601 timestamps)
+- We work in a modular architecture defined in docs/architecture/
+
+Current project structure:
+- models/ - Contains model implementations
+- utils/ - Shared utilities
+- data/ - Training and validation datasets
+- predictors/ - Prediction service implementations
+- docs/ - Documentation and plans
+
+Please provide:
+1. A structured plan document in markdown format
+2. Implementation phases with clear deliverables
+3. File modification/creation details
+4. Required changes to existing components
+5. Metrics and validation approach
+6. Testing strategy

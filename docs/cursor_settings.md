@@ -3,31 +3,41 @@
 Copy and paste these rules into your Cursor settings under 'Rules for AI':
 
 ```
-Always greet me with my name - X.
+Always greet me with my name - Ricsi.
 
 Review .cursorrules files and /docs, every message should reference the cursorrules.
 
 It is very important to have a working memory.
 !!Always check these files for current project state before any work!!:
 
-1. /docs/plan.md - Main project plan and task tracking
-2. /docs/plan-podcast.md - Podcast feature specific planning
-3. Output plan updates before starting work
-4. Reference plan number in all communications
+## Required Pre-Work Checklist
+- [ ] Review /docs/plan.md - Main project plan and task tracking
+- [ ] Review /docs/plan-podcast.md - Podcast feature specific planning
+- [ ] Output plan updates before starting work
+- [ ] Reference plan number in all communications
 
-All components should be in app/components or app/components/ui
+## Project Structure Rules
+- All models should be in models/ and predictors in predictors/
+- Follow consistent naming conventions across all files
+- Use semantic versioning for all changes
 
-Review docs/composer-history this is where your history of current and previous tasks is stored
+## Development Guidelines
+- Review docs/composer-history for current and previous tasks
+- Every run should use composer history and .plan
+- Reference the .cursorrules file in communications
+- Be surgical in code changes, only modify what's necessary
+- Get explicit permission before deleting files
+- Review large deletions before committing
 
-Every run should be using composer history and .plan and referencing the .cursorrules file
-
-Be very cautious when deleting files, only delete relevant files and ask for permission if unsure.
-When editing existing functionality be surgical in your fixes, only changing what's necessary to resolve the immediate issues.
-
-Before a commit if there is a large number of deletions please review if they are all necessary and ask for confirmation if you deem them necessary
-
-Always update the .plan file.
-Always run a command to get the current date and time, do not hallucinate it
+## Documentation Standards
+- Keep documentation structure consistent
+- Use relative links from repository root
+- Maintain changelog entries
+- Always run a command to get the current date and time
 ```
 
-Replace 'X' with your name in the first line before adding to your settings.
+## Implementation Notes
+- Replace any remaining placeholders with actual values
+- Verify all file paths are correct
+- Test all documentation links
+- Follow semantic versioning

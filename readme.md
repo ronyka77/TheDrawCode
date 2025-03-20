@@ -1,123 +1,261 @@
-# Soccer Match Draw Prediction Using Advanced Ensemble Models
+# 🥅 Soccer Prediction Project v2.2
 
-## Project Goals
+![GitHub](https://img.shields.io/github/license/username/soccer-prediction)
+![Python Version](https://img.shields.io/badge/python-3.9-blue.svg)
+![CPU Optimized](https://img.shields.io/badge/CPU-optimized-brightgreen.svg)
 
-The primary goal of this project is to achieve high accuracy in predicting draw outcomes in soccer matches. This is accomplished by leveraging a sophisticated ensemble modeling approach designed to capture the nuanced patterns associated with draw outcomes. The project aims to push the boundaries of draw prediction accuracy, providing valuable insights for teams, analysts, and betting markets.
+A machine learning system that accurately predicts soccer match draws and goal patterns using ensemble methods and advanced feature engineering techniques, with a focus on high-precision results for betting applications.
 
-## Overview
+## 📋 Table of Contents
 
-This project utilizes a comprehensive dataset comprising 20,000 matches from the last four years across 20 soccer leagues. Each match is represented by 117 statistical attributes. The core of the project involves developing a robust predictive model to identify matches likely to end in a draw, employing advanced machine learning techniques and ensemble methods.
+- [Key Features](#-key-features)
+- [Project Architecture](#-project-architecture)
+- [Installation](#-installation)
+- [Usage](#-usage)
+- [Model Pipeline](#-model-pipeline)
+- [Configuration](#-configuration)
+- [Extending the Model](#-extending-the-model)
+- [Troubleshooting](#-troubleshooting)
+- [Contributing](#-contributing)
+- [License](#-license)
 
-## Data Exploration and Feature Engineering
+## ✨ Key Features
 
-The project begins with a thorough data exploration phase to identify key features and relationships within the dataset. Feature engineering plays a crucial role, creating new features such as rolling averages of team performance metrics to enhance the predictive capabilities of the models. Advanced features, including those derived from the Poisson distribution, are also incorporated to better model goal-scoring dynamics.
+- **Ensemble Model Architecture**: Combines XGBoost, CatBoost, LightGBM, and neural networks for robust predictions
+- **High-Precision Focus**: Optimized for precision with customizable threshold tuning
+- **CPU-Only Optimization**: Designed to run efficiently without GPU requirements
+- **Reproducible Results**: Fixed seeds and deterministic operations for consistent outcomes
+- **MLflow Integration**: Comprehensive experiment tracking with model versioning
+- **Advanced Feature Engineering**: Soccer-specific feature development for improved accuracy
 
-## Data Acquisition and Preprocessing
+## 🏗 Project Architecture
 
-Data is sourced from the API-Football API and stored in MongoDB. The `get_fixtures.py` script handles data acquisition, including:
+![System Architecture](https://via.placeholder.com/800x400?text=Soccer+Prediction+Architecture)
 
-*   Retrieving league information and seasons.
-*   Fetching fixtures for specific leagues and seasons.
-*   Collecting detailed match statistics.
+The system employs a multi-stage ensemble approach:
 
-The data is then preprocessed and stored in both JSON files and MongoDB for efficient access and management.
+## 🚀 Installation
 
-## Modeling Strategy
+### Prerequisites
 
-The modeling strategy integrates several advanced techniques:
+- Python 3.9+
+- Windows 11
+- MongoDB (for data storage)
 
-*   **Base Models**: Utilizes XGBoost, CatBoost, and TabNet (with TabTransformer) to handle tabular data and capture complex interactions between features.
-*   **Graph Neural Networks (GNNs)**: Integrates GNNs to understand team relationships and historical performance by constructing graphs with teams as nodes and matches as edges.
-*   **Sequence Models**: Employs LSTMs or Temporal Fusion Transformers (TFT) to capture the temporal dynamics of recent match performance.
-*   **Ensemble Learning**: Combines predictions from base models, GNN embeddings, and sequence embeddings using a meta-learner, such as logistic regression or a small neural network, to achieve a robust final prediction.
-*   **Imbalance Mitigation**: Addresses class imbalance using techniques such as focal loss, class weighting, and oversampling to ensure the model performs well on the minority class (draws).
-*   **Calibration and Post-Processing**: Applies calibration techniques post-training to ensure reliable decision-making and accurate probability estimates.
+### Setup
 
-## Evaluation Metrics
+```bash
+# Clone the repository
+git clone https://github.com/username/soccer-prediction.git
+cd soccer-prediction
 
-Model performance is evaluated using a variety of metrics, with a focus on the draw class:
+# Create and activate virtual environment
+python -m venv venv
+venv\Scripts\activate
 
-*   **Accuracy**: Overall correctness of the predictions.
-*   **F2-score**: Harmonic mean of precision and recall, with a higher weight on recall, suitable for imbalanced datasets.
-*   **Precision**: Proportion of true positive predictions among all positive predictions.
-*   **Recall**: Proportion of true positive predictions among all actual positives.
-*   **AUC-ROC**: Area under the Receiver Operating Characteristic curve, measuring the model's ability to distinguish between classes.
-*   **Confusion Matrix Analysis**: Detailed breakdown of true positives, true negatives, false positives, and false negatives.
+# Install dependencies
+pip install -r requirements.txt
 
-## Cross-Validation and Hyperparameter Tuning
+# Set up environment for reproducibility
+set PYTHONHASHSEED=19
+set TF_ENABLE_ONEDNN_OPTS=0
+set OMP_NUM_THREADS=4
+set MKL_NUM_THREADS=4
+set OPENBLAS_NUM_THREADS=4
+```
 
-The project employs rigorous cross-validation and hyperparameter tuning to optimize model performance:
+### Verification
 
-*   **Cross-Validation**: Utilizes k-fold cross-validation to ensure the model generalizes well to unseen data.
-*   **Hyperparameter Tuning**: Employs techniques like grid search or Bayesian optimization to find the best hyperparameter settings for each model.
+Verify your installation with the following command:
 
-## Model Interpretability
+```bash
+python -m python_tests.test_environment
+```
 
-Model interpretability is enhanced using techniques such as SHAP (SHapley Additive exPlanations) values or LIME (Local Interpretable Model-agnostic Explanations). These methods help understand the contribution of individual features to the model's predictions, providing transparency and insights into the model's decision-making process.
+## 📊 Usage
 
-## Deployment and Real-World Application
+### Basic Prediction
 
-The final model is designed for deployment in real-world applications, including:
+```python
+from models.ensemble.ensemble_model import EnsembleModel
+from utils.logger import ExperimentLogger
+import pandas as pd
 
-*   **Sports Analytics Platforms**: Providing insights into match outcomes for analysts and teams.
-*   **Betting Systems**: Assisting in making informed betting decisions.
-*   **Team Strategy Development**: Helping teams understand factors contributing to draw outcomes and adjust their strategies accordingly.
+# Initialize logger
+logger = ExperimentLogger(experiment_name="soccer_prediction")
 
-## Future Work and Scalability
+# Load dataset
+data = pd.read_csv("path/to/matches.csv")
+X_train, y_train, X_test, y_test = prepare_data(data)
 
-Future work may include:
+# Initialize and train ensemble model
+model = EnsembleModel(
+    logger=logger,
+    calibrate=True,
+    meta_learner_type='xgb',
+    target_precision=0.50,
+    required_recall=0.25,
+    X_train=X_train
+)
 
-*   **Expanding to More Leagues**: Incorporating data from additional soccer leagues to enhance the model's generalizability.
-*   **Incorporating Live Data**: Integrating live match data to provide real-time predictions.
-*   **Exploring Additional ML Techniques**: Investigating other advanced machine learning techniques to further improve prediction accuracy.
+# Train the model
+results = model.train(X_train, y_train, X_test, y_test)
 
-The model's architecture is designed for scalability, allowing for easy expansion and integration of new data sources and techniques.
+# Make predictions
+predictions = model.predict(X_test)
+probabilities = model.predict_proba(X_test)
 
-## Collaboration and Stakeholder Engagement
+print(f"Optimized threshold: {model.optimal_threshold}")
+```
 
-Collaboration with domain experts is crucial to validate the model's predictions and ensure practical relevance. Stakeholder feedback is incorporated throughout the development process to align the project with real-world needs and expectations.
+### Running with MLflow Tracking
 
-## Ethical Considerations
+```python
+from models.ensemble.run_ensemble import run_ensemble
 
-The project addresses ethical considerations, emphasizing responsible gambling practices and the implications for betting markets. It is essential to use the model's predictions responsibly and ethically.
+# Run ensemble with MLflow tracking
+model = run_ensemble(
+    extra_base_model_type='random_forest',
+    meta_learner_type='xgb',
+    calibrate=True, 
+    dynamic_weighting=True,
+    target_precision=0.50,
+    required_recall=0.25,
+    experiment_name="ensemble_experiment"
+)
+```
 
-## Expected Outcomes
+### Viewing Experiments
 
-By integrating GNNs and sequence embeddings with advanced ensemble models, the project aims to significantly improve the accuracy of draw predictions in soccer matches. The final model will be rigorously evaluated, focusing on metrics such as accuracy and F2-score, with particular attention to improving recall for the draw class. The insights gained from this project will provide valuable information for teams, analysts, and betting markets, contributing to a deeper understanding of match outcomes.
+```bash
+# Start MLflow UI
+mlflow ui --port 5000
+```
 
-## Implementation Details
+Then navigate to `http://localhost:5000` in your browser.
 
-### Data Management
+## 🧪 Model Pipeline
 
-*   **MongoDB**: Used for storing raw and processed data, including fixtures, statistics, and league information.
-*   **JSON Files**: Used for storing intermediate data such as seasons, leagues, and fixtures.
+The system follows this workflow:
 
-### Key Scripts
+1. **Data Preparation**: Feature engineering and validation
+2. **Base Model Training**: Training multiple models (XGBoost, CatBoost, LightGBM, etc.)
+3. **Probability Calibration**: Optional sigmoid/isotonic calibration
+4. **Meta-Feature Creation**: Converting base model predictions to meta-features
+5. **Meta-Learner Training**: Training a model to combine base predictions
+6. **Threshold Optimization**: Fine-tuning prediction threshold for precision/recall balance
 
-*   **`get_fixtures.py`**: Handles data acquisition from the API-Football API and stores it in MongoDB and JSON files.
-    ```python:data/Create_data/api-football/get_fixtures.py
-    startLine: 1
-    endLine: 299
-    ```
-*   **`create_evaluation_set.py`**: Prepares the evaluation dataset, adds advanced goal features, and manages MLflow experiments.
-    ```python:utils/create_evaluation_set.py
-    startLine: 1
-    endLine: 630
-    ```
-*   **`predict_ensemble.py`**: Implements the ensemble prediction pipeline, including model loading, prediction, and evaluation.
-    ```python:predictors/predict_ensemble.py
-    startLine: 234
-    endLine: 335
-    ```
+## ⚙️ Configuration
 
-### Logging
+### Environment Variables
 
-*   Detailed logs are generated during data merging and preprocessing, stored in the `log` directory.
-    ```log/merged_data_for_prediction.log
-    startLine: 1
-    endLine: 4
-    ```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TF_ENABLE_ONEDNN_OPTS` | Enable/disable TensorFlow oneDNN optimizations | `0` |
+| `OMP_NUM_THREADS` | Number of OpenMP threads | `4` |
+| `MKL_NUM_THREADS` | Number of MKL threads | `4` |
+| `OPENBLAS_NUM_THREADS` | Number of OpenBLAS threads | `4` |
+| `PYTHONHASHSEED` | Python hash seed for reproducibility | `19` |
 
-### File Structure
+### Model Parameters
 
-The project follows a structured directory layout, ensuring organized and maintainable code:
+The ensemble model accepts the following parameters:
+
+```python
+EnsembleModel(
+    logger=None,                    # Logger instance
+    calibrate=False,                # Whether to calibrate probabilities
+    calibration_method="sigmoid",   # Calibration method
+    individual_thresholding=False,  # Use individual thresholds
+    meta_learner_type="xgb",        # Meta-learner type
+    dynamic_weighting=True,         # Use dynamic weighting
+    extra_base_model_type="mlp",    # Extra model type
+    sampling_strategy=0.7,          # Sampling strategy
+    complexity_penalty=0.01,        # Complexity penalty
+    target_precision=0.50,          # Target precision
+    required_recall=0.25,           # Required recall
+    X_train=None                    # Training features
+)
+```
+
+## 🧩 Extending the Model
+
+### Adding New Base Models
+
+To add a new model type to the ensemble:
+
+1. Implement the model in `models/StackedEnsemble/base/`
+2. Add the model type to `extra_base_model_type` options
+3. Update the initialization logic in `EnsembleModel.__init__()`
+
+Example for adding a new model type:
+
+```python
+# In ensemble_model.py, within __init__ method
+if self.extra_base_model_type == 'your_new_model':
+    self.model_extra = YourNewModel(
+        param1=value1,
+        param2=value2,
+        random_state=19
+    )
+    self.logger.info("Extra base model initialized as YourNewModel.")
+```
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### TensorFlow Numerical Differences
+
+**Problem**: Different numerical results on different machines due to oneDNN optimizations.
+
+**Solution**: Disable oneDNN optimizations by setting `TF_ENABLE_ONEDNN_OPTS=0` before importing TensorFlow:
+
+```python
+import os
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+import tensorflow as tf
+```
+
+#### Memory Issues with Large Models
+
+**Problem**: Out of memory errors when training models on large datasets.
+
+**Solution**: Reduce batch size, limit feature count, or use chunked processing:
+
+```python
+# Reduce batch size for neural networks
+model = EnsembleModel(
+    extra_base_model_type='mlp',
+    batch_size=32  # Smaller batch size
+)
+```
+
+## 👥 Contributing
+
+We welcome contributions to improve the prediction system! Please follow these steps:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Add tests for new functionality
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+Please ensure your code follows our coding standards:
+- Pass all tests
+- Follow PEP 8 guidelines
+- Include proper documentation
+- Use type hints
+- Handle errors appropriately
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+*For more detailed documentation, please refer to the [docs](docs/) directory.*
+
+(づ｡◕‿‿◕｡)づ
