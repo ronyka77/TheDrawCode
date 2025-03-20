@@ -133,20 +133,20 @@ def load_hyperparameter_space():
         'bagging_fraction': {
             'type': 'float',
             'low': 0.55,
-            'high': 0.60,
+            'high': 0.65,
             'log': False,
             'step': 0.005
         },
         'bagging_freq': {
             'type': 'int',
-            'low': 6,
-            'high': 10,
+            'low': 7,
+            'high': 12,
             'log': False,
             'step': 1
         },
         'reg_alpha': {
             'type': 'float',
-            'low': 1.0,
+            'low': 0.5,
             'high': 11.0,
             'log': False,
             'step': 0.1
@@ -175,7 +175,7 @@ def load_hyperparameter_space():
         'path_smooth': {
             'type': 'float',
             'low': 0.005,
-            'high': 0.49,
+            'high': 0.60,
             'log': False,
             'step': 0.005
         },
