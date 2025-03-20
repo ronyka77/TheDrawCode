@@ -62,17 +62,28 @@ from models.StackedEnsemble.shared.data_loader import DataLoader
 
 # Global settings
 min_recall = 0.20  # Minimum acceptable recall
-n_trials = 2000  # Number of hyperparameter optimization trials as in notebook
+n_trials = 20000  # Number of hyperparameter optimization trials as in notebook
 
 # Base parameters as in the notebook
 base_params = {
     'objective': 'binary',
-    'metric': ['binary_logloss', 'average_precision', 'auc'],
+    'metric': ['binary_logloss', 'auc'],
     'verbose': -1,
-    'n_jobs': -1,
+    'n_jobs': 4,
     'random_state': 19,
     'device': 'cpu'
 }
+
+# Set fixed seed and hash seed for determinism
+SEED = 19
+os.environ["PYTHONHASHSEED"] = str(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+
+# Restrict parallel threads across various libraries
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
 
 def load_hyperparameter_space():
     """
@@ -86,101 +97,101 @@ def load_hyperparameter_space():
     hyperparameter_space = {
         'learning_rate': {
             'type': 'float',
-            'low': 0.06,
-            'high': 0.08,
+            'low': 0.05,
+            'high': 0.14,
             'log': False,
-            'step': 0.001
+            'step': 0.005
         },
         'num_leaves': {
             'type': 'int',
-            'low': 80,
-            'high': 100,
+            'low': 50,
+            'high': 150,
             'log': False,
-            'step': 1
+            'step': 5
         },
         'max_depth': {
             'type': 'int',
-            'low': 8,
+            'low': 4,
             'high': 10,
             'log': False,
             'step': 1
         },
         'min_child_samples': {
             'type': 'int',
-            'low': 300,
+            'low': 150,
             'high': 320,
             'log': False,
-            'step': 1
+            'step': 10
         },
         'feature_fraction': {
             'type': 'float',
-            'low': 0.58,
-            'high': 0.62,
+            'low': 0.55,
+            'high': 0.70,
             'log': False,
             'step': 0.01
         },
         'bagging_fraction': {
             'type': 'float',
             'low': 0.55,
-            'high': 0.57,
+            'high': 0.60,
             'log': False,
             'step': 0.005
         },
         'bagging_freq': {
             'type': 'int',
-            'low': 7,
-            'high': 9,
+            'low': 6,
+            'high': 10,
             'log': False,
             'step': 1
         },
         'reg_alpha': {
             'type': 'float',
-            'low': 4.5,
-            'high': 5.5,
+            'low': 1.0,
+            'high': 11.0,
             'log': False,
             'step': 0.1
         },
         'reg_lambda': {
             'type': 'float',
-            'low': 1.2,
-            'high': 1.4,
+            'low': 1.0,
+            'high': 11.0,
             'log': False,
-            'step': 0.01
+            'step': 0.1
         },
         'min_split_gain': {
             'type': 'float',
-            'low': 0.15,
-            'high': 0.17,
+            'low': 0.10,
+            'high': 0.20,
             'log': False,
             'step': 0.01
         },
         'early_stopping_rounds': {
             'type': 'int',
-            'low': 350,
-            'high': 400,
+            'low': 300,
+            'high': 700,
             'log': False,
             'step': 10
         },
         'path_smooth': {
             'type': 'float',
-            'low': 0.45,
+            'low': 0.005,
             'high': 0.49,
             'log': False,
-            'step': 0.001
+            'step': 0.005
         },
         'cat_smooth': {
             'type': 'float',
-            'low': 13.5,
-            'high': 14.5,
+            'low': 10.0,
+            'high': 30.0,
             'log': False,
             'step': 0.1
         },
         'max_bin': {
             'type': 'int',
-            'low': 630,
-            'high': 650,
+            'low': 200,
+            'high': 700,
             'log': False,
-            'step': 5
+            'step': 10
         }
     }
     return hyperparameter_space
@@ -424,7 +435,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         study.optimize(
             objective, 
             n_trials=n_trials, 
-            timeout=10000,  # 10000 seconds as in notebook
+            timeout=900000,
             show_progress_bar=True,
             callbacks=[callback]
         )

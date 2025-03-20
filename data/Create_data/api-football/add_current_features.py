@@ -294,7 +294,7 @@ class MongoDBFeatures:
                 invalid_dates_count = fixtures_dataframe['date'].isnull().sum()
                 print(f"Found {invalid_dates_count} invalid dates")
                 # Fill invalid dates with a default value
-                fixtures_dataframe['date'].fillna('1970-01-01 00:00', inplace=True)
+                fixtures_dataframe['date'] = fixtures_dataframe['date'].fillna('1970-01-01 00:00')
             except Exception as e:
                 print(f"Error parsing dates: {e}")
                 fixtures_dataframe['date'] = '1970-01-01 00:00'
@@ -333,7 +333,10 @@ class MongoDBFeatures:
             file_path (str): The path to save the Excel file.
         """
         try:
-            
+            # Filter out rows where league_id is 235
+            if 'league_id' in fixtures_dataframe.columns:
+                fixtures_dataframe = fixtures_dataframe[fixtures_dataframe['league_id'] != 235]
+                print(f"Filtered out {len(fixtures_dataframe[fixtures_dataframe['league_id'] == 235])} rows with league_id 235")
             fixtures_dataframe.to_excel(file_path, index=False)
             print(f"Data exported to {file_path}")
         except Exception as e:
@@ -366,7 +369,7 @@ class MongoDBFeatures:
             if self.logger:
                 self.logger.error(f"Error adding features to fixtures data: {e}")
             return pd.DataFrame()
-        
+
     def load_and_prepare_data(self, fixtures_dataframe: pd.DataFrame):
         try:
             print("Collecting data...")

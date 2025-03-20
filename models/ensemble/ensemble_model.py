@@ -60,6 +60,11 @@ np.random.seed(random_seed)
 tf.random.set_seed(random_seed)
 os.environ['PYTHONHASHSEED'] = str(random_seed)
 
+# Restrict parallel threads across various libraries
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
+
 class EnsembleModel(BaseEstimator, ClassifierMixin):
     """
     EnsembleModel trains a soft voting ensemble (XGBoost, CatBoost, LGBM) combined with stacking
@@ -114,59 +119,61 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.model_xgb = XGBClassifier( #41.2%
             tree_method='hist',  # Required for CPU-only training per project rules
             device='cpu',
-            nthread=-1,
+            nthread=4,
             objective='binary:logistic',
             eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.05,
-            max_depth=7,
-            min_child_weight=245,
-            subsample=0.6,
-            colsample_bytree=0.73,
-            reg_alpha=38.0,
-            reg_lambda=7.07,
-            gamma=0.04,
-            early_stopping_rounds=760,
-            scale_pos_weight=2.35,
+            learning_rate=0.049999999999999996,
+            max_depth=10,
+            min_child_weight=400,
+            subsample=0.75,
+            colsample_bytree=0.69,
+            reg_alpha=37.5,
+            reg_lambda=7.390000000000001,
+            gamma=2.2,
+            early_stopping_rounds=660,
+            scale_pos_weight=2.65,
             seed=19
         )
         self.model_cat = CatBoostClassifier( #39.7%
-            learning_rate=0.07846192040909378,
-            depth=9,
-            min_data_in_leaf=18,
-            subsample=0.7138627535418607,
-            colsample_bylevel=0.4689356247169103,
-            reg_lambda=0.5364369908816581,
+            learning_rate=0.021289724174269435,
+            depth=6,
+            min_data_in_leaf=77,
+            subsample=0.5728544513714008,
+            colsample_bylevel=0.49610356838309444,
+            reg_lambda=2.13261884199673,
             leaf_estimation_iterations=6,
-            bagging_temperature=2.7219134152516724,
-            scale_pos_weight=12.701247011594266,
-            early_stopping_rounds=284,
+            bagging_temperature=1.5545831677860675,
+            scale_pos_weight=4.817574555909853,
+            early_stopping_rounds=479,
             loss_function='Logloss',
             eval_metric='AUC',
+            custom_metric=['Precision', 'Recall'],
             task_type='CPU',
-            thread_count=-1,
+            thread_count=4,
             verbose=-1
         )
         self.model_lgb = LGBMClassifier( #41.7%
             objective='binary',
-            metric=['binary_logloss', 'average_precision', 'auc'],
+            metric=['binary_logloss', 'auc'],
             verbose=-1,
-            n_jobs=-1,
+            n_jobs=4,
             random_state=19,
             device='cpu',
-            learning_rate=0.077,
-            num_leaves=89,
-            max_depth=9,
-            min_child_samples=314,
-            feature_fraction=0.61,
-            bagging_fraction=0.56,
-            bagging_freq=7,
-            reg_alpha=5.2,
-            reg_lambda=1.22,
-            min_split_gain=0.15,
-            path_smooth=0.481,
-            cat_smooth=14.0,
-            max_bin=645
+            learning_rate=0.10500000000000001,
+            num_leaves=140,
+            max_depth=8,
+            min_child_samples=180,
+            feature_fraction=0.5900000000000001,
+            bagging_fraction=0.6,
+            bagging_freq=10,
+            reg_alpha=1.3,
+            reg_lambda=8.5,
+            min_split_gain=0.13,
+            early_stopping_rounds=320,
+            path_smooth=0.24000000000000002,
+            cat_smooth=27.8,
+            max_bin=510
         )
         
         # Initialize the extra base model based on the selected type with reduced complexity

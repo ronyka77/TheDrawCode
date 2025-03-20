@@ -63,7 +63,7 @@ from models.StackedEnsemble.shared.data_loader import DataLoader
 
 # Global settings
 min_recall = 0.20  # Minimum acceptable recall
-n_trials = 2000  # Number of hyperparameter optimization trials as in notebook
+n_trials = 20000  # Number of hyperparameter optimization trials as in notebook
 # Get current versions
 xgb_version = xgb.__version__
 sklearn_version = sklearn.__version__
@@ -74,12 +74,22 @@ pip_requirements = [
     f"scikit-learn=={sklearn_version}",
     f"mlflow=={mlflow.__version__}"
 ]
+# Set fixed seed and hash seed for determinism
+SEED = 19
+os.environ["PYTHONHASHSEED"] = str(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+
+# Restrict parallel threads across various libraries
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
 
 # Base parameters as in the notebook
 base_params = {
     'objective': 'binary:logistic',
     'verbosity': 0,
-    'nthread': -1,
+    'nthread': 4,
     'seed': 19,
     'device': 'cpu',
     'tree_method': 'hist'
@@ -98,7 +108,7 @@ def load_hyperparameter_space():
         'learning_rate': {
             'type': 'float',
             'low': 0.005,               # narrowed based on top trials (0.06-0.09)
-            'high': 0.05,
+            'high': 0.06,
             'log': False,
             'step': 0.005
         },
@@ -111,19 +121,19 @@ def load_hyperparameter_space():
         'min_child_weight': {
             'type': 'int',
             'low': 200,                # narrowed based on top trials (~450)
-            'high': 500,
-            'step': 5
+            'high': 600,
+            'step': 10
         },
         'colsample_bytree': {
             'type': 'float',
-            'low': 0.65,                # narrowed based on top trials (0.62-0.65)
+            'low': 0.58,                # narrowed based on top trials (0.62-0.65)
             'high': 0.90,
             'log': False,
             'step': 0.01
         },
         'subsample': {
             'type': 'float',
-            'low': 0.6,                # narrowed based on top trials (0.85-0.91)
+            'low': 0.58,                # narrowed based on top trials (0.85-0.91)
             'high': 0.95,
             'log': False,
             'step': 0.01
@@ -131,14 +141,14 @@ def load_hyperparameter_space():
         'gamma': {
             'type': 'float',
             'low': 0.02,                # narrowed based on top trials (0.52-1.59)
-            'high': 1.0,
+            'high': 4.0,
             'log': False,
             'step': 0.02
         },
         'lambda': {
             'type': 'float',
             'low': 1.0,                # narrowed based on top trials (7.51-8.01)
-            'high': 8.0,
+            'high': 10.0,
             'log':  False,
             'step': 0.01
         },
@@ -325,34 +335,6 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             return 0.0
     
     try:
-        # Use dynamic sampler to expand the search space after 200 trials
-        # sampler = DynamicTPESampler(
-        #     dynamic_threshold=200,
-        #     dynamic_search_space={
-        #         "learning_rate": lambda orig: optuna.distributions.FloatDistribution(low=0.005, high=0.05, step=0.005),
-        #         "max_depth": lambda orig: optuna.distributions.IntDistribution(low=5, high=10, step=1),
-        #         "min_child_weight": lambda orig: optuna.distributions.IntDistribution(low=200, high=500, step=5),
-        #         "colsample_bytree": lambda orig: optuna.distributions.FloatDistribution(low=0.60, high=0.90, step=0.01),
-        #         "subsample": lambda orig: optuna.distributions.FloatDistribution(low=0.55, high=0.95, step=0.01),
-        #         "gamma": lambda orig: optuna.distributions.FloatDistribution(low=0.02, high=1.5, step=0.02),
-        #         "lambda": lambda orig: optuna.distributions.FloatDistribution(low=1.0, high=8.0, step=0.01),
-        #         "alpha": lambda orig: optuna.distributions.FloatDistribution(low=10.0, high=70.0, step=0.1),
-        #         "early_stopping_rounds": lambda orig: optuna.distributions.IntDistribution(low=400, high=1200, step=20),
-        #         "scale_pos_weight": lambda orig: optuna.distributions.FloatDistribution(low=2.0, high=5.0, step=0.05)
-        #     },
-        #     n_startup_trials=200,
-        #     prior_weight=0.2,
-        #     warn_independent_sampling=False
-        # )
-        cmaes_sampler = optuna.samplers.CmaEsSampler(
-            x0={'learning_rate': 0.025, 'max_depth': 7, 'min_child_weight': 350,
-                'colsample_bytree': 0.75, 'subsample': 0.75, 'gamma': 0.5,
-                'lambda': 4.0, 'alpha': 40.0, 'early_stopping_rounds': 800,
-                'scale_pos_weight': 3.5},
-            sigma0=0.1,
-            seed=42,
-            n_startup_trials=2000
-        )
         random_sampler = optuna.samplers.RandomSampler(
             seed=19
         )
@@ -403,7 +385,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         study.optimize(
             objective, 
             n_trials=n_trials, 
-            timeout=10000,  # 10000 seconds as in notebook
+            timeout=900000, 
             show_progress_bar=True,
             callbacks=[callback]
         )

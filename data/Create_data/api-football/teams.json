@@ -13501,6 +13501,206 @@
     },
     {
         "team": {
+            "id": 248,
+            "name": "Hamilton Academical",
+            "code": "HAM",
+            "country": "Scotland",
+            "founded": 1874,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/248.png"
+        },
+        "venue": {
+            "id": 19937,
+            "name": "ZLX Stadium",
+            "address": "Cadzow Avenue",
+            "city": "Hamilton",
+            "capacity": 6078,
+            "surface": "artificial turf",
+            "image": "https://media.api-sports.io/football/venues/19937.png"
+        }
+    },
+    {
+        "team": {
+            "id": 255,
+            "name": "Livingston",
+            "code": "LIV",
+            "country": "Scotland",
+            "founded": 1943,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/255.png"
+        },
+        "venue": {
+            "id": 1397,
+            "name": "Tony Macaroni Arena",
+            "address": "Almondvale Stadium Road",
+            "city": "Livingston",
+            "capacity": 9672,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/1397.png"
+        }
+    },
+    {
+        "team": {
+            "id": 901,
+            "name": "Partick",
+            "code": "PAR",
+            "country": "Scotland",
+            "founded": 1876,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/901.png"
+        },
+        "venue": {
+            "id": 19938,
+            "name": "Wyre Stadium at Firhill",
+            "address": "80 Firhill Road",
+            "city": "Glasgow",
+            "capacity": 13079,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/19938.png"
+        }
+    },
+    {
+        "team": {
+            "id": 1383,
+            "name": "Morton",
+            "code": "MOR",
+            "country": "Scotland",
+            "founded": 1874,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/1383.png"
+        },
+        "venue": {
+            "id": 1391,
+            "name": "Cappielow Park",
+            "address": "Sinclair Street",
+            "city": "Greenock",
+            "capacity": 11612,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/1391.png"
+        }
+    },
+    {
+        "team": {
+            "id": 1385,
+            "name": "Raith Rovers",
+            "code": "RAI",
+            "country": "Scotland",
+            "founded": 1883,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/1385.png"
+        },
+        "venue": {
+            "id": 2907,
+            "name": "Stark's Park",
+            "address": "Pratt Street",
+            "city": "Kirkcaldy",
+            "capacity": 10104,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/2907.png"
+        }
+    },
+    {
+        "team": {
+            "id": 1387,
+            "name": "Ayr Utd",
+            "code": "AYR",
+            "country": "Scotland",
+            "founded": 1910,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/1387.png"
+        },
+        "venue": {
+            "id": 1385,
+            "name": "Somerset Park",
+            "address": "Somerset Road",
+            "city": "Ayr",
+            "capacity": 10128,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/1385.png"
+        }
+    },
+    {
+        "team": {
+            "id": 1388,
+            "name": "Dunfermline",
+            "code": "DUN",
+            "country": "Scotland",
+            "founded": 1885,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/1388.png"
+        },
+        "venue": {
+            "id": 19936,
+            "name": "KDM Group East End Park",
+            "address": "Halbeath Road",
+            "city": "Dunfermline",
+            "capacity": 11998,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/19936.png"
+        }
+    },
+    {
+        "team": {
+            "id": 1389,
+            "name": "Falkirk",
+            "code": "FAL",
+            "country": "Scotland",
+            "founded": 1876,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/1389.png"
+        },
+        "venue": {
+            "id": 1390,
+            "name": "Falkirk Community Stadium",
+            "address": "Westfield",
+            "city": "Falkirk",
+            "capacity": 9008,
+            "surface": "artificial turf",
+            "image": "https://media.api-sports.io/football/venues/1390.png"
+        }
+    },
+    {
+        "team": {
+            "id": 4668,
+            "name": "Airdrie United",
+            "code": "AIR",
+            "country": "Scotland",
+            "founded": 2002,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/4668.png"
+        },
+        "venue": {
+            "id": 19749,
+            "name": "Excelsior Stadium",
+            "address": "Craigneuk Avenue",
+            "city": "Airdrie",
+            "capacity": 10171,
+            "surface": "artificial turf",
+            "image": "https://media.api-sports.io/football/venues/19749.png"
+        }
+    },
+    {
+        "team": {
+            "id": 6778,
+            "name": "Queen's Park",
+            "code": "QUE",
+            "country": "Scotland",
+            "founded": 1867,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/6778.png"
+        },
+        "venue": {
+            "id": 2617,
+            "name": "Hampden Park",
+            "address": "Letherby Drive",
+            "city": "Glasgow",
+            "capacity": 52500,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/2617.png"
+        }
+    },
+    {
+        "team": {
             "id": 939,
             "name": "Western Sydney Wanderers",
             "code": "WSW",
@@ -14817,326 +15017,6 @@
             "capacity": 16764,
             "surface": "grass",
             "image": "https://media.api-sports.io/football/venues/150.png"
-        }
-    },
-    {
-        "team": {
-            "id": 555,
-            "name": "CSKA Moscow",
-            "code": "CSK",
-            "country": "Russia",
-            "founded": 1911,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/555.png"
-        },
-        "venue": {
-            "id": 1333,
-            "name": "VEB Arena",
-            "address": "3-ya Peschanaya ul.",
-            "city": "Moskva",
-            "capacity": 30000,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/1333.png"
-        }
-    },
-    {
-        "team": {
-            "id": 558,
-            "name": "Spartak Moscow",
-            "code": "SPA",
-            "country": "Russia",
-            "founded": 1922,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/558.png"
-        },
-        "venue": {
-            "id": 20743,
-            "name": "Lukoil Arena",
-            "address": "Volokolamskoye shosse, Tushino",
-            "city": "Moskva",
-            "capacity": 45360,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/20743.png"
-        }
-    },
-    {
-        "team": {
-            "id": 596,
-            "name": "Zenit",
-            "code": "ZEN",
-            "country": "Russia",
-            "founded": 1925,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/596.png"
-        },
-        "venue": {
-            "id": 20984,
-            "name": "Gazprom Arena",
-            "address": "Futbolnaya al.",
-            "city": "St. Petersburg",
-            "capacity": 68134,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/20984.png"
-        }
-    },
-    {
-        "team": {
-            "id": 597,
-            "name": "Lokomotiv",
-            "code": "LOK",
-            "country": "Russia",
-            "founded": 1923,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/597.png"
-        },
-        "venue": {
-            "id": 1327,
-            "name": "RZD Arena",
-            "address": "ul. Bol&apos;shaya Cherkizovskaya 125",
-            "city": "Moskva",
-            "capacity": 28800,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/1327.png"
-        }
-    },
-    {
-        "team": {
-            "id": 621,
-            "name": "FC Krasnodar",
-            "code": "KRA",
-            "country": "Russia",
-            "founded": 2007,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/621.png"
-        },
-        "venue": {
-            "id": 1338,
-            "name": "Stadion FK Krasnodar",
-            "address": "ul. Vostochno-Kruglikovskaya 126",
-            "city": "Krasnodar",
-            "capacity": 35549,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/1338.png"
-        }
-    },
-    {
-        "team": {
-            "id": 779,
-            "name": "FC Rostov",
-            "code": "ROS",
-            "country": "Russia",
-            "founded": 1930,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/779.png"
-        },
-        "venue": {
-            "id": 1339,
-            "name": "Rostov Arena",
-            "address": "ul. Levoberezhnaya",
-            "city": "Rostov-na-Donu",
-            "capacity": 45000,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/1339.png"
-        }
-    },
-    {
-        "team": {
-            "id": 1079,
-            "name": "Krylia Sovetov",
-            "code": "KRY",
-            "country": "Russia",
-            "founded": 1942,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/1079.png"
-        },
-        "venue": {
-            "id": 20983,
-            "name": "Solidarnost Samara Arena",
-            "address": "ul. Dal&apos;nyaya",
-            "city": "Samara",
-            "capacity": 44918,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/20983.png"
-        }
-    },
-    {
-        "team": {
-            "id": 1080,
-            "name": "FC Orenburg",
-            "code": "GAZ",
-            "country": "Russia",
-            "founded": null,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/1080.png"
-        },
-        "venue": {
-            "id": 1342,
-            "name": "Stadion Gazovik",
-            "address": "Tsvetnoy bulvar&apos; 31",
-            "city": "Rostoshi",
-            "capacity": 10046,
-            "surface": "artificial turf",
-            "image": "https://media.api-sports.io/football/venues/1342.png"
-        }
-    },
-    {
-        "team": {
-            "id": 1083,
-            "name": "Rubin",
-            "code": "RUB",
-            "country": "Russia",
-            "founded": 1958,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/1083.png"
-        },
-        "venue": {
-            "id": 19911,
-            "name": "Ak Bars Arena",
-            "address": "Prospekt Husaina Yamasheva 115a",
-            "city": "Kazan&apos;",
-            "capacity": 45105,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/19911.png"
-        }
-    },
-    {
-        "team": {
-            "id": 1085,
-            "name": "Akhmat",
-            "code": "TER",
-            "country": "Russia",
-            "founded": 1958,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/1085.png"
-        },
-        "venue": {
-            "id": 1353,
-            "name": "Akhmat Arena",
-            "address": "Zhukavskogo per. 9, Staraya Sunzha",
-            "city": "Groznyi",
-            "capacity": 30597,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/1353.png"
-        }
-    },
-    {
-        "team": {
-            "id": 1088,
-            "name": "Dynamo",
-            "code": "DYN",
-            "country": "Russia",
-            "founded": 1923,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/1088.png"
-        },
-        "venue": {
-            "id": 1334,
-            "name": "VTB Arena",
-            "address": "Leningradskiy pr., 36",
-            "city": "Moskva",
-            "capacity": 26716,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/1334.png"
-        }
-    },
-    {
-        "team": {
-            "id": 1993,
-            "name": "Fakel",
-            "code": "FAK",
-            "country": "Russia",
-            "founded": 1947,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/1993.png"
-        },
-        "venue": {
-            "id": 1336,
-            "name": "Central'nyi Stadion Profsoyuzov",
-            "address": "ul. Studencheskaya 17",
-            "city": "Voronezh",
-            "capacity": 31793,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/1336.png"
-        }
-    },
-    {
-        "team": {
-            "id": 1994,
-            "name": "Khimki",
-            "code": "KHI",
-            "country": "Russia",
-            "founded": 1997,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/1994.png"
-        },
-        "venue": {
-            "id": 18629,
-            "name": "Arena Khimki",
-            "address": "ul. Kirova, dom 24",
-            "city": "Khimki",
-            "capacity": 18636,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/18629.png"
-        }
-    },
-    {
-        "team": {
-            "id": 2011,
-            "name": "Nizhny Novgorod",
-            "code": null,
-            "country": "Russia",
-            "founded": 2015,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/2011.png"
-        },
-        "venue": {
-            "id": 2835,
-            "name": "Stadion Nizhny Novgorod",
-            "address": "ul. Dolzhanskaya",
-            "city": "Nizhniy Novgorod",
-            "capacity": 44899,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/2835.png"
-        }
-    },
-    {
-        "team": {
-            "id": 6786,
-            "name": "Akron",
-            "code": null,
-            "country": "Russia",
-            "founded": null,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/6786.png"
-        },
-        "venue": {
-            "id": 20983,
-            "name": "Solidarnost Samara Arena",
-            "address": "ul. Dal&apos;nyaya",
-            "city": "Samara",
-            "capacity": 44918,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/20983.png"
-        }
-    },
-    {
-        "team": {
-            "id": 6813,
-            "name": "Makhachkala",
-            "code": null,
-            "country": "Russia",
-            "founded": 2019,
-            "national": false,
-            "logo": "https://media.api-sports.io/football/teams/6813.png"
-        },
-        "venue": {
-            "id": 20985,
-            "name": "Anzhi Arena",
-            "address": null,
-            "city": "Kaspiysk",
-            "capacity": 31000,
-            "surface": "grass",
-            "image": "https://media.api-sports.io/football/venues/20985.png"
         }
     },
     {
@@ -17297,6 +17177,326 @@
             "capacity": 6000,
             "surface": "grass",
             "image": "https://media.api-sports.io/football/venues/5044.png"
+        }
+    },
+    {
+        "team": {
+            "id": 566,
+            "name": "Ludogorets",
+            "code": "LUD",
+            "country": "Bulgaria",
+            "founded": 1945,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/566.png"
+        },
+        "venue": {
+            "id": 10547,
+            "name": "Huvepharma Arena",
+            "address": "bul. Severen",
+            "city": "Razgrad",
+            "capacity": 10422,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/10547.png"
+        }
+    },
+    {
+        "team": {
+            "id": 634,
+            "name": "Botev Plovdiv",
+            "code": "BOT",
+            "country": "Bulgaria",
+            "founded": null,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/634.png"
+        },
+        "venue": {
+            "id": 19922,
+            "name": "Stadion Hristo Botev",
+            "address": "bul. Iztochen 10",
+            "city": "Plovdiv",
+            "capacity": 22000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/19922.png"
+        }
+    },
+    {
+        "team": {
+            "id": 646,
+            "name": "Levski Sofia",
+            "code": "LEV",
+            "country": "Bulgaria",
+            "founded": 1914,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/646.png"
+        },
+        "venue": {
+            "id": 297,
+            "name": "Vivacom Arena - Georgi Asparuhov",
+            "address": "ul. Todorini kukli 47",
+            "city": "Sofia",
+            "capacity": 29200,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/297.png"
+        }
+    },
+    {
+        "team": {
+            "id": 851,
+            "name": "Cherno More Varna",
+            "code": "CHE",
+            "country": "Bulgaria",
+            "founded": 1945,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/851.png"
+        },
+        "venue": {
+            "id": 286,
+            "name": "Stadion Ticha",
+            "address": "ul. Nikola Vaptsarov 9",
+            "city": "Varna",
+            "capacity": 12500,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/286.png"
+        }
+    },
+    {
+        "team": {
+            "id": 853,
+            "name": "CSKA Sofia",
+            "code": "CSK",
+            "country": "Bulgaria",
+            "founded": 1948,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/853.png"
+        },
+        "venue": {
+            "id": 288,
+            "name": "Stadion B\u00e2lgarska Armija",
+            "address": "bul. Dragan Tzankov 3, Borisova Gradina",
+            "city": "Sofia",
+            "capacity": 22015,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/288.png"
+        }
+    },
+    {
+        "team": {
+            "id": 854,
+            "name": "Slavia Sofia",
+            "code": "SLA",
+            "country": "Bulgaria",
+            "founded": 1913,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/854.png"
+        },
+        "venue": {
+            "id": 18616,
+            "name": "Stadion Aleksandar Shalamanov",
+            "address": "ul. Koloman 1, Ovcha Kupel",
+            "city": "Sofia",
+            "capacity": 25556,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/18616.png"
+        }
+    },
+    {
+        "team": {
+            "id": 856,
+            "name": "Septemvri Sofia",
+            "code": null,
+            "country": "Bulgaria",
+            "founded": 1944,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/856.png"
+        },
+        "venue": {
+            "id": 304,
+            "name": "Stadion Dragalevtsi",
+            "address": "Bulevard Cherni vrah",
+            "city": "Sofia",
+            "capacity": 2000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/304.png"
+        }
+    },
+    {
+        "team": {
+            "id": 857,
+            "name": "Beroe",
+            "code": "BER",
+            "country": "Bulgaria",
+            "founded": 1916,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/857.png"
+        },
+        "venue": {
+            "id": 283,
+            "name": "Stadion Beroe",
+            "address": "ul. Georgi Kyumyurev 10",
+            "city": "Stara Zagora",
+            "capacity": 12128,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/283.png"
+        }
+    },
+    {
+        "team": {
+            "id": 858,
+            "name": "Lokomotiv Plovdiv",
+            "code": "PLO",
+            "country": "Bulgaria",
+            "founded": 1936,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/858.png"
+        },
+        "venue": {
+            "id": 298,
+            "name": "Stadion Lokomotiv",
+            "address": "Park Lauta",
+            "city": "Plovdiv",
+            "capacity": 13800,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/298.png"
+        }
+    },
+    {
+        "team": {
+            "id": 859,
+            "name": "Botev Vratsa",
+            "code": "VRA",
+            "country": "Bulgaria",
+            "founded": 1921,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/859.png"
+        },
+        "venue": {
+            "id": 285,
+            "name": "Stadion Hristo Botev",
+            "address": "ul. Sportna",
+            "city": "Vratsa",
+            "capacity": 32000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/285.png"
+        }
+    },
+    {
+        "team": {
+            "id": 1416,
+            "name": "Lokomotiv Sofia",
+            "code": null,
+            "country": "Bulgaria",
+            "founded": 2015,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/1416.png"
+        },
+        "venue": {
+            "id": 1883,
+            "name": "Stadion Lokomotiv",
+            "address": "bul. Rozhen 23",
+            "city": "Sofia",
+            "capacity": 7000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/1883.png"
+        }
+    },
+    {
+        "team": {
+            "id": 1426,
+            "name": "CSKA 1948",
+            "code": null,
+            "country": "Bulgaria",
+            "founded": 2016,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/1426.png"
+        },
+        "venue": {
+            "id": 296,
+            "name": "Stadion Vitosha",
+            "address": "ul. Sportist",
+            "city": "Bistrica",
+            "capacity": 2500,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/296.png"
+        }
+    },
+    {
+        "team": {
+            "id": 1430,
+            "name": "Arda Kardzhali",
+            "code": null,
+            "country": "Bulgaria",
+            "founded": 1924,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/1430.png"
+        },
+        "venue": {
+            "id": 291,
+            "name": "Arena Arda",
+            "address": "bul. Belomorski",
+            "city": "Kardzhali",
+            "capacity": 15000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/291.png"
+        }
+    },
+    {
+        "team": {
+            "id": 4659,
+            "name": "Hebar 1918",
+            "code": null,
+            "country": "Bulgaria",
+            "founded": 2015,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/4659.png"
+        },
+        "venue": {
+            "id": 3511,
+            "name": "Stadion Georgi Benkovski",
+            "address": "bul. Georgi Benkovski",
+            "city": "Pazardzhik",
+            "capacity": 13128,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/3511.png"
+        }
+    },
+    {
+        "team": {
+            "id": 4660,
+            "name": "Spartak Varna",
+            "code": "SPA",
+            "country": "Bulgaria",
+            "founded": 1918,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/4660.png"
+        },
+        "venue": {
+            "id": 3512,
+            "name": "Stadion Spartak",
+            "address": "ul. Prilep",
+            "city": "Varna",
+            "capacity": 12000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/3512.png"
+        }
+    },
+    {
+        "team": {
+            "id": 17306,
+            "name": "Levski Krumovgrad",
+            "code": null,
+            "country": "Bulgaria",
+            "founded": null,
+            "national": false,
+            "logo": "https://media.api-sports.io/football/teams/17306.png"
+        },
+        "venue": {
+            "id": 19902,
+            "name": "Nikola Shterev-Starika Complex",
+            "address": "ul. Komatevsko shose, kv. Komatevo",
+            "city": "Plovdiv",
+            "capacity": 4000,
+            "surface": "grass",
+            "image": "https://media.api-sports.io/football/venues/19902.png"
         }
     }
 ]

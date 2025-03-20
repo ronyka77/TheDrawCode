@@ -35,6 +35,11 @@ np.random.seed(random_seed)
 tf.random.set_seed(random_seed)
 os.environ['PYTHONHASHSEED'] = str(random_seed)
 
+# Restrict parallel threads across various libraries
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
+
 def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
     """
     Initialize the meta learner based on the provided meta_learner_type.
@@ -53,7 +58,7 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
         meta_learner = XGBClassifier(
             tree_method='hist',  # CPU-optimized
             device='cpu',
-            n_jobs=-1,
+            n_jobs=4,
             objective='binary:logistic',
             learning_rate=0.05,
             n_estimators=200,  # Reduced from 500
@@ -76,7 +81,7 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
         meta_learner = LGBMClassifier(
             objective='binary',
             boosting_type='gbdt',
-            n_jobs=-1,
+            n_jobs=4,
             random_state=19,
             device='cpu',
             bagging_fraction=0.7,
@@ -107,7 +112,7 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
             tol=1e-4,
             random_state=42,
             class_weight='balanced',
-            n_jobs=-1
+            n_jobs=4
         )
         
         logger.info("Logistic Regression meta-learner initialized with L2 regularization")
@@ -123,7 +128,7 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
             tol=1e-4,
             random_state=42,
             class_weight='balanced',
-            n_jobs=-1
+            n_jobs=4
         )
         
         logger.info("LogisticRegressionCV meta-learner initialized with auto C selection")
@@ -401,7 +406,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
 def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                             eval_meta_features: Optional[np.ndarray] = None, 
                             eval_meta_targets: Optional[np.ndarray] = None,
-                            meta_learner_type='xgb', n_trials=2000, timeout=3600, 
+                            meta_learner_type='xgb', n_trials=2000, timeout=900000, 
                             target_precision=0.5, min_recall=0.25):
     """
     Hypertune meta-learner using Optuna and optimize threshold for precision/recall balance.
@@ -435,23 +440,23 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             base_params = {
                 'tree_method': 'hist',
                 'objective': 'binary:logistic',
-                'n_jobs': -1,
+                'n_jobs': 4,
                 'eval_metric': ['aucpr', 'error', 'logloss'],
                 'device': 'cpu',
                 'random_state': 19
             }
             
             params = {
-                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.2, log=True),
-                'max_depth': trial.suggest_int('max_depth', 4, 10),
-                'min_child_weight': trial.suggest_int('min_child_weight', 1, 200),
-                'gamma': trial.suggest_float('gamma', 0.1, 3.0, step=0.1),
-                'subsample': trial.suggest_float('subsample', 0.55, 0.9, step=0.01),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.55, 0.9, step=0.01),
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.01, 20.0, log=True),
-                'reg_lambda': trial.suggest_float('reg_lambda', 1.00, 20.0, log=True),
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 6.0, step=0.1),
-                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 200, 1000, step=20)
+                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.06, step=0.005),
+                'max_depth': trial.suggest_int('max_depth', 5, 10, step=1),
+                'min_child_weight': trial.suggest_int('min_child_weight', 200, 600, step=10),
+                'gamma': trial.suggest_float('gamma', 0.02, 4.0, step=0.02),
+                'subsample': trial.suggest_float('subsample', 0.58, 0.95, step=0.01),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.58, 0.90, step=0.01),
+                'reg_alpha': trial.suggest_float('reg_alpha', 10.0, 70.0, step=0.1),
+                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0, step=0.01),
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 4.5, step=0.05),
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 400, 1200, step=20)
             }
             params.update(base_params)
             meta_learner = XGBClassifier(**params)
@@ -461,27 +466,27 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             import lightgbm as lgb
             base_params = {
                 'objective': 'binary',
-                'metric': ['binary_logloss', 'average_precision', 'auc'],
-                'n_jobs': -1,
+                'metric': ['binary_logloss', 'auc'],
+                'n_jobs': 4,
                 'random_state': 19,
                 'device': 'cpu',
                 'verbose': -1
             }
             params = {
-                'bagging_fraction': trial.suggest_float('bagging_fraction', 0.5, 0.7, step=0.01),
-                'bagging_freq': trial.suggest_int('bagging_freq', 5, 15),
-                'cat_smooth': trial.suggest_float('cat_smooth', 1.0, 20.0, step=0.1),
-                'feature_fraction': trial.suggest_float('feature_fraction', 0.5, 0.7, step=0.01),
-                'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.1, step=0.01),
-                'max_bin': trial.suggest_int('max_bin', 500, 800, step=10),
-                'max_depth': trial.suggest_int('max_depth', 7, 11),
-                'min_child_samples': trial.suggest_int('min_child_samples', 250, 350),
-                'min_split_gain': trial.suggest_float('min_split_gain', 0.1, 0.3, step=0.01),
-                'num_leaves': trial.suggest_int('num_leaves', 80, 100),
-                'path_smooth': trial.suggest_float('path_smooth', 0.4, 0.5),
-                'reg_alpha': trial.suggest_float('reg_alpha', 1.0, 6.0, step=0.1),
-                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 2.0, step=0.01),
-                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 200, 1000, step=20)
+                'bagging_fraction': trial.suggest_float('bagging_fraction', 0.55, 0.60, step=0.005),
+                'bagging_freq': trial.suggest_int('bagging_freq', 6, 10, step=1),
+                'cat_smooth': trial.suggest_float('cat_smooth', 10.0, 30.0, step=0.1),
+                'feature_fraction': trial.suggest_float('feature_fraction', 0.55, 0.70, step=0.01),
+                'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.14, step=0.005),
+                'max_bin': trial.suggest_int('max_bin', 200, 700, step=10),
+                'max_depth': trial.suggest_int('max_depth', 4, 10, step=1),
+                'min_child_samples': trial.suggest_int('min_child_samples', 150, 320, step=10),
+                'min_split_gain': trial.suggest_float('min_split_gain', 0.10, 0.20, step=0.01),
+                'num_leaves': trial.suggest_int('num_leaves', 50, 150, step=5),
+                'path_smooth': trial.suggest_float('path_smooth', 0.005, 0.49, step=0.005),
+                'reg_alpha': trial.suggest_float('reg_alpha', 1.0, 11.0, step=0.1),
+                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 11.0, step=0.1),
+                'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 300, 700, step=10)
             }
             params.update(base_params)
             meta_learner = LGBMClassifier(**params)
@@ -532,7 +537,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             from sklearn.linear_model import SGDClassifier
             base_params = {
                 'random_state': 19,
-                'n_jobs': -1
+                'n_jobs': 4
             }
             params = {
                 'loss': 'modified_huber',
@@ -678,7 +683,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         base_params = {
             'tree_method': 'hist',
             'objective': 'binary:logistic',
-            'n_jobs': -1,
+            'n_jobs': 4,
             'eval_metric': ['aucpr', 'logloss', 'error'],
             'device': 'cpu',
             'random_state': 19
@@ -687,7 +692,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         base_params = {
             'objective': 'binary',
             'boosting_type': 'gbdt',
-            'n_jobs': -1,
+            'n_jobs': 4,
             'random_state': 19,
             'device': 'cpu'
         }
@@ -705,7 +710,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     elif meta_learner_type == 'sgd':
         base_params = {
             'random_state': 19,
-            'n_jobs': -1
+            'n_jobs': 4
         }
     elif meta_learner_type == 'bayesian':
         # No base params needed for Bayesian meta-learner

@@ -297,7 +297,7 @@ class ApiFootball:
             try:
                 fixture_date_str = self.fixtures_collection.find_one({"fixture_id": fixture_id}, {"date": 1})["date"]
                 fixture_date = datetime.strptime(fixture_date_str, '%Y-%m-%d %H:%M')
-                if fixture_date < datetime(2025, 2, 15):
+                if fixture_date < datetime(2025, 3, 15):
                     self.fixtures_collection.delete_one({"fixture_id": fixture_id})
                     self.logger.info(f"Fixture {fixture_id} dropped from MongoDB due to date constraint.")
                     return {}

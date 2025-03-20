@@ -1,24 +1,38 @@
 """
-CatBoost-based model for predicting soccer match draws.
+XGBoost Model for Soccer Draw Prediction
 
-This module implements a CatBoost-based model for predicting soccer match draws,
-including model creation, training, hyperparameter optimization, and MLflow integration.
+This module implements a XGBoost-based model for predicting soccer match draws.
+It includes functionality for model creation, training, hyperparameter optimization,
+threshold tuning, and MLflow integration for experiment tracking.
+
+The implementation focuses on high precision while maintaining a minimum recall threshold.
 """
 
 import os
 import sys
 import json
+import pickle
 import random
-import time
+import logging
+import warnings
 import numpy as np
 import pandas as pd
-import catboost as cb
-from catboost import Pool
-import optuna
+import xgboost as xgb
 import mlflow
-from pathlib import Path
-from typing import Dict, Union, Any, List, Tuple
+import optuna
+from optuna.integration import XGBoostPruningCallback
+from sklearn.metrics import (
+    precision_score, recall_score, f1_score, roc_auc_score,
+    confusion_matrix, classification_report, precision_recall_curve
+)
 from datetime import datetime
+import time
+import gc
+from pathlib import Path
+from typing import Any, Dict, Tuple
+import sklearn
+from sklearn.ensemble import RandomForestClassifier
+
 
 # Add project root to Python path
 try:
@@ -34,40 +48,38 @@ except Exception as e:
     sys.path.append(os.getcwd())
     print(f"Current directory: {os.getcwd()}")
 
-# Import logger
 from utils.logger import ExperimentLogger
-experiment_name = "catboost_soccer_prediction"
+experiment_name = "random_forest_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
+from utils.dynamic_sampler import DynamicTPESampler
 from utils.create_evaluation_set import setup_mlflow_tracking
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
 # Import shared utility functions
 from models.StackedEnsemble.shared.hypertuner_utils import (
-    predict, predict_proba, evaluate, optimize_threshold, calculate_feature_importance,
-    DEFAULT_MIN_RECALL
+    predict, predict_proba, evaluate, optimize_threshold, calculate_feature_importance
 )
 from models.StackedEnsemble.shared.data_loader import DataLoader
 
 # Global settings
 min_recall = 0.20  # Minimum acceptable recall
-n_trials = 1000  # Number of hyperparameter optimization trials as in notebook
+n_trials = 100  # Number of hyperparameter optimization trials as in notebook
+# Get current versions
+sklearn_version = sklearn.__version__
 
-# Base parameters as in the notebook
-base_params = {
-    'loss_function': 'Logloss',
-    'eval_metric': 'AUC',                        # Primary metric
-    'custom_metric': ['Precision', 'Recall'],
-    'thread_count': 4,
-    'random_seed': 19,
-    'task_type': 'CPU'
-}
-
+# Create explicit pip requirements list
 pip_requirements = [
-    f'catboost=={cb.__version__}',
-    f'mlflow=={mlflow.__version__}'
+    f"scikit-learn=={sklearn_version}",
+    f"mlflow=={mlflow.__version__}"
 ]
 
+# Update base parameters for RandomForest
+base_params = {
+    'random_state': 19,
+    'n_jobs': 4,
+    'verbose': 0
+}
 # Set fixed seed and hash seed for determinism
 SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
@@ -81,100 +93,77 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 
 def load_hyperparameter_space():
     """
-    Define the hyperparameter space for CatBoost model tuning.
-    
-    Returns:
-        dict: Hyperparameter space configuration
+    Define hyperparameter space for RandomForest tuning.
     """
-    try:
-        # Define hyperparameter space directly as in notebook
-        hyperparameter_space = {
-            'learning_rate': {
-                'type': 'float',
-                'low': 0.001,
-                'high': 0.1,
-                'log': True
-            },
-            'depth': {
-                'type': 'int',
-                'low': 4,
-                'high': 10,
-                'step': 1
-            },
-            'min_data_in_leaf': {
-                'type': 'int', 
-                'low': 10,
-                'high': 100,
-                'step': 5
-            },
-            'subsample': {
-                'type': 'float',
-                'low': 0.55,
-                'high': 0.95,
-                'step': 0.05
-            },
-            'colsample_bylevel': {
-                'type': 'float',
-                'low': 0.3,
-                'high': 0.7,
-                'step': 0.1
-            },
-            'reg_lambda': {
-                'type': 'float',
-                'low': 0.5,
-                'high': 10.0,
-                'log': True
-            },
-            'leaf_estimation_iterations': {
-                'type': 'int',
-                'low': 1,
-                'high': 10,
-                'step': 1
-            },
-            'bagging_temperature': {
-                'type': 'float',
-                'low': 1.0,
-                'high': 7.0,
-                'step': 0.1
-            },
-            'scale_pos_weight': {
-                'type': 'float',
-                'low': 2.0,
-                'high': 5.0,
-                'step': 0.1
-            },
-            'early_stopping_rounds': {
-                'type': 'int',
-                'low': 30,
-                'high': 500,
-                'step': 10
-            }
+    hyperparameter_space = {
+        'n_estimators': {
+            'type': 'int',
+            'low': 100,
+            'high': 1000,
+            'step': 10
+        },
+        'max_depth': {
+            'type': 'int',
+            'low': 4,
+            'high': 15,
+            'step': 1
+        },
+        'min_samples_split': {
+            'type': 'int',
+            'low': 2,
+            'high': 40,
+            'step': 2
+        },
+        'min_samples_leaf': {
+            'type': 'int',
+            'low': 2,
+            'high': 40,
+            'step': 2
+        },
+        'max_features': {
+            'type': 'float',
+            'low': 0.1,
+            'high': 1.0,
+            'step': 0.1
+        },
+        'class_weight': {
+            'type': 'float',
+            'low': 1.8,
+            'high': 5.0,
+            'step': 0.1
         }
-        return hyperparameter_space
-    except Exception as e:
-        logger.error(f"Error creating hyperparameter space: {str(e)}")
-        return None
+    }
+    return hyperparameter_space
 
 def create_model(model_params):
     """
-    Create and configure CatBoost model instance.
+    Create and configure RandomForest model instance.
     
     Args:
         model_params (dict): Model parameters
         
     Returns:
-        cb.CatBoostClassifier: Configured CatBoost model
+        RandomForestClassifier: Configured RandomForest model
     """
-    if model_params is None:
-        model_params = base_params
-    
-    model_params.update(base_params)
-    
-    return cb.CatBoostClassifier(**model_params)
+    try:
+        params = base_params.copy()
+        params.update(model_params)
+        
+        # Convert class_weight parameter to dictionary format
+        if 'class_weight' in params:
+            class_weight_value = params.pop('class_weight')
+            params['class_weight'] = {0: 1.0, 1: class_weight_value}
+        
+        model = RandomForestClassifier(**params)
+        return model
+        
+    except Exception as e:
+        logger.error(f"Error creating RandomForest model: {str(e)}")
+        raise
 
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
-    Train a CatBoost model with early stopping and threshold optimization.
+    Train a RandomForest model and optimize threshold.
     
     Args:
         X_train: Training features
@@ -189,37 +178,33 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         tuple: (trained_model, metrics)
     """
     try:
-        X_combined = pd.concat([X_train, X_test])
-        y_combined = pd.concat([y_train, y_test])
-        # Extract early stopping rounds if present
-        early_stopping_rounds = model_params.pop('early_stopping_rounds', 100)
-        
-        # Create model with remaining parameters
         model = create_model(model_params)
         
-        # Create eval set for early stopping
-        eval_set = Pool(X_eval, y_eval)
+        # Combine training and validation data
+        X_combined = pd.concat([X_train, X_test], axis=0)
+        y_combined = pd.concat([y_train, y_test], axis=0)
         
-        # Fit model with early stopping
-        model.fit(
-            X_combined, y_combined,
-            eval_set=eval_set,
-            early_stopping_rounds=early_stopping_rounds,    
-            verbose=False
-        )
+        # Reset indexes
+        X_combined.reset_index(drop=True, inplace=True)
+        y_combined.reset_index(drop=True, inplace=True)
+        # Fit model
+        model.fit(X_combined, y_combined)
         
         # Get validation predictions and optimize threshold
-        best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
+        best_threshold, metrics = optimize_threshold(
+            model, X_eval, y_eval, min_recall=min_recall
+        )
         
         return model, metrics
         
     except Exception as e:
-        logger.error(f"Error training CatBoost model: {str(e)}")
+        logger.error(f"Error training RandomForest model: {str(e)}")
         raise
 
 def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
     """
     Run hyperparameter optimization with Optuna.
+    Added to match notebook implementation.
     
     Args:
         X_train: Training features
@@ -277,6 +262,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
                             param_config['low'],
                             param_config['high']
                         )
+            
             # Train model and get metrics
             model, metrics = train_model(
                 X_train, y_train,
@@ -287,12 +273,9 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             
             recall = metrics.get('recall', 0.0)
             precision = metrics.get('precision', 0.0)
+            
             # Optimize for precision while maintaining minimum recall
             score = precision if recall >= min_recall else 0.0
-            
-            logger.info(f"Trial {trial.number}:")
-            logger.info(f"  Params: {params}")
-            logger.info(f"  Score: {score}")
             
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
@@ -303,42 +286,63 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             return 0.0
     
     try:
-        study = optuna.create_study(
-            study_name='catboost_optimization',
-            direction='maximize',
-            sampler=optuna.samplers.RandomSampler(seed=19)
+        random_sampler = optuna.samplers.RandomSampler(
+            seed=19
         )
-        # --- New: Initialize and add a callback function ---
+        study = optuna.create_study(
+            study_name='xgboost_optimization',
+            direction='maximize',
+            sampler=random_sampler
+        )
+        
+        # Optimize
         best_score = -float('inf')  # Initialize with worst possible score
         best_params = {}
-        top_trials = []  # To record top trials
+        top_trials = []
 
         def callback(study, trial):
-            nonlocal best_score, best_params, top_trials
+            nonlocal best_score
+            nonlocal best_params
+            nonlocal top_trials
             logger.info(f"Current best score: {best_score:.4f}")
             if trial.value > best_score:
                 best_score = trial.value
                 best_params = trial.params
                 logger.info(f"New best score found in trial {trial.number}: {best_score:.4f}")
-            # Record and log top trials every few iterations
+            # Create a record for the current trial
             current_run = (trial.value, trial.params, trial.number)
+            
+            # Append the trial's record to the list
             top_trials.append(current_run)
+            
+            # Sort the list in descending order by score (trial.value)
             top_trials.sort(key=lambda x: x[0], reverse=True)
+            
+            # Keep only the top 10 best trials
             top_trials = top_trials[:10]
+            # Log top trials as a table every 10 trials
             if trial.number % 9 == 0:
-                logger.info("Top 10 trials so far:")
-                for rank, t in enumerate(top_trials, 1):
-                    logger.info(f"Rank {rank}, Trial {t[2]}, Score: {t[0]:.4f}, Params: {t[1]}")
+                table_header = "| Rank | Trial # | Score | Parameters |"
+                table_separator = "|------|---------|-------|------------|"
+                table_rows = [f"| {i+1} | {trial[2]} | {trial[0]:.4f} | {trial[1]} |" for i, trial in enumerate(top_trials)]
+                
+                logger.info("Top 10 trials:")
+                logger.info(table_header)
+                logger.info(table_separator)
+                for row in table_rows:
+                    logger.info(row)
             return best_score
-
+        
         study.optimize(
-            objective,
-            n_trials=n_trials,
-            timeout=1000000,
+            objective, 
+            n_trials=n_trials, 
+            timeout=900000,
             show_progress_bar=True,
             callbacks=[callback]
         )
+        
         best_params.update(base_params)
+        
         logger.info(f"Best trial value: {best_score}")
         logger.info(f"Best parameters found: {best_params}")
         return best_params
@@ -347,22 +351,14 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         logger.error(f"Error in hyperparameter optimization: {str(e)}")
         raise
 
-def hypertune_catboost(experiment_name: str):
+def hypertune_random_forest(experiment_name: str):
     """
     Main training function with MLflow tracking.
-    
-    Args:
-        experiment_name (str): Experiment name for MLflow tracking
-        
-    Returns:
-        tuple: (best_params, best_metrics)
     """
     try:
-        # Start MLflow run
-        with mlflow.start_run(run_name=f"catboost_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-            # Set tags
+        with mlflow.start_run(run_name=f"rf_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
             mlflow.set_tags({
-                "model_type": "catboost_base",
+                "model_type": "random_forest_base",
                 "training_mode": "global",
                 "cpu_only": True
             })
@@ -408,7 +404,11 @@ def hypertune_catboost(experiment_name: str):
                     if input_example[col].dtype.kind == 'i':
                         logger.info(f"Converting integer column '{col}' to float64 to handle potential missing values")
                         input_example[col] = input_example[col].astype('float64')
-
+            # Log best parameters to MLflow
+            logger.info("Logging best parameters to MLflow")
+            for param_name, param_value in best_params.items():
+                mlflow.log_param(param_name, param_value)
+                
             # Infer signature with proper handling for integer columns with potential missing values
             signature = mlflow.models.infer_signature(
                 input_example,
@@ -417,12 +417,12 @@ def hypertune_catboost(experiment_name: str):
             
             # Log warning about integer columns in signature
             logger.info("Model signature created - check logs for any warnings about integer columns")
-
-            mlflow.catboost.log_model(
+            # When saving model, use sklearn instead of xgboost
+            mlflow.sklearn.log_model(
                 model,
                 "model",
-                pip_requirements=pip_requirements,  # Explicitly set requirements
-                registered_model_name=f"catboost_{datetime.now().strftime('%Y%m%d_%H%M')}",
+                pip_requirements=pip_requirements,
+                registered_model_name=f"rf_{datetime.now().strftime('%Y%m%d_%H%M')}",
                 signature=signature
             )
             
@@ -437,7 +437,7 @@ def log_to_mlflow(model, metrics, params, experiment_name):
     Log trained model, metrics, and parameters to MLflow.
     
     Args:
-        model: Trained CatBoost model
+        model: Trained RandomForest model
         metrics: Model evaluation metrics
         params: Model parameters
         experiment_name: Experiment name
@@ -450,7 +450,7 @@ def log_to_mlflow(model, metrics, params, experiment_name):
         mlflow.set_experiment(experiment_name)
         
         # Start a new run
-        with mlflow.start_run(run_name=f"catboost_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
+        with mlflow.start_run(run_name=f"rf_final_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
             # Log parameters
             for param_name, param_value in params.items():
                 mlflow.log_param(param_name, param_value)
@@ -460,17 +460,20 @@ def log_to_mlflow(model, metrics, params, experiment_name):
                 mlflow.log_metric(metric_name, metric_value)
             
             # Log model
-            model_info = mlflow.catboost.log_model(
+            model_info = mlflow.sklearn.log_model(
                 model,
                 "model",
-                registered_model_name=f"catboost_{datetime.now().strftime('%Y%m%d_%H%M')}"
+                registered_model_name=f"rf_{datetime.now().strftime('%Y%m%d_%H%M')}"
             )
             
             # Log feature importance using the shared utility
-            importance_df = calculate_feature_importance(model)
+            importance_df = calculate_feature_importance(
+                model, 
+                feature_names=X_train.columns if hasattr(X_train, 'columns') else None
+            )
             
-            # Save to CSV and log as artifact
             if not importance_df.empty:
+                # Save to CSV and log as artifact
                 importance_path = "feature_importance.csv"
                 importance_df.to_csv(importance_path, index=False)
                 mlflow.log_artifact(importance_path)
@@ -486,7 +489,7 @@ def log_to_mlflow(model, metrics, params, experiment_name):
 
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
-    Train CatBoost model with focus on precision target.
+    Train RandomForest model with focus on precision target.
     
     Args:
         X_train: Training features
@@ -502,18 +505,18 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
     try:
         # Run hyperparameter tuning
         logger.info("Running hyperparameter tuning")
-        best_params, _ = hypertune_catboost(experiment_name)
+        best_params, _ = hypertune_random_forest(experiment_name)
         
         if not best_params:
             logger.warning("Hyperparameter tuning failed. Using default parameters.")
             best_params = base_params.copy()
             best_params.update({
-                'learning_rate': 0.05,
-                'depth': 6,
-                'min_data_in_leaf': 20,
-                'subsample': 0.8,
-                'colsample_bylevel': 0.8,
-                'reg_lambda': 1.0
+                'n_estimators': 500,
+                'max_depth': 20,
+                'min_samples_split': 2,
+                'min_samples_leaf': 1,
+                'max_features': 0.5,
+                'class_weight': 2.0
             })
         
         # Train final model with best parameters
@@ -539,7 +542,7 @@ def main():
     Main execution function.
     """
     try:
-        logger.info("Starting CatBoost model training")
+        logger.info("Starting RandomForest model training")
         
         # Import data at runtime to avoid global scope issues
         from models.StackedEnsemble.shared.data_loader import DataLoader
@@ -556,11 +559,10 @@ def main():
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
         
-        # Hyperparameter optimization
-        logger.info("Starting hyperparameter optimization")
-        best_params = hypertune_catboost(experiment_name)
-        logger.info(f"Best parameters: {best_params}")
+        current_params, current_metrics = hypertune_random_forest(experiment_name)
         
+        logger.info(f"Run completed with parameters: {current_params}")
+        logger.info(f"Run metrics: {current_metrics}")
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
 
