@@ -179,7 +179,9 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             cat_smooth=18.3,
             max_bin=250
         )
-        
+        self.xgb_features = import_selected_features_ensemble(model_type='xgb')
+        self.cat_features = import_selected_features_ensemble(model_type='cat')
+        self.lgb_features = import_selected_features_ensemble(model_type='lgbm')
         # Initialize the extra base model based on the selected type with reduced complexity
         self.extra_base_model_type = extra_base_model_type.lower()
         if self.extra_base_model_type == 'random_forest':

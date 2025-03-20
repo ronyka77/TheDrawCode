@@ -52,7 +52,7 @@ experiment_name = "xgboost_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
 from utils.dynamic_sampler import DynamicTPESampler
-from utils.create_evaluation_set import setup_mlflow_tracking
+from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
 # Import shared utility functions
@@ -115,7 +115,7 @@ def load_hyperparameter_space():
         'max_depth': {
             'type': 'int',
             'low': 5,                  # narrowed based on top trials (6-7)
-            'high': 10,
+            'high': 13,
             'step': 1
         },
         'min_child_weight': {
@@ -612,6 +612,10 @@ def main():
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
+        features = import_selected_features_ensemble(model_type='xgb')
+        X_train = X_train[features]
+        X_test = X_test[features]
+        X_eval = X_eval[features]
         
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")

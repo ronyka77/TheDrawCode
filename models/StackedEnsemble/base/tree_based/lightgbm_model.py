@@ -51,7 +51,7 @@ experiment_name = "lightgbm_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
 from utils.dynamic_sampler import DynamicTPESampler
-from utils.create_evaluation_set import setup_mlflow_tracking
+from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
 # Import shared utility functions
@@ -658,7 +658,10 @@ def main():
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        
+        features = import_selected_features_ensemble(model_type='lgbm')
+        X_train = X_train[features]
+        X_test = X_test[features]
+        X_eval = X_eval[features]
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")

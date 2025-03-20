@@ -39,7 +39,7 @@ from utils.logger import ExperimentLogger
 experiment_name = "catboost_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
-from utils.create_evaluation_set import setup_mlflow_tracking
+from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
 # Import shared utility functions
@@ -97,27 +97,27 @@ def load_hyperparameter_space():
             },
             'depth': {
                 'type': 'int',
-                'low': 4,
-                'high': 10,
+                'low': 6,
+                'high': 12,
                 'step': 1
             },
             'min_data_in_leaf': {
                 'type': 'int', 
                 'low': 10,
-                'high': 100,
+                'high': 130,
                 'step': 5
             },
             'subsample': {
                 'type': 'float',
                 'low': 0.55,
                 'high': 0.95,
-                'step': 0.05
+                'step': 0.02
             },
             'colsample_bylevel': {
                 'type': 'float',
                 'low': 0.3,
                 'high': 0.7,
-                'step': 0.1
+                'step': 0.02
             },
             'reg_lambda': {
                 'type': 'float',
@@ -127,26 +127,26 @@ def load_hyperparameter_space():
             },
             'leaf_estimation_iterations': {
                 'type': 'int',
-                'low': 1,
-                'high': 10,
-                'step': 1
+                'low': 2,
+                'high': 20,
+                'step': 2
             },
             'bagging_temperature': {
                 'type': 'float',
                 'low': 1.0,
-                'high': 7.0,
+                'high': 10.0,
                 'step': 0.1
             },
             'scale_pos_weight': {
                 'type': 'float',
-                'low': 2.0,
+                'low': 1.5,
                 'high': 5.0,
                 'step': 0.1
             },
             'early_stopping_rounds': {
                 'type': 'int',
-                'low': 30,
-                'high': 500,
+                'low': 100,
+                'high': 700,
                 'step': 10
             }
         }
@@ -549,7 +549,10 @@ def main():
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        
+        features = import_selected_features_ensemble(model_type='cat')
+        X_train = X_train[features]
+        X_test = X_test[features]
+        X_eval = X_eval[features]
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")

@@ -124,7 +124,7 @@ def load_hyperparameter_space():
             'type': 'float',
             'low': 0.1,
             'high': 1.0,
-            'step': 0.1
+            'step': 0.02
         },
         'class_weight': {
             'type': 'float',
@@ -132,6 +132,12 @@ def load_hyperparameter_space():
             'high': 5.0,
             'step': 0.1
         }
+        # 'ccp_alpha': {
+        #     'type': 'float',
+        #     'low': 0.002,
+        #     'high': 0.2,
+        #     'step': 0.002
+        # }
     }
     return hyperparameter_space
 

@@ -1059,11 +1059,9 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
     This function loads the pre-selected features for each model type from the
     selected_features_ensemble.json file. The features were selected based on
     composite importance scores from feature selection analysis.
-
     Args:
         model_type (Optional[str]): Specific model type to return features for.
             Options: 'xgb', 'cat', 'lgbm', 'all'. If None, returns all features.
-
     Returns:
         Union[dict, list]: If model_type is None, returns dictionary containing selected features 
             for each model type with keys:
@@ -1072,7 +1070,6 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
             - 'lgbm': List of features for LightGBM
         If model_type is 'all', returns list of features that are common to all models
         If model_type is specified ('xgb', 'cat', 'lgbm'), returns list of features for that model type.
-
     Raises:
         FileNotFoundError: If the JSON file cannot be found
         JSONDecodeError: If the JSON file is malformed
@@ -1473,82 +1470,6 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
             error_code=DataProcessingError.FILE_CORRUPTED
         )
         raise
-
-def get_selected_columns_from_mlflow_run(run_id: str) -> List[str]:
-    """Retrieve selected feature columns from a specific MLflow run.
-    This function queries MLflow to get the list of selected features that were
-    used in a particular model training run. The features are extracted from
-    the model signature in the MLmodel artifact file.
-    Args:
-        run_id (str): The MLflow run ID to query
-    Returns:
-        List[str]: List of selected feature column names
-    Raises:
-        ValueError: If the run ID is invalid or features cannot be retrieved
-        FileNotFoundError: If the MLmodel artifact is missing
-        Exception: For any other errors during retrieval
-    Example:
-        >>> columns = get_selected_columns_from_mlflow_run("1234567890abcdef")
-        >>> logger.info(f"Retrieved {len(columns)} features from MLflow run")
-    """
-    try:
-        # Initialize MLflow client
-        manager = MLFlowManager()
-        # Get artifact URI using MLFlowManager
-        artifact_uri = manager.get_run_artifact_uri(run_id)
-        
-        logger.info(f"Artifact URI: {artifact_uri}")
-        # Construct the path to MLmodel file, checking for nested model directories
-        artifact_path = Path(artifact_uri)
-        
-        # Find the model directory by checking for MLmodel file in subdirectories
-        model_dir = None
-        for item in artifact_path.iterdir():
-            if item.is_dir() and (item / "MLmodel").exists():
-                model_dir = item
-                break
-                
-        # If no model directory found, use the root artifact path
-        mlmodel_path = (model_dir / "MLmodel") if model_dir else (artifact_path / "MLmodel")
-        
-        # Read and parse the MLmodel file
-        with open(mlmodel_path, "r") as f:
-            mlmodel_content = f.read()
-            
-        # Extract the signature section
-        signature_start = mlmodel_content.find("signature:")
-        if signature_start == -1:
-            raise ValueError("No signature found in MLmodel file")
-            
-        # Extract the input schema
-        input_schema_start = mlmodel_content.find("inputs:", signature_start)
-        if input_schema_start == -1:
-            raise ValueError("No input schema found in signature")
-            
-        # Parse the feature names
-        features = []
-        for line in mlmodel_content[input_schema_start:].splitlines():
-            if "name:" in line:
-                feature_name = line.split("name:")[1].strip().strip('"')
-                features.append(feature_name)
-            elif "}" in line:  # End of input schema
-                break
-                
-        if not features:
-            raise ValueError("No features found in input schema")
-            
-        return features
-        
-    except mlflow.exceptions.MlflowException as e:
-        raise ValueError(f"Invalid MLflow run ID {run_id}: {str(e)}")
-    except FileNotFoundError:
-        raise FileNotFoundError(
-            f"MLmodel artifact not found in run {run_id}"
-        )
-    except Exception as e:
-        raise Exception(
-            f"Error retrieving features from MLflow run {run_id}: {str(e)}"
-        )
 
 if __name__ == "__main__":
     # update_api_training_data_for_draws()
