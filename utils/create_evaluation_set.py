@@ -1347,7 +1347,6 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
         if missing:
             logger.info(f"Missing required columns: {missing}", error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS)
             raise ValueError(f"Missing columns: {missing}")
-
         # Date handling
         if 'date_encoded' not in data.columns:
             try:
@@ -1357,7 +1356,6 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
             except Exception as e:
                 logger.info(f"Date encoding failed: {str(e)}", error_code=DataProcessingError.FEATURE_CREATION_FAILED)
                 raise
-
         # Optimized column dropping
         cols_to_drop = {'Date', 'Home', 'Away', 'league_name'}
         if cols_to_drop:

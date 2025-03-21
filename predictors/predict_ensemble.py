@@ -63,6 +63,11 @@ class DrawPredictor:
     def _validate_input(self, df: pd.DataFrame) -> None:
         """Validate input dataframe has all required columns."""
         missing_cols = set(self.required_features) - set(df.columns)
+        # Drop columns not in required features
+        extra_cols = set(df.columns) - set(self.required_features)
+        if extra_cols:
+            df.drop(columns=list(extra_cols), inplace=True, errors='ignore')
+            print(f"Dropped columns: {extra_cols}")
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
 
@@ -78,12 +83,15 @@ class DrawPredictor:
             # Ensure we have a 1D numpy array
             if not isinstance(pos_probas, np.ndarray):
                 pos_probas = np.array(pos_probas)
-        except AttributeError as e:
+        except Exception as e:
+            print(f"Error predicting: {e}")
             if "use_label_encoder" in str(e):
                 print("Attribute error due to missing 'use_label_encoder'. Patching model...")
                 setattr(self.model, "use_label_encoder", False)
                 predictions = self.model.predict(df)
                 pos_probas = self.model.predict_proba(df)
+        print(f"pos_probas: {pos_probas}")
+        print(f"predictions: {predictions}")
         
         results = {
             'predictions': predictions.tolist(),
@@ -176,7 +184,6 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         for col in numeric_columns:
             prediction_df[col] = prediction_df[col].astype('float64')
         
-            
         # Add column validation
         predictor._validate_input(prediction_df)
         
@@ -185,6 +192,8 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
             raise TypeError("prediction_data must be a pandas DataFrame")
         
         prediction_df = prediction_df[predictor.required_features]
+        results = predictor.predict(prediction_df)
+        print(f"Prediction successful...")
         # Merge prediction data with real scores to get is_draw column
         predict_df = prediction_df.merge(
             real_scores_df[['fixture_id', 'is_draw']],
@@ -196,8 +205,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         print(f"Merged prediction data with real scores and dropped NaN is_draw. Shape: {predict_df.shape}")
         # Make predictions first
         # threshold, best_metrics = predictor._find_optimal_threshold(predictor.model, predict_df, predict_df['is_draw'])
-        results = predictor.predict(prediction_df)
-        print(f"Prediction successful...")
+        
         # Add predictions to dataframe using .loc to avoid SettingWithCopyWarning
         prediction_df = prediction_df.copy()  # Create explicit copy
         prediction_df.loc[:, 'draw_predicted'] = results['predictions']
@@ -305,12 +313,8 @@ def main():
         # 'ee17cebf244e473ba8e661bcdd442d50', #KEEP 29, 31, 36
         # 'f20a9ef589a341bfb39941593e0af0ac', 
         # '5befa2bf2b5d4ae6866f3cc177c7b68f', #KEEP 30, 32
-        # '8abc7269aeba4436a5d23ed2bd13e4d4', 
-        # '79a717d959464732b4131d55bd29d2a0', #KEEP 29, 33, 36
         # '97207cdaab54477fa267d8cd29ce35e9', #31, 32, 34, 37
-        # 'ad904d636b114f589847f7223ea1d800', 
-        # '90d0e5ef4309482e8e96b702681bd306', #33, 34, 35
-        'a5766987a6db458cb0bc63b998302388', #
+        '403c8c5eaaf442898594e45e6998cff4', #33, 38
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()

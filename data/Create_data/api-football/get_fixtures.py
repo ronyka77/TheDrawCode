@@ -730,9 +730,9 @@ def main():
 
     api_football.delete_fixtures_not_in_leagues()
 
-    api_football.get_teams_for_leagues()
+    # api_football.get_teams_for_leagues()
 
-    api_football.get_teams_missing_venues()
+    # api_football.get_teams_missing_venues()
 
 if __name__ == "__main__":
     main()

@@ -39,7 +39,7 @@ logger = ExperimentLogger(experiment_name=experiment_name,
                             log_dir="./logs/ensemble_model_run_ensemble")
 from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 
-from models.ensemble.ensemble_model import EnsembleModel
+from models.ensemble.ensemble_model_0321 import EnsembleModel
 from models.ensemble.data_utils import balance_and_clean_dataset
 
 

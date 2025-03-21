@@ -120,36 +120,36 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.target_precision = target_precision  # For threshold tuning
         
         # Define base models with CPU-only settings with reduced complexity to avoid overfitting:
-        self.model_xgb = XGBClassifier( #37.6%
+        self.model_xgb = XGBClassifier( #37.8%
             tree_method='hist',  # Required for CPU-only training per project rules
             device='cpu',
             nthread=4,
             objective='binary:logistic',
             eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.05,
-            max_depth=12,
-            min_child_weight=390,
-            subsample=0.7,
-            colsample_bytree=0.79,
-            reg_alpha=48.5,
-            reg_lambda=5.73,
-            gamma=0.98,
-            early_stopping_rounds=660,
-            scale_pos_weight=2.72,
+            learning_rate=0.06,
+            max_depth=7,
+            min_child_weight=340,
+            subsample=0.69,
+            colsample_bytree=0.8699999999999999,
+            reg_alpha=20.8,
+            reg_lambda=2.6,
+            gamma=3.5,
+            early_stopping_rounds=860,
+            scale_pos_weight=3.04,
             seed=19
         )
-        self.model_cat = CatBoostClassifier( #36.7%
-            learning_rate=0.02,
-            depth=9,
-            min_data_in_leaf=70,
-            subsample=0.95,
-            colsample_bylevel=0.52,
-            reg_lambda=4.570117165999504,
+        self.model_cat = CatBoostClassifier( #38.1%
+            learning_rate=0.055,
+            depth=7,
+            min_data_in_leaf=165,
+            subsample=0.5900000000000001,
+            colsample_bylevel=0.5800000000000001,
+            reg_lambda=0.6540483398088304,
             leaf_estimation_iterations=12,
-            bagging_temperature=3.6,
-            scale_pos_weight=4.45,
-            early_stopping_rounds=420,
+            bagging_temperature=9.3,
+            scale_pos_weight=4.7,
+            early_stopping_rounds=700,
             loss_function='Logloss',
             eval_metric='AUC',
             custom_metric=['Precision', 'Recall'],
@@ -157,7 +157,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             thread_count=4,
             verbose=-1
         )
-        self.model_lgb = LGBMClassifier( #39.4%
+        self.model_lgb = LGBMClassifier( #40.5%
             objective='binary',
             metric=['binary_logloss', 'auc'],
             verbose=-1,
@@ -187,13 +187,13 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.extra_base_model_type = extra_base_model_type.lower()
         if self.extra_base_model_type == 'random_forest':
             self.model_extra = RandomForestClassifier(
-                n_estimators=180,
-                max_depth=13,
+                n_estimators=540,
+                max_depth=12,
                 min_samples_split=10,
-                min_samples_leaf=6,
-                max_features=0.4,
+                min_samples_leaf=32,
+                max_features=0.18,
                 bootstrap=True,
-                class_weight={0: 1.0, 1: 2.0},
+                class_weight={0: 1.0, 1: 2.2},
                 criterion='entropy',
                 random_state=19,
                 n_jobs=4
@@ -517,6 +517,10 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         # Prepare input data
         X_prepared = prepare_data(X, X.columns)
+        X_prepared_xgb = X_prepared[self.xgb_features]
+        X_prepared_cat = X_prepared[self.cat_features]
+        X_prepared_lgb = X_prepared[self.lgb_features]
+        X_prepared_rf = X_prepared[self.rf_features]
         # Generate predictions from base models
         # Use calibrated models if available
         xgb_model = self.model_xgb_calibrated if self.calibrate else self.model_xgb
@@ -532,11 +536,11 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             else:  # SVM case
                 p_extra = extra_model.predict_proba(X_scaled)[:, 1]
         else:
-            p_extra = extra_model.predict_proba(X_prepared)[:, 1]
+            p_extra = extra_model.predict_proba(X_prepared_rf)[:, 1]
         
-        p_xgb = xgb_model.predict_proba(X_prepared)[:, 1]
-        p_cat = cat_model.predict_proba(X_prepared)[:, 1]
-        p_lgb = lgb_model.predict_proba(X_prepared)[:, 1]
+        p_xgb = xgb_model.predict_proba(X_prepared_xgb)[:, 1]
+        p_cat = cat_model.predict_proba(X_prepared_cat)[:, 1]
+        p_lgb = lgb_model.predict_proba(X_prepared_lgb)[:, 1]
         # Create meta-features
         meta_features = create_meta_features(
             p_xgb, p_cat, p_lgb, p_extra, 
@@ -545,7 +549,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         # Get meta-learner predictions
         meta_probs = self.meta_learner.predict_proba(meta_features)
-        
         return meta_probs[:, 1]
 
     def predict(self, X) -> np.ndarray:

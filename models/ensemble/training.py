@@ -208,6 +208,7 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
     xgb_features = import_selected_features_ensemble(model_type='xgb')
     cat_features = import_selected_features_ensemble(model_type='cat')
     lgb_features = import_selected_features_ensemble(model_type='lgbm')
+    rf_features = import_selected_features_ensemble(model_type='rf')
     for model_name, model in models.items():
         logger.info(f"Training base model: {model_name}")
         try:
@@ -232,6 +233,7 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
             if model_name == 'extra':
                 # Apply scaling if needed (for MLP or SVM models)
                 if 'extra_scaler' in models:
+                    logger.info("Scaling training data")
                     scaler = models['extra_scaler']
                     X_train_scaled = scaler.transform(X_train_copy)
                     X_eval_scaled = scaler.transform(X_eval_copy)
@@ -249,7 +251,9 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
                     trained_models[model_name] = model
                     trained_models['extra_scaler'] = scaler
                 else:
-                    model.fit(X_train_copy, y_train_copy)
+                    X_train_rf = X_train_copy[rf_features]
+                    logger.info("Training Random Forest model")
+                    model.fit(X_train_rf, y_train_copy)
                     trained_models[model_name] = model
             elif model_name == 'xgb':
                 X_train_xgb = X_train_copy[xgb_features]
@@ -658,10 +662,13 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         except Exception as e:
             logger.error(f"Error in trial {trial.number}: {str(e)}")
             return -1.0
+    # Generate a seed based on the current time
+    random_seed = int(time.time())
+    random_sampler = optuna.samplers.RandomSampler(seed=random_seed)
     # Create and run Optuna study
     study = optuna.create_study(
         direction="maximize",
-        sampler = optuna.samplers.RandomSampler(seed=19)
+        sampler = random_sampler
     )
     logger.info(f"Running Optuna study with {n_trials} trials and {meta_learner_type} meta-learner")
     study.optimize(objective, n_trials=n_trials, timeout=timeout, show_progress_bar=True)

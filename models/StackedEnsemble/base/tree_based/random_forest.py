@@ -100,8 +100,8 @@ def load_hyperparameter_space():
         'n_estimators': {
             'type': 'int',
             'low': 100,
-            'high': 1000,
-            'step': 10
+            'high': 2000,
+            'step': 20
         },
         'max_depth': {
             'type': 'int',
@@ -112,7 +112,7 @@ def load_hyperparameter_space():
         'min_samples_split': {
             'type': 'int',
             'low': 2,
-            'high': 40,
+            'high': 60,
             'step': 2
         },
         'min_samples_leaf': {
@@ -123,7 +123,7 @@ def load_hyperparameter_space():
         },
         'max_features': {
             'type': 'float',
-            'low': 0.1,
+            'low': 0.04,
             'high': 1.0,
             'step': 0.02
         },
