@@ -44,7 +44,7 @@ from models.ensemble.data_utils import balance_and_clean_dataset
 
 
 def run_ensemble(extra_base_model_type: str = 'random_forest',
-                meta_learner_type: str = 'xgb',
+                meta_learner_type: str = 'lgb',
                 calibrate: bool = True,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
@@ -221,7 +221,7 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 artifact_path="ensemble_model",
                 signature=signature,
                 registered_model_name=model_name,
-                pip_requirements=["scikit-learn==1.4.2"]
+                pip_requirements=["scikit-learn==1.6.1"]
             )
             logger.info(f"Model saved with signature and registered as: {model_name}")
             return ensemble_model
@@ -287,37 +287,6 @@ def log_all_model_params(ensemble_model):
             for key, value in list(params.items())[:3]:
                 mlflow.log_param(f"{model_name}_{key}", str(value))
 
-
 if __name__ == "__main__":
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Run the ensemble model training and evaluation.")
-    parser.add_argument("--extra-model", type=str, default="mlp", choices=["random_forest", "svm", "mlp"],
-                        help="Type of fourth base model")
-    parser.add_argument("--meta-learner", type=str, default="lgb", choices=["xgb", "logistic", "mlp", "lgb"],
-                        help="Type of meta-learner")
-    parser.add_argument("--calibrate", action="store_true", default=True,
-                        help="Whether to calibrate base model probabilities")
-    parser.add_argument("--dynamic-weighting", action="store_true", default=True,
-                        help="Whether to use dynamic weighting for base model probabilities")
-    parser.add_argument("--target-precision", type=float, default=0.50,
-                        help="Target precision for threshold tuning")
-    parser.add_argument("--required-recall", type=float, default=0.25,
-                        help="Minimum required recall for threshold tuning")
-    parser.add_argument("--experiment-name", type=str, default="ensemble_model_improved",
-                        help="Name of the MLflow experiment")
-    parser.add_argument("--time-based-split", action="store_true", default=True,
-                        help="Whether to use time-based data splits")
-    
-    args = parser.parse_args()
-    
     # Run the ensemble model
-    run_ensemble(
-        extra_base_model_type=args.extra_model,
-        meta_learner_type=args.meta_learner,
-        calibrate=args.calibrate,
-        dynamic_weighting=args.dynamic_weighting,
-        target_precision=args.target_precision,
-        required_recall=args.required_recall,
-        experiment_name=args.experiment_name,
-        time_based_split=args.time_based_split
-    )
+    run_ensemble()

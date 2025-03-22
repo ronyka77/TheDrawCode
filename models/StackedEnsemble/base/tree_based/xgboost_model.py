@@ -108,7 +108,7 @@ def load_hyperparameter_space():
         'learning_rate': {
             'type': 'float',
             'low': 0.005,               # narrowed based on top trials (0.06-0.09)
-            'high': 0.06,
+            'high': 0.08,
             'log': False,
             'step': 0.005
         },
@@ -251,38 +251,24 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         raise
 
 def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
-    """
-    Run hyperparameter optimization with Optuna.
-    Added to match notebook implementation.
-    
-    Args:
-        X_train: Training features
-        y_train: Training labels
-        X_test: Testing features
-        y_test: Testing labels
-        X_eval: Evaluation features
-        y_eval: Evaluation labels
-        hyperparameter_space: Hyperparameter space configuration
-        
-    Returns:
-        dict: Best parameters
-    """
     logger.info("Starting hyperparameter optimization")
     
     if not hyperparameter_space:
         hyperparameter_space = load_hyperparameter_space()
     
-    best_score = 0.0
-    
+    best_score = -float('inf')
+    best_params = {}
+    # Global list to store best trials across the entire hypertuning process
+    global_top_trials = []
+    top_trials = []
+
     def objective(trial):
         try:
             params = base_params.copy()
-            
             # Add hyperparameters from config with step size if provided
             for param_name, param_config in hyperparameter_space.items():
                 if param_config['type'] == 'float':
                     if 'step' in param_config:
-                        # Use step if it is provided
                         params[param_name] = trial.suggest_float(
                             param_name,
                             param_config['low'],
@@ -326,6 +312,10 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             # Optimize for precision while maintaining minimum recall
             score = precision if recall >= min_recall else 0.0
             
+            logger.info(f"Trial {trial.number}:")
+            logger.info(f"  Params: {params}")
+            logger.info(f"  Score: {score}")
+            
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
             return score
@@ -333,72 +323,93 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         except Exception as e:
             logger.error(f"Trial failed: {str(e)}")
             return 0.0
-    
-    try:
-        # Generate a seed based on the current time
-        random_seed = int(time.time())
-        random_sampler = optuna.samplers.RandomSampler(seed=random_seed)
-        study = optuna.create_study(
-            study_name='xgboost_optimization',
-            direction='maximize',
-            sampler=random_sampler
-        )
-        
-        # Optimize
-        best_score = -float('inf')  # Initialize with worst possible score
-        best_params = {}
-        top_trials = []
 
-        def callback(study, trial):
-            nonlocal best_score
-            nonlocal best_params
-            nonlocal top_trials
-            logger.info(f"Current best score: {best_score:.4f}")
-            if trial.value > best_score:
-                best_score = trial.value
-                best_params = trial.params
-                logger.info(f"New best score found in trial {trial.number}: {best_score:.4f}")
-            # Create a record for the current trial
-            current_run = (trial.value, trial.params, trial.number)
-            
-            # Append the trial's record to the list
-            top_trials.append(current_run)
-            
-            # Sort the list in descending order by score (trial.value)
-            top_trials.sort(key=lambda x: x[0], reverse=True)
-            
-            # Keep only the top 10 best trials
-            top_trials = top_trials[:10]
-            # Log top trials as a table every 10 trials
-            if trial.number % 9 == 0:
-                table_header = "| Rank | Trial # | Score | Parameters |"
-                table_separator = "|------|---------|-------|------------|"
-                table_rows = [f"| {i+1} | {trial[2]} | {trial[0]:.4f} | {trial[1]} |" for i, trial in enumerate(top_trials)]
-                
-                logger.info("Top 10 trials:")
-                logger.info(table_header)
-                logger.info(table_separator)
-                for row in table_rows:
-                    logger.info(row)
-            return best_score
+    # Callback function defined outside the loop so that its modifications affect the outer scope.
+    def callback(study, trial):
+        nonlocal best_score, best_params, top_trials
+        logger.info(f"Current best score in this batch: {best_score:.4f}")
+        if trial.value > best_score:
+            best_score = trial.value
+            best_params = trial.params
+            logger.info(f"New best score found in trial {trial.number}: {best_score:.4f}")
+        # Create a record for the current trial
+        current_run = (trial.value, trial.params, trial.number)
+        top_trials.append(current_run)
+        # Sort and keep only top 10 for this batch
+        top_trials.sort(key=lambda x: x[0], reverse=True)
+        top_trials[:] = top_trials[:10]
+        table_header = "| Rank | Trial # | Score | Parameters |"
+        table_separator = "|------|---------|-------|------------|"
+        if trial.number % 9 == 0:  
+            table_rows = [f"| {i+1} | {rec[2]} | {rec[0]:.4f} | {rec[1]} |" for i, rec in enumerate(top_trials)]
+            logger.info("Top trials in current batch:")
+            logger.info(table_header)
+            logger.info(table_separator)
+            for row in table_rows:
+                logger.info(row)
+        # Log global top trials every 100 trials
+        if trial.number % 100 == 0 and global_top_trials:
+            logger.info("Global top 10 trials:")
+            table_rows = [f"| {i+1} | {rec[2]} | {rec[0]:.4f} | {rec[1]} |" for i, rec in enumerate(global_top_trials[:10])]
+            logger.info(table_header)
+            logger.info(table_separator)
+            for row in table_rows:
+                logger.info(row)
+        return best_score
+    
+    # Set persistent storage path using SQLite
+    storage_url = "sqlite:///optuna_xgboost.db"
+    study_name = "xgboost_optimization"
+    # Total trials to conduct
+    total_trials = 20000  # Example; you can set n_trials accordingly.
+    batch_size = 1000
+    num_batches = total_trials // batch_size
+    if total_trials % batch_size != 0:
+        num_batches += 1
+
+    # Loop over batches, resetting the sampler each time
+    for batch in range(num_batches):
+        # Create a new sampler with a dynamic seed
+        random_seed = int(time.time())
+        new_sampler = optuna.samplers.RandomSampler(seed=random_seed)
         
-        study.optimize(
-            objective, 
-            n_trials=n_trials, 
-            timeout=900000, 
-            show_progress_bar=True,
-            callbacks=[callback]
+        # (Re-)create the study with persistent storage; previous trials are loaded automatically.
+        study = optuna.create_study(
+            study_name=study_name,
+            direction='maximize',
+            storage=storage_url,
+            load_if_exists=True,
+            sampler=new_sampler
         )
         
-        best_params.update(base_params)
+        logger.info(f"Starting batch {batch+1}/{num_batches} with new sampler (seed={random_seed})")
+        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback])
         
-        logger.info(f"Best trial value: {best_score}")
-        logger.info(f"Best parameters found: {best_params}")
-        return best_params
-            
-    except Exception as e:
-        logger.error(f"Error in hyperparameter optimization: {str(e)}")
-        raise
+        # Merge current batch's top trials with global_top_trials
+        for trial_record in top_trials:
+            global_top_trials.append(trial_record)
+        # Keep only the best 10 across all batches
+        global_top_trials.sort(key=lambda x: x[0], reverse=True)
+        global_top_trials = global_top_trials[:10]
+    
+    # After all batches, update best_params (assume the best trial is the first in global_top_trials)
+    if global_top_trials:
+        best_score, best_params, best_trial_number = global_top_trials[0]
+    else:
+        best_params = {}
+    
+    best_params.update(base_params)
+    
+    logger.info(f"Best trial value across batches: {best_score:.4f}")
+    logger.info(f"Best parameters found: {best_params}")
+    logger.info("Top 10 trials across all batches:")
+    table_header = "| Rank | Trial # | Score | Parameters |"
+    table_separator = "|------|---------|-------|------------|"
+    for i, trial_record in enumerate(global_top_trials):
+        score_val, params_val, trial_num = trial_record
+        logger.info(f"| {i+1} | {trial_num} | {score_val:.4f} | {params_val} |")
+    
+    return best_params
 
 def hypertune_xgboost(experiment_name: str):
     """

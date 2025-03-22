@@ -413,7 +413,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
 def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                             eval_meta_features: Optional[np.ndarray] = None, 
                             eval_meta_targets: Optional[np.ndarray] = None,
-                            meta_learner_type='xgb', n_trials=2000, timeout=900000, 
+                            meta_learner_type='xgb', n_trials=3000, timeout=900000, 
                             target_precision=0.5, min_recall=0.25):
     """
     Hypertune meta-learner using Optuna and optimize threshold for precision/recall balance.
@@ -454,15 +454,15 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             }
             
             params = {
-                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.06, step=0.005),
-                'max_depth': trial.suggest_int('max_depth', 5, 13, step=1),
-                'min_child_weight': trial.suggest_int('min_child_weight', 200, 600, step=10),
+                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.10, step=0.005),
+                'max_depth': trial.suggest_int('max_depth', 4, 13, step=1),
+                'min_child_weight': trial.suggest_int('min_child_weight', 150, 800, step=10),
                 'gamma': trial.suggest_float('gamma', 0.02, 4.0, step=0.02),
-                'subsample': trial.suggest_float('subsample', 0.58, 0.95, step=0.01),
-                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.58, 0.90, step=0.01),
+                'subsample': trial.suggest_float('subsample', 0.55, 0.95, step=0.01),
+                'colsample_bytree': trial.suggest_float('colsample_bytree', 0.55, 0.90, step=0.01),
                 'reg_alpha': trial.suggest_float('reg_alpha', 10.0, 70.0, step=0.1),
                 'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 10.0, step=0.01),
-                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 2.0, 4.5, step=0.05),
+                'scale_pos_weight': trial.suggest_float('scale_pos_weight', 1.8, 4.5, step=0.05),
                 'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 400, 1200, step=20)
             }
             params.update(base_params)
@@ -483,15 +483,15 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 'bagging_freq': trial.suggest_int('bagging_freq', 7, 12, step=1),
                 'cat_smooth': trial.suggest_float('cat_smooth', 10.0, 30.0, step=0.1),
                 'feature_fraction': trial.suggest_float('feature_fraction', 0.55, 0.70, step=0.01),
-                'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.14, step=0.005),
+                'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.20, step=0.005),
                 'max_bin': trial.suggest_int('max_bin', 200, 700, step=10),
                 'max_depth': trial.suggest_int('max_depth', 4, 10, step=1),
                 'min_child_samples': trial.suggest_int('min_child_samples', 150, 320, step=10),
                 'min_split_gain': trial.suggest_float('min_split_gain', 0.10, 0.20, step=0.01),
                 'num_leaves': trial.suggest_int('num_leaves', 50, 150, step=5),
                 'path_smooth': trial.suggest_float('path_smooth', 0.005, 0.60, step=0.005),
-                'reg_alpha': trial.suggest_float('reg_alpha', 0.5, 11.0, step=0.1),
-                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 11.0, step=0.1),
+                'reg_alpha': trial.suggest_float('reg_alpha', 0.5, 11.0, step=0.05),
+                'reg_lambda': trial.suggest_float('reg_lambda', 1.0, 5.0, step=0.05),
                 'early_stopping_rounds': trial.suggest_int('early_stopping_rounds', 300, 700, step=10)
             }
             params.update(base_params)
@@ -662,19 +662,78 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         except Exception as e:
             logger.error(f"Error in trial {trial.number}: {str(e)}")
             return -1.0
-    # Generate a seed based on the current time
-    random_seed = int(time.time())
-    random_sampler = optuna.samplers.RandomSampler(seed=random_seed)
-    # Create and run Optuna study
-    study = optuna.create_study(
-        direction="maximize",
-        sampler = random_sampler
-    )
-    logger.info(f"Running Optuna study with {n_trials} trials and {meta_learner_type} meta-learner")
-    study.optimize(objective, n_trials=n_trials, timeout=timeout, show_progress_bar=True)
-    # Get best parameters
-    best_params = study.best_params
-    logger.info(f"Best parameters of hypertuning: {best_params}")
+    # Set persistent storage path using SQLite
+    storage_url = "sqlite:///optuna_ensemble.db"
+    study_name = "ensemble_optimization"
+    
+    # Initialize variables for batch training
+    best_score = -float('inf')
+    best_params = {}
+    global_top_trials = []
+    top_trials = []
+    
+    # Total trials to conduct
+    total_trials = n_trials
+    batch_size = 1000
+    num_batches = total_trials // batch_size
+    if total_trials % batch_size != 0:
+        num_batches += 1
+    # Callback function for tracking top trials
+    def callback(study, trial):
+        nonlocal best_score, best_params, top_trials
+        if trial.value > best_score:
+            best_score = trial.value
+            best_params = trial.params
+        # Create a record for the current trial
+        current_run = (trial.value, trial.params, trial.number)
+        top_trials.append(current_run)
+        # Sort and keep only top 10 for this batch
+        top_trials.sort(key=lambda x: x[0], reverse=True)
+        top_trials[:] = top_trials[:10]
+        if trial.number % 9 == 0:
+            table_header = "| Rank | Trial # | Score | Parameters |"
+            table_separator = "|------|---------|-------|------------|"
+            table_rows = [f"| {i+1} | {rec[2]} | {rec[0]:.4f} | {rec[1]} |" for i, rec in enumerate(top_trials)]
+            logger.info("Top trials in current batch:")
+            logger.info(table_header)
+            logger.info(table_separator)
+            for row in table_rows:
+                logger.info(row)
+
+    # Loop over batches, resetting the sampler each time
+    for batch in range(num_batches):
+        # Generate a seed based on the current time
+        random_seed = int(time.time())
+        random_sampler = optuna.samplers.RandomSampler(seed=random_seed)
+        
+        # Create and run Optuna study with persistent storage
+        study = optuna.create_study(
+            study_name=study_name,
+            direction="maximize",
+            sampler=random_sampler
+            # storage=storage_url,
+            # load_if_exists=True
+        )
+        
+        logger.info(f"Starting batch {batch+1}/{num_batches} with new sampler (seed={random_seed})")
+        study.optimize(
+            objective, 
+            n_trials=min(batch_size, total_trials - batch * batch_size),
+            timeout=timeout,
+            show_progress_bar=True,
+            callbacks=[callback]
+        )
+        
+        # Merge current batch's top trials with global_top_trials
+        for trial_record in top_trials:
+            global_top_trials.append(trial_record)
+        # Keep only the best 10 across all batches
+        global_top_trials.sort(key=lambda x: x[0], reverse=True)
+        global_top_trials = global_top_trials[:10]
+    
+    # Get best parameters from global top trials
+    if global_top_trials:
+        best_score, best_params, best_trial_number = global_top_trials[0]
     
     # Define base parameters outside objective function scope
     if meta_learner_type == 'xgb':

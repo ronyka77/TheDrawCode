@@ -314,7 +314,9 @@ def main():
         # 'f20a9ef589a341bfb39941593e0af0ac', 
         # '5befa2bf2b5d4ae6866f3cc177c7b68f', #KEEP 30, 32
         # '97207cdaab54477fa267d8cd29ce35e9', #31, 32, 34, 37
-        '403c8c5eaaf442898594e45e6998cff4', #33, 38
+        # '403c8c5eaaf442898594e45e6998cff4', #33, 38
+        # '835b997b8acd46f7a72ab5350451e427', #36
+        'e6411ed2e93a4dd4b4a756d228edf18e', #41
     ]
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()

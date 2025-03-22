@@ -240,19 +240,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 metrics=['accuracy', keras.metrics.AUC(name='auc')]
             )
             self.logger.info("Extra base model initialized as MLPClassifier.")
-        elif self.extra_base_model_type == 'sgd':
-            
-            self.model_extra = SGDClassifier(
-                loss='log_loss',
-                penalty='elasticnet',
-                alpha=0.0001,
-                l1_ratio=0.5,
-                class_weight=None,
-                max_iter=1000,
-                early_stopping=True,
-                random_state=19
-            )
-            self.logger.info("Extra base model initialized as SGDClassifier.")
         else:
             raise ValueError(f"Unknown extra_base_model_type: {self.extra_base_model_type}")
             
