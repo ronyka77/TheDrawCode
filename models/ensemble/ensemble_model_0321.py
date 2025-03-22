@@ -17,6 +17,8 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from typing import Dict, List, Tuple, Optional, Union
 import os
 import sys
+import time
+import json
 from pathlib import Path
 # Restrict parallel threads across various libraries
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -66,8 +68,6 @@ random.seed(random_seed)
 np.random.seed(random_seed)
 tf.random.set_seed(random_seed)
 os.environ['PYTHONHASHSEED'] = str(random_seed)
-
-
 
 class EnsembleModel(BaseEstimator, ClassifierMixin):
     """
@@ -127,16 +127,16 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             objective='binary:logistic',
             eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.06,
-            max_depth=7,
-            min_child_weight=340,
-            subsample=0.69,
-            colsample_bytree=0.8699999999999999,
-            reg_alpha=20.8,
-            reg_lambda=2.6,
-            gamma=3.5,
-            early_stopping_rounds=860,
-            scale_pos_weight=3.04,
+            learning_rate=0.030000000000000002,
+            max_depth=6,
+            min_child_weight=420,
+            subsample=0.59,
+            colsample_bytree=0.6599999999999999,
+            reg_alpha=27.1,
+            reg_lambda=6.67,
+            gamma=1.58,
+            early_stopping_rounds=1350,
+            scale_pos_weight=3.12,
             seed=19
         )
         self.model_cat = CatBoostClassifier( #38.1%
@@ -164,20 +164,20 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             n_jobs=4,
             random_state=19,
             device='cpu',
-            learning_rate=0.11,
-            num_leaves=145,
+            learning_rate=0.135,
+            num_leaves=75,
             max_depth=9,
-            min_child_samples=170,
-            feature_fraction=0.62,
-            bagging_fraction=0.635,
-            bagging_freq=8,
-            reg_alpha=2.7,
-            reg_lambda=8.3,
-            min_split_gain=0.11,
-            early_stopping_rounds=610,
-            path_smooth=0.125,
-            cat_smooth=16.8,
-            max_bin=590
+            min_child_samples=230,
+            feature_fraction=0.6900000000000001,
+            bagging_fraction=0.665,
+            bagging_freq=11,
+            reg_alpha=6.7,
+            reg_lambda=7.7,
+            min_split_gain=0.19,
+            early_stopping_rounds=550,
+            path_smooth=0.095,
+            cat_smooth=28.1,
+            max_bin=340
         )
         self.xgb_features = import_selected_features_ensemble(model_type='xgb')
         self.cat_features = import_selected_features_ensemble(model_type='cat')

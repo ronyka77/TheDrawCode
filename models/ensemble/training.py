@@ -480,9 +480,9 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             }
             params = {
                 'bagging_fraction': trial.suggest_float('bagging_fraction', 0.55, 0.65, step=0.005),
-                'bagging_freq': trial.suggest_int('bagging_freq', 7, 12, step=1),
+                'bagging_freq': trial.suggest_int('bagging_freq', 5, 14, step=1),
                 'cat_smooth': trial.suggest_float('cat_smooth', 10.0, 30.0, step=0.1),
-                'feature_fraction': trial.suggest_float('feature_fraction', 0.55, 0.70, step=0.01),
+                'feature_fraction': trial.suggest_float('feature_fraction', 0.50, 0.70, step=0.01),
                 'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.20, step=0.005),
                 'max_bin': trial.suggest_int('max_bin', 200, 700, step=10),
                 'max_depth': trial.suggest_int('max_depth', 4, 10, step=1),

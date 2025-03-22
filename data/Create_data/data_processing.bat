@@ -4,7 +4,7 @@ echo Starting model processing sequence...
 REM Set Python path and activate environment
 call conda init
 call conda activate soccerpredictor_env
-pushd "\\192.168.0.77\Betting\Draw_Prediction_Projects\TheDrawCode\data\Create_data"
+cd "C:\Users\szita\Documents\TheDrawCode\data\Create_data"
 
 echo Running add_poisson_xG.py...
 python add_poisson_xG.py

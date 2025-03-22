@@ -105,3 +105,10 @@ python_tests/
 two_staged_xgboost.py
 cursor_settings.md
 Templates.txt
+.cursor/rules/
+models/ensemble/params/
+rules_template-main/
+optuna_ensemble.db
+optuna_xgboost.db
+optuna_lightgbm.db
+

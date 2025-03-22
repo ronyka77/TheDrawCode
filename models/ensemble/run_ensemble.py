@@ -34,9 +34,9 @@ os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
 # Local imports
 from utils.logger import ExperimentLogger
-experiment_name = "ensemble_model_run_ensemble"
+experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name,
-                            log_dir="./logs/ensemble_model_run_ensemble")
+                            log_dir="./logs/ensemble_model_improved")
 from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 
 from models.ensemble.ensemble_model_0321 import EnsembleModel
@@ -49,7 +49,7 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
                 required_recall: float = 0.25,
-                experiment_name: str = "ensemble_model_run_ensemble",
+                experiment_name: str = "ensemble_model_improved",
                 time_based_split: bool = True,
                 logger: ExperimentLogger = logger):
     """

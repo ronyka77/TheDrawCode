@@ -180,8 +180,5 @@ SELECTCOLUMNS(
     "comparison_home_total",ROUNDUP(future_matches[comparison_home_total], 2),
     "draw_percent",ROUNDUP(future_matches[draw_percent], 0),
     "away_win_percent",ROUNDUP(future_matches[away_win_percent], 0),
-    "home_win_percent",ROUNDUP(future_matches[home_win_percent], 0),
-    "goals_home_prediction",ROUNDUP(future_matches[goals_home_prediction], 0),
-    "goals_away_prediction",ROUNDUP(future_matches[goals_away_prediction], 0),
-    "total_goals_prediction",ROUNDUP(future_matches[total_goals_prediction], 0)
+    "home_win_percent",ROUNDUP(future_matches[home_win_percent], 0)
 )
