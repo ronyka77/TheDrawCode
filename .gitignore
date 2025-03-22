@@ -111,4 +111,4 @@ rules_template-main/
 optuna_ensemble.db
 optuna_xgboost.db
 optuna_lightgbm.db
-
+tasks/
