@@ -19,6 +19,7 @@ import lightgbm as lgb
 import tensorflow as tf
 from tensorflow.keras import layers, regularizers, callbacks
 import os
+import warnings
 
 from utils.logger import ExperimentLogger
 logger = ExperimentLogger(experiment_name="ensemble_model_training",
@@ -28,6 +29,10 @@ logger = ExperimentLogger(experiment_name="ensemble_model_training",
 from models.ensemble.bayesian_meta_learner import BayesianMetaLearner, train_with_optimal_parameters
 from models.ensemble.ResNet import ResNetMetaLearner
 from utils.create_evaluation_set import import_selected_features_ensemble
+
+# Filter scikit-learn parameter renaming warnings
+warnings.filterwarnings("ignore", message=".*force_all_finite.*", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*ensure_all_finite.*", category=FutureWarning)
 
 # Set random seeds for reproducibility
 random_seed = 19
@@ -41,13 +46,15 @@ os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["NUMEXPR_NUM_THREADS"] = "4"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 
 def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
     """
     Initialize the meta learner based on the provided meta_learner_type.
     
     Args:
-        meta_learner_type: Type of meta-learner ('xgb', 'logistic', or 'mlp')
+        meta_learner_type: Type of meta-learner ('xgb', 'logistic', 'mlp', 'tabnet', etc.)
         
     Returns:
         Initialized meta-learner model
@@ -75,6 +82,26 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
         )
         
         logger.info("XGBoost meta-learner initialized with CPU-optimized settings")
+    elif meta_learner_type.lower() == 'tabnet':
+        # Import TabNetClassifier
+        from pytorch_tabnet.tab_model import TabNetClassifier
+        
+        # TabNet meta-learner with CPU settings
+        meta_learner = TabNetClassifier(
+            learning_rate=0.02,
+            n_d=8,  # Dimension of the prediction layer
+            n_a=8,  # Dimension of the attention layer
+            n_steps=5,  # Number of steps in the architecture
+            gamma=1.5,  # Scaling coefficient for attention
+            lambda_sparse=1e-5,  # Sparsity regularization
+            momentum=0.9,
+            mask_type='entmax',  # Used to compute sparse attention weights
+            device_name='cpu',
+            verbose=0,
+            seed=19
+        )
+        
+        logger.info("TabNet meta-learner initialized with CPU-optimized settings")
     elif meta_learner_type.lower() == 'lgb':
         from lightgbm import LGBMClassifier
         import lightgbm as lgb
@@ -209,6 +236,8 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
     cat_features = import_selected_features_ensemble(model_type='cat')
     lgb_features = import_selected_features_ensemble(model_type='lgbm')
     rf_features = import_selected_features_ensemble(model_type='rf')
+    tabnet_features = import_selected_features_ensemble(model_type='tabnet')
+    
     for model_name, model in models.items():
         logger.info(f"Training base model: {model_name}")
         try:
@@ -265,6 +294,32 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
                     verbose=False
                 )
                 trained_models[model_name] = model
+            elif model_name == 'tabnet':
+                # TabNet specific training
+                logger.info("Training TabNet model")
+                X_train_tabnet = X_train_copy[tabnet_features]
+                X_eval_tabnet = X_eval_copy[tabnet_features]
+                # Convert to numpy arrays if pandas
+                if hasattr(X_train_tabnet, 'values'):
+                    X_train_tabnet_np = X_train_tabnet.values
+                    X_eval_tabnet_np = X_eval_tabnet.values
+                    y_train_np = y_train_copy.values if hasattr(y_train_copy, 'values') else y_train_copy
+                    y_eval_np = y_eval_copy.values if hasattr(y_eval_copy, 'values') else y_eval_copy
+                else:
+                    X_train_tabnet_np = X_train_tabnet
+                    X_eval_tabnet_np = X_eval_tabnet
+                    y_train_np = y_train_copy
+                    y_eval_np = y_eval_copy
+                
+                # Train TabNet with early stopping on eval set
+                model.fit(
+                    X_train_tabnet_np, y_train_np,
+                    eval_set=[(X_eval_tabnet_np, y_eval_np)],
+                    max_epochs=150,
+                    patience=17,
+                    eval_metric=['auc', 'logloss']
+                )
+                trained_models[model_name] = model
             elif model_name == 'cat':
                 X_train_cat = X_train_copy[cat_features]
                 X_eval_cat = X_eval_copy[cat_features]
@@ -275,7 +330,6 @@ def train_base_models(models: Dict, X_train: pd.DataFrame, y_train: pd.Series,
                     verbose=False
                 )
                 trained_models[model_name] = model
-            
             elif model_name == 'lgb':
                 X_train_lgb = X_train_copy[lgb_features]
                 X_eval_lgb = X_eval_copy[lgb_features]
@@ -341,6 +395,15 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
         elif meta_learner_type == 'bayesian':
             # Special handling for Bayesian meta-learner
             meta_learner.train(meta_features, meta_targets, eval_meta_features, eval_meta_targets)
+            
+            # Get predictions on validation set
+            y_proba = meta_learner.predict_proba(eval_meta_features)
+            y_pred = (y_proba >= best_threshold).astype(int)
+            
+            # Find optimal threshold
+            best_threshold, metrics = tune_threshold_for_precision(
+                y_proba, eval_meta_targets, target_precision, min_recall
+            )
         
         # For models that support early stopping (XGBoost)
         elif hasattr(meta_learner, 'early_stopping_rounds') or hasattr(meta_learner, 'early_stopping'):
@@ -467,6 +530,26 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             }
             params.update(base_params)
             meta_learner = XGBClassifier(**params)
+        elif meta_learner_type == 'tabnet':
+            from pytorch_tabnet.tab_model import TabNetClassifier
+            base_params = {
+                'device_name': 'cpu',
+                'verbose': 0,
+                'seed': 19
+            }
+            
+            params = {
+                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.05, log=True),
+                'n_d': trial.suggest_int('n_d', 8, 16, step=1),
+                'n_a': trial.suggest_int('n_a', 8, 16, step=1),
+                'n_steps': trial.suggest_int('n_steps', 3, 10, step=1),
+                'gamma': trial.suggest_float('gamma', 1.0, 2.0, step=0.1),
+                'lambda_sparse': trial.suggest_float('lambda_sparse', 1e-6, 1e-4, log=True),
+                'momentum': trial.suggest_float('momentum', 0.8, 0.99, step=0.01),
+                'mask_type': trial.suggest_categorical('mask_type', ['sparsemax', 'entmax'])
+            }
+            params.update(base_params)
+            meta_learner = TabNetClassifier(**params)
         elif meta_learner_type == 'lgb':
             from lightgbm import LGBMClassifier
             import lightgbm as lgb
@@ -593,7 +676,41 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         
         # Train meta-learner
         try:
-            if meta_learner_type == 'resnet':
+            if meta_learner_type == 'tabnet':
+                # Special handling for TabNet's training
+                # Convert to numpy arrays if pandas
+                if hasattr(meta_features, 'values'):
+                    meta_features_np = meta_features.values
+                    meta_targets_np = meta_targets.values if hasattr(meta_targets, 'values') else meta_targets
+                    eval_features_np = eval_meta_features.values if hasattr(eval_meta_features, 'values') else eval_meta_features
+                    eval_targets_np = eval_meta_targets.values if hasattr(eval_meta_targets, 'values') else eval_meta_targets
+                else:
+                    meta_features_np = meta_features
+                    meta_targets_np = meta_targets
+                    eval_features_np = eval_meta_features
+                    eval_targets_np = eval_meta_targets
+                
+                # Train TabNet with early stopping on eval set
+                meta_learner.fit(
+                    meta_features_np, meta_targets_np,
+                    eval_set=[(eval_features_np, eval_targets_np)],
+                    max_epochs=150,
+                    patience=17,
+                    eval_metric=['auc', 'logloss']
+                )
+                
+                # Get predictions on validation set
+                y_proba = meta_learner.predict_proba(eval_features_np)[:, 1]
+                
+                # Find optimal threshold
+                best_threshold, metrics = tune_threshold_for_precision(
+                    y_proba, eval_meta_targets, target_precision, min_recall
+                )
+                
+                if metrics['recall'] < min_recall:
+                    return -1.0
+                return metrics['precision']
+            elif meta_learner_type == 'resnet':
                 # Special handling for ResNet meta-learner
                 meta_learner.fit(
                     meta_features, meta_targets,
@@ -620,6 +737,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 
                 # Get predictions on validation set
                 y_proba = meta_learner.predict_proba(eval_meta_features)
+                y_pred = (y_proba >= best_threshold).astype(int)
                 
                 # Find optimal threshold
                 best_threshold, metrics = tune_threshold_for_precision(
@@ -662,15 +780,12 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         except Exception as e:
             logger.error(f"Error in trial {trial.number}: {str(e)}")
             return -1.0
-    # Set persistent storage path using SQLite
-    storage_url = "sqlite:///optuna_ensemble.db"
-    study_name = "ensemble_optimization"
-    
     # Initialize variables for batch training
     best_score = -float('inf')
     best_params = {}
     global_top_trials = []
     top_trials = []
+    study_name = "ensemble_optimization"   
     
     # Total trials to conduct
     total_trials = n_trials
@@ -808,6 +923,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         
         # Get predictions on validation set
         y_proba = best_meta_learner.predict_proba(eval_meta_features)
+        y_pred = (y_proba >= best_threshold).astype(int)
         
         # Find optimal threshold
         best_threshold, metrics = tune_threshold_for_precision(

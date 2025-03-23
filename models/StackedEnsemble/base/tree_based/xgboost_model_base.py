@@ -238,10 +238,10 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
             verbose=False
         )
         
-        # Get validation predictions
-        best_threshold, metrics = optimize_threshold(
-            model, X_eval, y_eval, min_recall=min_recall
-        )
+        # Get predictions using fixed 0.5 threshold
+        y_pred = (model.predict_proba(X_eval)[:, 1] >= 0.5).astype(int)
+        # Calculate metrics without threshold optimization
+        metrics = evaluate(model=model, X=X_eval, y=y_eval, threshold=0.5)
         
         return model, metrics
         
@@ -307,14 +307,13 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             
             recall = metrics.get('recall', 0.0)
             precision = metrics.get('precision', 0.0)
-            threshold = metrics.get('threshold', 0.5)
+            
             # Optimize for precision while maintaining minimum recall
             score = precision if recall >= min_recall else 0.0
             
             logger.info(f"Trial {trial.number}:")
-            logger.info(f"  Score: {score}")
-            logger.info(f"  Threshold: {threshold}")
             logger.info(f"  Params: {params}")
+            logger.info(f"  Score: {score}")
             
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
@@ -358,8 +357,8 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         return best_score
     
     # Set persistent storage path using SQLite
-    storage_url = "sqlite:///optuna_xgboost.db"
-    study_name = "xgboost_optimization"
+    storage_url = "sqlite:///optuna_xgboost_base.db"
+    study_name = "xgboost_base_optimization"
     # Total trials to conduct
     total_trials = n_trials  # Example; you can set n_trials accordingly.
     batch_size = 1000

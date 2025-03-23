@@ -14,6 +14,11 @@ import mlflow.sklearn
 from pathlib import Path
 import argparse
 from datetime import datetime
+import warnings
+import random
+# Filter scikit-learn parameter renaming warnings
+warnings.filterwarnings("ignore", message=".*force_all_finite.*", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*ensure_all_finite.*", category=FutureWarning)
 
 # Add project root to Python path
 try:
@@ -32,20 +37,24 @@ except Exception as e:
 # Set environment variables for Git
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
 
+# Set fixed seed and hash seed for determinism
+SEED = 19
+os.environ["PYTHONHASHSEED"] = str(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+
 # Local imports
 from utils.logger import ExperimentLogger
 experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name,
                             log_dir="./logs/ensemble_model_improved")
 from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
-
-from models.ensemble.ensemble_model_0321 import EnsembleModel
+from models.ensemble.ensemble_model_0323 import EnsembleModel
 from models.ensemble.data_utils import balance_and_clean_dataset
-
 
 def run_ensemble(extra_base_model_type: str = 'random_forest',
                 meta_learner_type: str = 'lgb',
-                calibrate: bool = True,
+                calibrate: bool = False,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
                 required_recall: float = 0.25,
@@ -150,23 +159,22 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
             log_all_model_params(ensemble_model)
             
             # Analyze prediction errors on validation set (most recent data)
-            logger.info("Analyzing prediction errors on validation set...")
-            error_analysis = ensemble_model.analyze_prediction_errors(X_val_filtered, y_val)
+            # logger.info("Analyzing prediction errors on validation set...")
+            # error_analysis = ensemble_model.analyze_prediction_errors(X_val_filtered, y_val)
             
-            # Explain model predictions on validation set
-            logger.info("Explaining model predictions on validation set...")
-            explanation = ensemble_model.explain_predictions(X_val_filtered)
+            # # Explain model predictions on validation set
+            # logger.info("Explaining model predictions on validation set...")
+            # explanation = ensemble_model.explain_predictions(X_val_filtered)
             
             # Final metrics on validation set
             logger.info("Final metrics on validation set:")
             for metric, value in training_results.items():
                 if isinstance(value, (int, float)):
                     logger.info(f"  {metric}: {value:.4f}")
-            
             logger.info("Ensemble model execution completed successfully.")
+
             # Save model with signature to MLflow
             logger.info("Saving ensemble model with signature to MLflow...")
-            
             # Create an input example for signature inference
             input_example = X_val_filtered.iloc[0:1].copy()
             best_threshold = training_results['threshold']
@@ -249,15 +257,15 @@ def log_all_model_params(ensemble_model):
     
     Args:
         ensemble_model: Your trained ensemble model instance that contains attributes
-                        like model_xgb, model_cat, model_lgb, and model_extra.
+                        like model_xgb, model_tabnet, model_lgb, and model_extra.
     """
     params_dict = {}
     
     # Log parameters from each base model.
     if hasattr(ensemble_model, "model_xgb"):
         params_dict["XGBoost"] = ensemble_model.get_model_params(ensemble_model.model_xgb)
-    if hasattr(ensemble_model, "model_cat"):
-        params_dict["CatBoost"] = ensemble_model.get_model_params(ensemble_model.model_cat)
+    if hasattr(ensemble_model, "model_tabnet"):
+        params_dict["TabNet"] = ensemble_model.get_model_params(ensemble_model.model_tabnet)
     if hasattr(ensemble_model, "model_lgb"):
         params_dict["LightGBM"] = ensemble_model.get_model_params(ensemble_model.model_lgb)
     if hasattr(ensemble_model, "model_extra"):
@@ -266,8 +274,8 @@ def log_all_model_params(ensemble_model):
     # Optionally, log calibrated versions if available.
     if hasattr(ensemble_model, "model_xgb_calibrated") and ensemble_model.model_xgb_calibrated is not None:
         params_dict["XGBoost_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_xgb_calibrated)
-    if hasattr(ensemble_model, "model_cat_calibrated") and ensemble_model.model_cat_calibrated is not None:
-        params_dict["CatBoost_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_cat_calibrated)
+    if hasattr(ensemble_model, "model_tabnet_calibrated") and ensemble_model.model_tabnet_calibrated is not None:
+        params_dict["TabNet_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_tabnet_calibrated)
     if hasattr(ensemble_model, "model_lgb_calibrated") and ensemble_model.model_lgb_calibrated is not None:
         params_dict["LightGBM_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_lgb_calibrated)
     if hasattr(ensemble_model, "model_extra_calibrated") and ensemble_model.model_extra_calibrated is not None:
@@ -279,7 +287,6 @@ def log_all_model_params(ensemble_model):
     
     # Log the complete parameters dictionary as a JSON artifact to MLflow.
     mlflow.log_dict(params_dict, "ensemble_model_parameters.json")
-    
     # Optionally, also log some keys using mlflow.log_param for faster comparison in the UI.
     for model_name, params in params_dict.items():
         # For each top-level model, log a summary (e.g., only the first few keys).

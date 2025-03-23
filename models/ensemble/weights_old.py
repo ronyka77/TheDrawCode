@@ -13,7 +13,7 @@ import mlflow
 from utils.logger import ExperimentLogger
 from models.ensemble.thresholds import tune_threshold_for_precision
 
-def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray, 
+def compute_dynamic_weights(p_xgb: np.ndarray, p_cat: np.ndarray, 
                             p_lgb: np.ndarray, p_extra: np.ndarray, 
                             targets: pd.Series,
                             logger: ExperimentLogger = None) -> Dict:
@@ -22,7 +22,7 @@ def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray,
     
     Args:
         p_xgb: XGBoost predicted probabilities
-        p_tabnet: TabNet predicted probabilities
+        p_cat: CatBoost predicted probabilities
         p_lgb: LightGBM predicted probabilities
         p_extra: Extra model predicted probabilities
         targets: True labels
@@ -63,13 +63,13 @@ def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray,
     
     # Calculate metrics for each model with optimized thresholds
     xgb_threshold, xgb_precision, xgb_recall, xgb_f1 = find_best_threshold(p_xgb, targets)
-    tabnet_threshold, tabnet_precision, tabnet_recall, tabnet_f1 = find_best_threshold(p_tabnet, targets)
+    cat_threshold, cat_precision, cat_recall, cat_f1 = find_best_threshold(p_cat, targets)
     lgb_threshold, lgb_precision, lgb_recall, lgb_f1 = find_best_threshold(p_lgb, targets)
     extra_threshold, extra_precision, extra_recall, extra_f1 = find_best_threshold(p_extra, targets)
     
     # Log individual model metrics
     logger.info(f"XGBoost: threshold={xgb_threshold:.3f}, precision={xgb_precision:.4f}, recall={xgb_recall:.4f}, f1={xgb_f1:.4f}")
-    logger.info(f"TabNet: threshold={tabnet_threshold:.3f}, precision={tabnet_precision:.4f}, recall={tabnet_recall:.4f}, f1={tabnet_f1:.4f}")
+    logger.info(f"CatBoost: threshold={cat_threshold:.3f}, precision={cat_precision:.4f}, recall={cat_recall:.4f}, f1={cat_f1:.4f}")
     logger.info(f"LightGBM: threshold={lgb_threshold:.3f}, precision={lgb_precision:.4f}, recall={lgb_recall:.4f}, f1={lgb_f1:.4f}")
     logger.info(f"Extra Model: threshold={extra_threshold:.3f}, precision={extra_precision:.4f}, recall={extra_recall:.4f}, f1={extra_f1:.4f}")
     
@@ -79,10 +79,10 @@ def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray,
         'xgb_recall': xgb_recall,
         'xgb_f1': xgb_f1,
         'xgb_threshold': xgb_threshold,
-        'tabnet_precision': tabnet_precision,
-        'tabnet_recall': tabnet_recall,
-        'tabnet_f1': tabnet_f1,
-        'tabnet_threshold': tabnet_threshold,
+        'cat_precision': cat_precision,
+        'cat_recall': cat_recall,
+        'cat_f1': cat_f1,
+        'cat_threshold': cat_threshold,
         'lgb_precision': lgb_precision,
         'lgb_recall': lgb_recall,
         'lgb_f1': lgb_f1,
@@ -99,23 +99,23 @@ def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray,
         return 0.6 * precision + 0.2 * recall + 0.2 * f1
     
     xgb_score = composite_score(xgb_precision, xgb_recall, xgb_f1)
-    tabnet_score = composite_score(tabnet_precision, tabnet_recall, tabnet_f1)
+    cat_score = composite_score(cat_precision, cat_recall, cat_f1)
     lgb_score = composite_score(lgb_precision, lgb_recall, lgb_f1)
     extra_score = composite_score(extra_precision, extra_recall, extra_f1)
     
     # Calculate raw weights based on composite scores
-    total_score = xgb_score + tabnet_score + lgb_score + extra_score
+    total_score = xgb_score + cat_score + lgb_score + extra_score
     
     if total_score > 0:
         raw_weights = {
             'xgb': xgb_score / total_score,
-            'tabnet': tabnet_score / total_score,
+            'cat': cat_score / total_score,
             'lgb': lgb_score / total_score,
             'extra': extra_score / total_score
         }
     else:
         # Fallback to equal weights if total score is 0
-        raw_weights = {'xgb': 0.25, 'tabnet': 0.25, 'lgb': 0.25, 'extra': 0.25}
+        raw_weights = {'xgb': 0.25, 'cat': 0.25, 'lgb': 0.25, 'extra': 0.25}
     
     # Apply smoothing to avoid extreme weights
     # Ensure each model gets at least 10% weight
@@ -165,35 +165,38 @@ def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray,
     
     return normalized_weights
 
-def compute_precision_focused_weights(p_xgb, p_tabnet, p_lgb, p_extra, y_true, target_precision, required_recall, logger=None):
+def compute_precision_focused_weights(p_xgb, p_cat, p_lgb, p_extra, y_true, target_precision, required_recall, logger=None):
     """
     Compute weights with strong focus on precision
     """
-    logger.info("Computing precision-focused weights...")
+    if logger is None:
+        logger = ExperimentLogger(experiment_name="ensemble_model_weights",
+                                log_dir="./logs/ensemble_model_weights")
+    
     # Find precision-optimal thresholds
     xgb_threshold, xgb_metrics = tune_threshold_for_precision(p_xgb, y_true, target_precision, required_recall)
-    tabnet_threshold, tabnet_metrics = tune_threshold_for_precision(p_tabnet, y_true, target_precision, required_recall)
+    cat_threshold, cat_metrics = tune_threshold_for_precision(p_cat, y_true, target_precision, required_recall)
     lgb_threshold, lgb_metrics = tune_threshold_for_precision(p_lgb, y_true, target_precision, required_recall)
     extra_threshold, extra_metrics = tune_threshold_for_precision(p_extra, y_true, target_precision, required_recall)
     
     # Calculate weight based on precision^2 (to emphasize precision differences)
     xgb_weight = xgb_metrics['precision']**2
-    tabnet_weight = tabnet_metrics['precision']**2
+    cat_weight = cat_metrics['precision']**2
     lgb_weight = lgb_metrics['precision']**2
     extra_weight = extra_metrics['precision']**2
     
     # Ensure minimum contribution from each model (5%)
-    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight
+    total_weight = xgb_weight + cat_weight + lgb_weight + extra_weight
     xgb_weight = max(0.05, xgb_weight / total_weight)
-    tabnet_weight = max(0.05, tabnet_weight / total_weight)
+    cat_weight = max(0.05, cat_weight / total_weight)
     lgb_weight = max(0.05, lgb_weight / total_weight)
     extra_weight = max(0.05, extra_weight / total_weight)
     
     # Renormalize
-    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight
+    total_weight = xgb_weight + cat_weight + lgb_weight + extra_weight
     weights = {
         'xgb': xgb_weight / total_weight,
-        'tabnet': tabnet_weight / total_weight,
+        'cat': cat_weight / total_weight,
         'lgb': lgb_weight / total_weight,
         'extra': extra_weight / total_weight
     }

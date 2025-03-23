@@ -18,8 +18,9 @@ Betting applications and soccer analytical platforms require accurate prediction
 ## 4. Key Features
 
 - **Ensemble Model Architecture:**
+  - Leverages multiple state-of-the-art models, including LightGBM, XGBoost, CatBoost, and RandomForest, to enhance prediction performance.
+  - Employs ensemble techniques such as dynamic weighting, probability calibration, and threshold tuning to combine model outputs, aiming for a target precision of ≥50%.
   - Integrates base models from `/models/StackedEnsemble` and `/models/ensemble`.
-  - Uses ensemble techniques to combine predictions and improve precision.
 
 - **Dynamic Feature Engineering:**
   - Custom feature extraction tailored to soccer match data utilizing utilities in `/utils` (e.g., `feature_selection.py`, `advanced_goal_features.py`).
@@ -34,35 +35,29 @@ Betting applications and soccer analytical platforms require accurate prediction
   - Comprehensive tracking with MLflow for model parameters, metrics, and artifact registration.
 
 ## 5. Target Audience
-
 - **Betting Companies:** To support data-driven betting strategies with accurate predictions.
 - **Soccer Analytics Firms:** Providing insights on match outcomes and performance metrics.
 - **Data Scientists and ML Engineers:** Interested in advanced ensemble methods and reproducible research.
 
 ## 6. Success Metrics
-
 - **Precision & Recall:** Meeting or exceeding target precision (>= 0.50) and maintaining adequate recall (>= 0.25).
 - **Reproducibility:** Consistent model performance, verified via MLflow tracking.
 - **User Adoption:** Positive feedback from beta deployments and real-world applications in betting platforms.
 
 ## 7. Constraints
-
 - The system is optimized for CPU-only environments; GPU-based techniques are not currently supported.
 - Data quality is critical; the input data must be clean and contain all required features for accurate predictions.
 
 ## 8. Environment and Dependencies
-
 - **Operating System:** Windows 11
 - **Python Version:** 3.9+
 - **Key Dependencies:** LightGBM, XGBoost, scikit-learn, Optuna, MLflow, Pandas, NumPy
 - **Environment Management:** Use a Python virtual environment with dependencies installed using `pip install -r requirements.txt`.
 
 ## 9. Future Enhancements
-
 - **Model Extensions:** Incorporate additional base models and explore deeper neural network architectures.
 - **GPU Support:** In future releases, extend support to GPU-based training for scalability.
 - **Enhanced Data Validation:** Implement robust anomaly detection mechanisms in the data preprocessing pipeline.
 
 ## 10. Conclusion
-
 The Soccer Prediction Project is poised to deliver a state-of-the-art solution for soccer match prediction. By leveraging an ensemble of machine learning models, advanced feature engineering, and rigorous experiment tracking, the system aims to provide high-precision predictions that are critical for effective soccer analytics and betting decision-making. ಠ_ಠ

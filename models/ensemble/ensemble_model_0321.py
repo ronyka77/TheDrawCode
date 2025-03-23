@@ -127,29 +127,29 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             objective='binary:logistic',
             eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.030000000000000002,
-            max_depth=6,
-            min_child_weight=420,
-            subsample=0.59,
-            colsample_bytree=0.6599999999999999,
-            reg_alpha=27.1,
-            reg_lambda=6.67,
-            gamma=1.58,
-            early_stopping_rounds=1350,
-            scale_pos_weight=3.12,
+            learning_rate=0.005,
+            max_depth=8,
+            min_child_weight=250,
+            subsample=0.6799999999999999,
+            colsample_bytree=0.61,
+            reg_alpha=17.7,
+            reg_lambda=4.220000000000001,
+            gamma=1.5,
+            early_stopping_rounds=960,
+            scale_pos_weight=4.44,
             seed=19
         )
         self.model_cat = CatBoostClassifier( #38.1%
-            learning_rate=0.055,
-            depth=7,
-            min_data_in_leaf=165,
-            subsample=0.5900000000000001,
-            colsample_bylevel=0.5800000000000001,
-            reg_lambda=0.6540483398088304,
-            leaf_estimation_iterations=12,
-            bagging_temperature=9.3,
-            scale_pos_weight=4.7,
-            early_stopping_rounds=700,
+            learning_rate=0.1,
+            depth=11,
+            min_data_in_leaf=20,
+            subsample=0.63,
+            colsample_bylevel=0.6799999999999999,
+            reg_lambda=5.335330904540154,
+            leaf_estimation_iterations=20,
+            bagging_temperature=4.1,
+            scale_pos_weight=4.25,
+            early_stopping_rounds=430,
             loss_function='Logloss',
             eval_metric='AUC',
             custom_metric=['Precision', 'Recall'],
@@ -164,20 +164,20 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             n_jobs=4,
             random_state=19,
             device='cpu',
-            learning_rate=0.135,
-            num_leaves=75,
-            max_depth=9,
-            min_child_samples=230,
-            feature_fraction=0.6900000000000001,
-            bagging_fraction=0.665,
+            learning_rate=0.115,
+            num_leaves=55,
+            max_depth=7,
+            min_child_samples=200,
+            feature_fraction=0.67,
+            bagging_fraction=0.675,
             bagging_freq=11,
-            reg_alpha=6.7,
-            reg_lambda=7.7,
-            min_split_gain=0.19,
-            early_stopping_rounds=550,
-            path_smooth=0.095,
-            cat_smooth=28.1,
-            max_bin=340
+            reg_alpha=2.5,
+            reg_lambda=6.2,
+            min_split_gain=0.12000000000000001,
+            early_stopping_rounds=670,
+            path_smooth=0.54,
+            cat_smooth=18.700000000000003,
+            max_bin=610
         )
         self.xgb_features = import_selected_features_ensemble(model_type='xgb')
         self.cat_features = import_selected_features_ensemble(model_type='cat')
@@ -459,15 +459,12 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         # Train meta-learner
         self.logger.info("Training meta-learner...")
-        # self.meta_learner = train_meta_learner(self.meta_learner, meta_df, y_val)
         self.meta_learner = hypertune_meta_learner(meta_df_train, y_combined, meta_df, y_val, 
                                                     meta_learner_type=self.meta_learner_type, target_precision=self.target_precision, min_recall=self.required_recall)
         # Step 10: Tune threshold for optimal precision-recall trade-off
         self.logger.info(f"Tuning threshold for target precision {self.target_precision}...")
-        
         # Get meta-learner predictions on validation data
         meta_val_probs = self.meta_learner.predict_proba(meta_df)[:, 1]
-        
         # Tune threshold
         best_threshold, threshold_metrics = tune_threshold_for_precision(
             meta_val_probs, y_val, 

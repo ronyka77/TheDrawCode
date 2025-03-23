@@ -27,28 +27,30 @@ graph TD;
   Data is loaded, cleaned, and validated using utilities in the `/utils` folder. This stage prepares the dataset for training by ensuring quality and proper formatting.
 
 - **Feature Engineering:**  
-  Custom feature engineering is implemented in `/utils/feature_selection.py` and `/utils/advanced_goal_features.py` to extract soccer-specific insights.
+  Custom feature engineering is implemented in  `/utils/advanced_goal_features.py` to extract soccer-specific insights.
 
 - **Base Model Training:**  
-  Base models, including LightGBM, XGBoost, and others, are implemented in the `/models/StackedEnsemble` and `/models/ensemble` directories. These models are trained individually using optimized parameters for CPU-only environments.
+  Base models, including **XGBoost**, **TabNet**, and **LightGBM**, are implemented in the `/models/StackedEnsemble` and `/models/ensemble` directories. The ensemble pipeline trains these as core models. **TabNet** is integrated via `pytorch_tabnet.tab_model.TabNetClassifier` with parameters tuned for high precision (learning_rate=0.02196, n_d=11, n_a=16, n_steps=9, gamma=1.8, lambda_sparse=2.48893e-05, momentum=0.95, mask_type='entmax').
+  
+- **Extra Model Options:**  
+  Additional models such as **CatBoost**, **RandomForest**, **SVM**, and **MLP** are available as extra model options. CatBoost has been moved from the primary base models to the extra options.
 
 - **Hyperparameter Tuning & Optimization:**  
-  Hyperparameter tuning is performed using Optuna with persistent storage (e.g., SQLite via `optuna_lightgbm.db`). Dynamic sampling methods from `/utils/dynamic_sampler.py` help refine model parameters further.
+  Hyperparameter tuning is performed using Optuna with persistent storage (e.g., SQLite via `optuna_lightgbm.db`).
 
 - **Ensemble Learning:**  
-  Predictions from the base models are combined to form a robust ensemble. The ensemble method harmonizes diverse model outputs to improve prediction precision.
+  The ensemble model integrates multiple base models by combining their predictions through a stacking approach. The meta-learner dynamically weights and calibrates each model's output, and threshold tuning refines the final prediction decision boundary.
 
 - **Threshold Optimization:**  
-  Post-training threshold tuning is applied to achieve the desired balance between precision and recall, ensuring reliable predictions for betting applications.
+  Post-training threshold tuning is performed on the ensemble's consolidated output to fine-tune the decision boundary, ensuring reliable predictions tailored for betting applications.
 
 - **Prediction Service:**  
-  The final ensemble model is deployed through the prediction service found in `/predictors/predict_ensemble.py`, which serves prediction requests in real-time.
+  The final ensemble model is deployed via the prediction service found in `/predictors/predict_ensemble.py`, which serves prediction requests in real-time.
 
 - **Utilities:**  
-  MLflow is used extensively for experiment tracking, model registration, and logging (see `/utils/logger.py` and `/utils/mlflow_utils.py`). Dynamic feature selection and error monitoring are integral utilities that support the entire pipeline.
+  MLflow is used for experiment tracking, model registration, and logging, with additional utilities for dynamic feature selection and error monitoring.
 
 ## Data Flow & Process Overview
-
 1. The system ingests raw soccer match data.
 2. Features are engineered and selected based on domain knowledge.
 3. Multiple base models are trained and tuned.
@@ -58,7 +60,6 @@ graph TD;
 7. Detailed logs and metrics are tracked using MLflow for reproducibility and analysis.
 
 ## Future Enhancements
-
 - Integration of additional base models and deeper neural network architectures.
 - Extended support for GPU-based training in future releases.
 - Enhanced data validation and anomaly detection in the preprocessing stage.

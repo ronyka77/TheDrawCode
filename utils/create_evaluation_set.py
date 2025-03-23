@@ -1085,7 +1085,7 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
             features = json.load(f)
             
         # Validate loaded data structure
-        if not all(key in features for key in ['xgb', 'cat', 'lgbm', 'rf']):
+        if not all(key in features for key in ['xgb', 'cat', 'lgbm', 'rf', 'tabnet']):
             raise ValueError("JSON file missing required model keys")
             
         # Return specific model type if requested
@@ -1094,11 +1094,11 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
                 # Get intersection of features across all models
                 common_features = list(
                     set(features['xgb']).union(
-                    features['cat'], features['lgbm'], features['rf']))
+                    features['cat'], features['lgbm'], features['rf'], features['tabnet']))
                 logger.info("Returning features common to all models")
                 return common_features
-            elif model_type not in ['xgb', 'cat', 'lgbm', 'rf', 'all']:
-                raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'all'")
+            elif model_type not in ['xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'all']:
+                raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'all'")
             logger.info(f"Returning selected features for model type: {model_type}")
             return features[model_type]
             
@@ -1140,9 +1140,9 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
     """
     try:
         # Load training data
-        data_path = os.path.join(project_root, "data", "prediction", "api_prediction_eval.xlsx")
+        data_path = os.path.join(project_root, "data", "prediction", "api_prediction_eval.parquet")
         logger.info(f"Loading training data from: {data_path}")
-        data = pd.read_excel(data_path)
+        data = pd.read_parquet(data_path)
 
         # Create target variable
         data['is_draw'] = (data['match_outcome'] == 2).astype(int)
@@ -1162,6 +1162,9 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
             'Date',
             'date',
             'referee_draw_rate', 
+            'referee_home_impact',
+            'referee_goals_per_game',
+            'referee_away_impact',
             'referee_draws', 
             'referee_match_count',
             'referee_foul_rate',

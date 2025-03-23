@@ -16,7 +16,7 @@ The project is organized into clearly defined modules:
   - Models such as LightGBM, XGBoost, and other ensemble techniques are implemented here.
 
 - **/utils:**
-  - Provides utility functions for logging (`logger.py`), MLflow integration (`mlflow_utils.py`), dynamic sampling (`dynamic_sampler.py`), and feature engineering (`feature_selection.py`, `advanced_goal_features.py`).
+  - Provides utility functions for logging (`logger.py`), MLflow integration (`mlflow_utils.py`), and feature engineering (`advanced_goal_features.py`).
   - Supports data ingestion, preprocessing, and error monitoring.
 
 - **/predictors:**
@@ -55,4 +55,30 @@ The project is organized into clearly defined modules:
 - **GPU Support:** While currently optimized for CPU, future updates may incorporate GPU-based training.
 - **Data Validation:** Continued improvements to data ingestion and anomaly detection mechanisms.
 
-By leveraging these technical strategies, the Soccer Prediction Project delivers robust, high-quality predictions crucial for effective soccer analytics in betting environments. ಠ_ಠ
+## Ensemble Model Implementation Details
+
+The ensemble model is implemented in `models/ensemble/ensemble_model_0321.py` and integrates multiple base models as follows:
+
+- **XGBoost:** Utilizes `XGBClassifier` with CPU-only settings (e.g., `tree_method='hist'`, `device='cpu'`, `nthread=4`) and parameters tuned for optimal precision.
+- **TabNet:** Integrated using `TabNetClassifier` from the `pytorch_tabnet.tab_model` package. It is configured with the following key parameters:
+    - learning_rate: 0.02196
+    - n_d: 11
+    - n_a: 16
+    - n_steps: 9
+    - gamma: 1.8
+    - lambda_sparse: 2.48893e-05
+    - momentum: 0.95
+    - mask_type: 'entmax'
+- **LightGBM:** Configured with `LGBMClassifier` using a binary objective with hyperparameters set for robust performance.
+
+Extra base model options have been updated to include **CatBoost** (along with RandomForest, SVM, and MLP), which is now removed from the primary base model lineup.
+
+These base models are trained on selected feature subsets independently. Their probability outputs on validation data are then used to create meta-features through a stacking approach. The ensemble combines these predictions by:
+
+- **Dynamic Weighting:** Calculating model-specific weights based on validation precision, emphasizing the models with stronger performance.
+
+- **Probability Calibration:** Optionally calibrating the outputs (using methods such as sigmoid calibration) to refine each model's probability estimates.
+
+- **Threshold Tuning:** Determining an optimal decision threshold (via functions like `tune_threshold_for_precision`) to achieve a target precision (typically ≥50%), balancing precision and recall effectively.
+
+This configuration is designed to drive improved precision, which is critical for reliable predictions in betting applications.

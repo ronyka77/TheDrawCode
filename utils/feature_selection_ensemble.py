@@ -21,6 +21,8 @@ import random
 import sys
 from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
+from pytorch_tabnet.tab_model import TabNetClassifier
+import torch
 
 # Add project root to Python path
 try:
@@ -134,10 +136,25 @@ def select_features(
         cat_smooth=18.3,
         max_bin=250
     )
+    tabnet_model = TabNetClassifier(
+        n_d=11,
+        n_a=16,
+        n_steps=9,
+        gamma=1.8,
+        lambda_sparse=2.4889331018199245e-05,
+        momentum=0.9500000000000001,
+        mask_type='entmax',
+        device_name='cpu',
+        optimizer_fn=torch.optim.Adam,
+        optimizer_params={'lr': 0.021963953605914036},
+        verbose=0,
+        seed=19
+    )
     models = {
         "xgb": xgb_model,
         "cat": cat_model,
-        "lgbm": lgbm_model
+        "lgbm": lgbm_model,
+        "tabnet": tabnet_model
     }
     # DataFrame to store importance scores for each feature from each model.
     importance_df = pd.DataFrame(index=X.columns)
@@ -145,12 +162,12 @@ def select_features(
     for name, model in models.items():
         model.fit(X, y)
         if name == "xgb":
-            # same order as X.columns.
             imp = model.feature_importances_
         elif name == "cat":
-            # CatBoost provide importance as an np.array corresponding to features.
             imp = model.get_feature_importance()
         elif name == "lgbm":
+            imp = model.feature_importances_
+        elif name == "tabnet":
             imp = model.feature_importances_
         else:
             imp = np.zeros(X.shape[1])
@@ -197,6 +214,20 @@ def select_features_differentiated(
     
     fixed_features = fixed_features or []
     models = {
+        "tabnet": TabNetClassifier(
+            n_d=11,
+            n_a=16,
+            n_steps=9,
+            gamma=1.8,
+            lambda_sparse=2.4889331018199245e-05,
+            momentum=0.9500000000000001,
+            mask_type='entmax',
+            device_name='cpu',
+            optimizer_fn=torch.optim.Adam,
+            optimizer_params={'lr': 0.021963953605914036},
+            verbose=0,
+            seed=19
+        ),
         "xgb": XGBClassifier(
             tree_method='hist',  # Required for CPU-only training per project rules
             device='cpu',
@@ -204,16 +235,16 @@ def select_features_differentiated(
             objective='binary:logistic',
             eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.06,
-            max_depth=7,
-            min_child_weight=340,
-            subsample=0.69,
-            colsample_bytree=0.8699999999999999,
-            reg_alpha=20.8,
-            reg_lambda=2.6,
-            gamma=3.5,
-            early_stopping_rounds=860,
-            scale_pos_weight=3.04,
+            learning_rate=0.02,
+            max_depth=9,
+            min_child_weight=390,
+            subsample=0.77,
+            colsample_bytree=0.6499999999999999,
+            reg_alpha=31.0,
+            reg_lambda=6.3500000000000005,
+            gamma=0.9400000000000001,
+            early_stopping_rounds=600,
+            scale_pos_weight=2.5,
             seed=19
         ),
         "cat": CatBoostClassifier(
@@ -241,20 +272,20 @@ def select_features_differentiated(
             n_jobs=4,
             random_state=19,
             device='cpu',
-            learning_rate=0.11,
-            num_leaves=145,
+            learning_rate=0.08,
+            num_leaves=110,
             max_depth=9,
-            min_child_samples=170,
-            feature_fraction=0.62,
-            bagging_fraction=0.635,
-            bagging_freq=8,
-            reg_alpha=2.7,
-            reg_lambda=8.3,
-            min_split_gain=0.11,
-            early_stopping_rounds=610,
-            path_smooth=0.125,
-            cat_smooth=16.8,
-            max_bin=590
+            min_child_samples=290,
+            feature_fraction=0.5900000000000001,
+            bagging_fraction=0.56,
+            bagging_freq=10,
+            reg_alpha=8.100000000000001,
+            reg_lambda=5.0,
+            min_split_gain=0.24000000000000002,
+            early_stopping_rounds=650,
+            path_smooth=0.17,
+            cat_smooth=25.900000000000002,
+            max_bin=230
         ),
         "rf": RandomForestClassifier(
             n_estimators=540,
@@ -284,6 +315,17 @@ def select_features_differentiated(
             imp = np.array(model.feature_importances_)
         elif name == "rf":
             model.fit(X, y)
+            imp = np.array(model.feature_importances_)
+        elif name == "tabnet":
+            model.fit(
+                X.values, y.values,
+                eval_set=[(X_val.values, y_val.values)],
+                eval_metric=['auc', 'logloss'],
+                patience=10,
+                max_epochs=100,
+                batch_size=1024,
+                virtual_batch_size=128
+            )
             imp = np.array(model.feature_importances_)
         else:
             imp = np.zeros(X.shape[1])
@@ -318,6 +360,7 @@ def select_features_differentiated(
         "cat": selected["cat"],
         "lgbm": selected["lgbm"],
         "rf": selected["rf"],
+        "tabnet": selected["tabnet"],
         "union": union_features
     }
 
@@ -363,6 +406,23 @@ if __name__ == "__main__":
     # Ensure consistent column order and alignment
     features_combined = features_combined[features_train.columns]
     target_combined = pd.concat([target_train, target_test], axis=0)
+    # Handle NaN values by filling with column means for numeric columns
+    logger.info("Handling NaN values in features")
+    numeric_cols = features_combined.select_dtypes(include=np.number).columns
+    features_combined[numeric_cols] = features_combined[numeric_cols].fillna(features_combined[numeric_cols].mean())
+    features_val[numeric_cols] = features_val[numeric_cols].fillna(features_combined[numeric_cols].mean())
+    
+    # For categorical columns, fill with mode
+    categorical_cols = features_combined.select_dtypes(include=['object', 'category']).columns
+    for col in categorical_cols:
+        mode_val = features_combined[col].mode()[0]
+        features_combined[col] = features_combined[col].fillna(mode_val)
+        features_val[col] = features_val[col].fillna(mode_val)
+    
+    # Verify no NaN values remain
+    if features_combined.isna().any().any() or features_val.isna().any().any():
+        logger.error("NaN values still present after imputation")
+        raise ValueError("Failed to handle all NaN values")
     # Log the merge operation
     logger.info(f"Merged training and test features. Combined shape: {features_combined.shape}")
     selected_features = select_features_differentiated(features_combined, target_combined, features_val, target_val, verbose=True)

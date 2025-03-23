@@ -14,6 +14,8 @@ from pymongo import MongoClient
 from sklearn.metrics import recall_score, f1_score
 from xgboost import XGBClassifier
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Suppress pandas chained assignment warnings
+pd.options.mode.chained_assignment = None  # default='warn'
 
 from utils.create_evaluation_set import get_real_api_scores_from_excel, setup_mlflow_tracking, create_prediction_set_ensemble
 
@@ -67,7 +69,7 @@ class DrawPredictor:
         extra_cols = set(df.columns) - set(self.required_features)
         if extra_cols:
             df.drop(columns=list(extra_cols), inplace=True, errors='ignore')
-            print(f"Dropped columns: {extra_cols}")
+            # print(f"Dropped columns: {extra_cols}")
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
 
@@ -90,8 +92,6 @@ class DrawPredictor:
                 setattr(self.model, "use_label_encoder", False)
                 predictions = self.model.predict(df)
                 pos_probas = self.model.predict_proba(df)
-        print(f"pos_probas: {pos_probas}")
-        print(f"predictions: {predictions}")
         
         results = {
             'predictions': predictions.tolist(),
@@ -203,8 +203,6 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Drop rows with NaN in is_draw column
         predict_df = predict_df.dropna(subset=['is_draw'])
         print(f"Merged prediction data with real scores and dropped NaN is_draw. Shape: {predict_df.shape}")
-        # Make predictions first
-        # threshold, best_metrics = predictor._find_optimal_threshold(predictor.model, predict_df, predict_df['is_draw'])
         
         # Add predictions to dataframe using .loc to avoid SettingWithCopyWarning
         prediction_df = prediction_df.copy()  # Create explicit copy
@@ -295,6 +293,39 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         print(f"Error type: {type(e).__name__}")
         return pd.DataFrame(), 0.0, 0.0
 
+def apply_threshold_filter(df: pd.DataFrame, remove_thresholds: List[float]) -> pd.DataFrame:
+    """
+    Remove all rows from df where 'draw_probability' matches any of the remove_thresholds.
+    Args:
+        df (pd.DataFrame): DataFrame with predictions.
+        remove_thresholds (List[float]): List of threshold values to remove.
+    
+    Returns:
+        pd.DataFrame: Filtered DataFrame.
+    """
+    # Create a mask for rows to keep (where draw_probability is not in remove_thresholds)
+    mask = ~df['draw_probability'].isin(remove_thresholds)
+    
+    # Count number of rows being deleted for each threshold
+    for threshold in remove_thresholds:
+        num_deleted = (df['draw_probability'] == threshold).sum()
+        print(f"Deleted {num_deleted} rows at threshold {threshold}")
+    
+    # Apply the filter and return the filtered DataFrame
+    return df[mask]
+
+def apply_keep_thresholds_filter(df: pd.DataFrame, allowed_thresholds: List[float]) -> pd.DataFrame:
+    """
+    Keep only rows in df where 'draw_probability' is one of the allowed_threshold values.
+    Args:
+        df (pd.DataFrame): DataFrame with predictions.
+        allowed_thresholds (List[float]): List of allowed threshold values.
+    Returns:
+        pd.DataFrame: Filtered DataFrame.
+    """
+    condition = df['draw_probability'].isin(allowed_thresholds)
+    return df[condition]
+
 def main():
     best_precision = 0
     best_model_uri = None
@@ -302,23 +333,52 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        # 'f04b93479ee249f6bc77204e5c4b206f', #59, 60
-        # '035abdf986654b1e8b551d0ce044c929', #57, 58, 60, 61
-        # '8d80522037ae4a9790b72129c06851a4', #45, 47 
-        # 'd3c066618b4d425fbb2ffff99a478238', #59, 60, 64, 65, 66, 69
-        # '7c12f45bc2c442818cf09c497eef4176', #32, 33
-        # '58f6a2c94ced4c1a9c724d19224cca8c', #32, 34, 36, 37
-        # '1b64ed01857f4abf9892de9c22707151', #33, 34
-        # 'b850fb10b2f04741ad787aebee0307a4', #30, 31, 34
-        # 'ee17cebf244e473ba8e661bcdd442d50', #KEEP 29, 31, 36
+        # 'f04b93479ee249f6bc77204e5c4b206f', 
+        # '035abdf986654b1e8b551d0ce044c929', 
+        # '8d80522037ae4a9790b72129c06851a4', 
+        # 'd3c066618b4d425fbb2ffff99a478238', 
+        # '7c12f45bc2c442818cf09c497eef4176', 
+        # '58f6a2c94ced4c1a9c724d19224cca8c', 
+        # '1b64ed01857f4abf9892de9c22707151', 
+        # 'ee17cebf244e473ba8e661bcdd442d50', 
         # 'f20a9ef589a341bfb39941593e0af0ac', 
-        # '5befa2bf2b5d4ae6866f3cc177c7b68f', #KEEP 30, 32
-        # '97207cdaab54477fa267d8cd29ce35e9', #31, 32, 34, 37
-        # '403c8c5eaaf442898594e45e6998cff4', #33, 38
-        # '835b997b8acd46f7a72ab5350451e427', #36
-        # 'e6411ed2e93a4dd4b4a756d228edf18e', #41
-        '2a6741a91ec74ccea16bc7bab242fab3', #41
+        # '5befa2bf2b5d4ae6866f3cc177c7b68f', 
+        # '97207cdaab54477fa267d8cd29ce35e9', 
+        # '403c8c5eaaf442898594e45e6998cff4', 
+        # '835b997b8acd46f7a72ab5350451e427', 
+        # '538f96a0c783429f9f2e6967cc4693a2', 
+        # 'ab80dd2cc30a4eb3a7279c051b07ce90', 
+        # '3cf20b90b809469d87fe11bfc79d1234',
+        # '01d70371af714f87b0b15393a5ce6853', 
+        '9d1caf1dbee3488187b496c2c61f948d'
     ]
+    # Filter configuration to remove predictions near specific thresholds
+    filter_config = {
+        'f04b93479ee249f6bc77204e5c4b206f': {"remove_thresholds": [0.59]},  
+        '8d80522037ae4a9790b72129c06851a4': {"remove_thresholds": [0.45, 0.47]},  
+        'd3c066618b4d425fbb2ffff99a478238': {"remove_thresholds": [0.59, 0.60, 0.64, 0.65, 0.66, 0.69]},  
+        '5befa2bf2b5d4ae6866f3cc177c7b68f': {"remove_thresholds": [0.30, 0.31, 0.32, 0.33, 0.34, 0.35]},  
+        '7c12f45bc2c442818cf09c497eef4176': {"remove_thresholds": [0.32, 0.33]},  
+        '58f6a2c94ced4c1a9c724d19224cca8c': {"remove_thresholds": [0.32, 0.35, 0.36, 0.40, 0.41, 0.42]},  
+        '835b997b8acd46f7a72ab5350451e427': {"remove_thresholds": [0.36, 0.31, 0.32]},  
+        'ab80dd2cc30a4eb3a7279c051b07ce90': {"remove_thresholds": [0.33, 0.34, 0.38]},  
+        '01d70371af714f87b0b15393a5ce6853': {"remove_thresholds": [0.37, 0.41]},  
+    }
+    
+    # Keep configuration to only allow predictions near specific thresholds
+    keep_config = {
+        'ee17cebf244e473ba8e661bcdd442d50': {"keep_thresholds": [0.29, 0.31, 0.36]},        
+        '97207cdaab54477fa267d8cd29ce35e9': {"keep_thresholds": [0.31, 0.32, 0.34, 0.37]},  
+        '8d80522037ae4a9790b72129c06851a4': {"keep_thresholds": [0.47, 0.48]},  
+        'd3c066618b4d425fbb2ffff99a478238': {"keep_thresholds": [0.66, 0.68, 0.71, 0.72, 0.73]},  
+        '1b64ed01857f4abf9892de9c22707151': {"keep_thresholds": [0.30, 0.34]},  
+        'ee17cebf244e473ba8e661bcdd442d50': {"keep_thresholds": [0.33, 0.35]},  
+        '035abdf986654b1e8b551d0ce044c929': {"keep_thresholds": [0.61, 0.62, 0.65, 0.68, 0.72]},  
+        '538f96a0c783429f9f2e6967cc4693a2': {"keep_thresholds": [0.33, 0.40, 0.41, 0.43, 0.48]},  
+        '403c8c5eaaf442898594e45e6998cff4': {"keep_thresholds": [0.35, 0.37, 0.42]},  
+    }
+    
+    
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
     prediction_data = prediction_df.copy()
@@ -330,19 +390,34 @@ def main():
         print(f"real_scores_df: {len(real_scores_df)}")
     except Exception as e:
         print(f"Error processing fixture IDs: {str(e)}")
-        print(f"Error type: {type(e).__name__}")
-        # Create empty DataFrame to allow continuation
         real_scores_df = pd.DataFrame()
+    
     # Evaluate each model
     for uri in model_uris:
         try:
             uri_full = f"runs:/{uri}/ensemble_model"
             predicted_df, precision, draws_recall = make_prediction(prediction_data, uri_full, real_scores_df)
-            # Add validation check
             if not isinstance(predicted_df, pd.DataFrame) or predicted_df.empty:
                 print(f"Skipping invalid predictions from model {uri}")
                 continue
-                
+            
+            # --- Apply remove threshold filtering if configured for this model ---
+            config = filter_config.get(uri, None)
+            if config is not None:
+                remove_thresholds = config.get("remove_thresholds", None)
+                if remove_thresholds is not None:
+                    print(f"Applying remove threshold filter for model {uri}: removing all predictions with draw_probability in {remove_thresholds}")
+                    predicted_df = apply_threshold_filter(predicted_df, remove_thresholds)
+            # --- Apply keep threshold filtering if configured for this model ---
+            config_keep = keep_config.get(uri, None)
+            if config_keep is not None:
+                allowed_thresholds = config_keep.get("keep_thresholds", None)
+                if allowed_thresholds is not None:
+                    print(f"Applying keep threshold filter for model {uri}: keeping only predictions with draw_probability in {allowed_thresholds}")
+                    predicted_df = apply_keep_thresholds_filter(predicted_df, allowed_thresholds)
+            # Remove rows where draw_predicted is 0
+            predicted_df = predicted_df[predicted_df['draw_predicted'] == 1]
+            print(f"Filtered to {len(predicted_df)} rows where draw_predicted = 1")
             # Save individual model predictions
             model_output_path = Path(f"./data/prediction/ensemble/predictions_model_{uri}.xlsx")
             # Reorder columns to place draw_predicted and draw_probability last
@@ -364,13 +439,12 @@ def main():
     print(f"\nBest model URI: {best_model_uri}")
     print(f"Best precision: {best_precision:.2%}")
     
-    # Handle empty predictions
+    # Handle empty predictions for best model
     if best_predictions.empty:
         print("Warning: No valid predictions generated. Creating empty result.")
         predicted_df = pd.DataFrame(columns=['fixture_id', 'draw_predicted', 'draw_probability'])
     else:
         predicted_df = best_predictions
-        # Reorder columns to place draw_predicted and draw_probability last
         cols = [col for col in predicted_df.columns if col not in ['draw_predicted', 'draw_probability']]
         cols.extend(['draw_predicted', 'draw_probability'])
         predicted_df = predicted_df[cols]

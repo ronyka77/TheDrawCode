@@ -50,7 +50,6 @@ from utils.logger import ExperimentLogger
 experiment_name = "lightgbm_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
-from utils.dynamic_sampler import DynamicTPESampler
 from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
@@ -62,7 +61,7 @@ from models.StackedEnsemble.shared.data_loader import DataLoader
 
 # Global settings
 min_recall = 0.20  # Minimum acceptable recall
-n_trials = 20000  # Number of hyperparameter optimization trials as in notebook
+n_trials = 100000  # Number of hyperparameter optimization trials as in notebook
 
 # Base parameters as in the notebook
 base_params = {
@@ -332,13 +331,14 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             
             recall = metrics.get('recall', 0.0)
             precision = metrics.get('precision', 0.0)
-            
+            threshold = metrics.get('threshold', 0.5)
             # Optimize for precision while maintaining minimum recall
             score = precision if recall >= min_recall else 0.0
             
             logger.info(f"Trial {trial.number}:")
-            logger.info(f"  Params: {params}")
             logger.info(f"  Score: {score}")
+            logger.info(f"  Threshold: {threshold}")
+            logger.info(f"  Params: {params}")
             
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
@@ -385,7 +385,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     storage_url = "sqlite:///optuna_lightgbm.db"
     study_name = "lightgbm_optimization"
     # Total trials to conduct
-    total_trials = 20000  # Example; you can set n_trials accordingly.
+    total_trials = n_trials  # Example; you can set n_trials accordingly.
     batch_size = 1000
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
