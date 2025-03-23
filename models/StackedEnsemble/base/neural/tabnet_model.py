@@ -53,7 +53,7 @@ n_trials = 20000
 base_params = {
     'optimizer_fn': optim.Adam,
     'mask_type': 'sparsemax',
-    'eval_metric': ['auc', 'logloss', 'accuracy'],
+    'eval_metric': ['auc', 'logloss'],
     'verbose': 0,
     'seed': 19,
     'device_name': 'cpu'
@@ -71,6 +71,14 @@ os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+# PyTorch specific reproducibility settings
+torch.manual_seed(SEED)
+torch.use_deterministic_algorithms(True)  # Force deterministic algorithms
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+# Configure PyTorch threads
+torch.set_num_threads(4)
+torch.set_num_interop_threads(4)
 
 def load_hyperparameter_space():
     """
@@ -86,12 +94,12 @@ def load_hyperparameter_space():
         'n_d': {
             'type': 'int',
             'low': 4,
-            'high': 16
+            'high': 30
         },
         'n_a': {
             'type': 'int',
             'low': 4,
-            'high': 16
+            'high': 20
         },
         'n_steps': {
             'type': 'int',
@@ -100,8 +108,8 @@ def load_hyperparameter_space():
         },
         'gamma': {
             'type': 'float',
-            'low': 1.0,
-            'high': 2.0,
+            'low': 0.8,
+            'high': 2.5,
             'step': 0.05
         },
         'lambda_sparse': {
@@ -114,17 +122,18 @@ def load_hyperparameter_space():
             'type': 'float',
             'low': 0.8,
             'high': 0.99,
-            'step': 0.01
+            'step': 0.005
         },
         'patience': {
             'type': 'int',
-            'low': 15,
+            'low': 3,
             'high': 20
         },
         'max_epochs': {
             'type': 'int',
-            'low': 50,
-            'high': 150
+            'low': 40,
+            'high': 100,
+            'step': 2
         }
     }
     return hyperparameter_space

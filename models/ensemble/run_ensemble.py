@@ -36,7 +36,6 @@ except Exception as e:
 
 # Set environment variables for Git
 os.environ['GIT_PYTHON_GIT_EXECUTABLE'] = "C:/Program Files/Git/bin/git.exe"
-
 # Set fixed seed and hash seed for determinism
 SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
@@ -158,24 +157,14 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
             )
             log_all_model_params(ensemble_model)
             
-            # Analyze prediction errors on validation set (most recent data)
-            # logger.info("Analyzing prediction errors on validation set...")
-            # error_analysis = ensemble_model.analyze_prediction_errors(X_val_filtered, y_val)
-            
-            # # Explain model predictions on validation set
-            # logger.info("Explaining model predictions on validation set...")
-            # explanation = ensemble_model.explain_predictions(X_val_filtered)
-            
             # Final metrics on validation set
             logger.info("Final metrics on validation set:")
             for metric, value in training_results.items():
                 if isinstance(value, (int, float)):
                     logger.info(f"  {metric}: {value:.4f}")
             logger.info("Ensemble model execution completed successfully.")
-
             # Save model with signature to MLflow
             logger.info("Saving ensemble model with signature to MLflow...")
-            # Create an input example for signature inference
             input_example = X_val_filtered.iloc[0:1].copy()
             best_threshold = training_results['threshold']
             # Get prediction for output example

@@ -33,6 +33,11 @@ os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+# PyTorch specific reproducibility settings
+torch.manual_seed(SEED)
+torch.use_deterministic_algorithms(True)  # Force deterministic algorithms
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 from utils.logger import ExperimentLogger
 from utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
@@ -43,8 +48,6 @@ from models.ensemble.training import train_base_models, hypertune_meta_learner, 
 from models.ensemble.weights import compute_precision_focused_weights
 from models.ensemble.thresholds import tune_threshold_for_precision
 from models.ensemble.evaluation import evaluate_model
-
-
 
 class EnsembleModel(BaseEstimator, ClassifierMixin):
     def __init__(self, 
@@ -101,13 +104,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             mask_type='sparsemax',
             device_name='cpu',
             verbose=0,
-            seed=19,
-            clip_value=1,
-            epsilon=1e-15,
-            n_indep_decoder=1,
-            n_independent=2,
-            n_shared=2,
-            n_shared_decoder=1
+            seed=19
         )
         
         self.model_lgb = LGBMClassifier(
@@ -240,8 +237,9 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             from sklearn.model_selection import train_test_split
             self.logger.info("Splitting training data for validation...")
             X_train_prepared, X_val_prepared, y_train, y_val = train_test_split(X_train_prepared, y_train, test_size=val_size, random_state=19, stratify=y_train)
-        X_combined = pd.concat([X_train_prepared, X_val_prepared], axis=0)
-        y_combined = pd.concat([y_train, y_val], axis=0)
+        
+        X_combined = pd.concat([X_train_prepared, X_test_prepared], axis=0)
+        y_combined = pd.concat([y_train, y_test], axis=0)
         # Base models dictionary using updated keys
         base_models = {
             'xgb': self.model_xgb,
@@ -286,8 +284,10 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # Optionally calculate dynamic weights based on validation performance
         if self.dynamic_weighting:
             self.logger.info("Computing dynamic weights based on validation performance...")
+            # Combine validation and training predictions for weight computation
+            self.logger.info(f"Combined dataset for weight computation: {len(p_xgb_combined)} samples")
             self.dynamic_weights = compute_precision_focused_weights(
-                p_xgb, p_tabnet, p_lgb, p_extra, y_val, self.target_precision, self.required_recall, self.logger
+                p_xgb_combined, p_tabnet_combined, p_lgb_combined, p_extra_combined, y_combined_all, self.target_precision, self.required_recall, self.logger
             )
             self.dynamic_weights_train = compute_precision_focused_weights(
                 p_xgb_train, p_tabnet_train, p_lgb_train, p_extra_train, y_combined, self.target_precision, self.required_recall, self.logger

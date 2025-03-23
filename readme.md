@@ -21,7 +21,7 @@ A machine learning system that accurately predicts soccer match draws and goal p
 
 ## ✨ Key Features
 
-- **Ensemble Model Architecture**: Combines XGBoost, CatBoost, LightGBM, and neural networks for robust predictions
+- **Ensemble Model Architecture**: Combines XGBoost, TabNet, LightGBM, and optional extra models for robust predictions
 - **High-Precision Focus**: Optimized for precision with customizable threshold tuning
 - **CPU-Only Optimization**: Designed to run efficiently without GPU requirements
 - **Reproducible Results**: Fixed seeds and deterministic operations for consistent outcomes
@@ -32,7 +32,15 @@ A machine learning system that accurately predicts soccer match draws and goal p
 
 ![System Architecture](https://via.placeholder.com/800x400?text=Soccer+Prediction+Architecture)
 
-The system employs a multi-stage ensemble approach:
+The system employs a multi-stage ensemble approach with the following components:
+
+- **Data Ingestion & Preprocessing**: Data loading, cleaning, and validation
+- **Feature Engineering**: Soccer-specific feature extraction
+- **Base Model Training**: Training of XGBoost, TabNet, and LightGBM models
+- **Hyperparameter Tuning**: Optimization using Optuna with persistent storage
+- **Ensemble Learning**: Stacking approach with dynamic weighting
+- **Threshold Optimization**: Fine-tuning for high precision predictions
+- **Prediction Service**: Deployment for real-time predictions
 
 ## 🚀 Installation
 
@@ -139,7 +147,7 @@ Then navigate to `http://localhost:5000` in your browser.
 The system follows this workflow:
 
 1. **Data Preparation**: Feature engineering and validation
-2. **Base Model Training**: Training multiple models (XGBoost, CatBoost, LightGBM, etc.)
+2. **Base Model Training**: Training primary models (XGBoost, TabNet, LightGBM)
 3. **Probability Calibration**: Optional sigmoid/isotonic calibration
 4. **Meta-Feature Creation**: Converting base model predictions to meta-features
 5. **Meta-Learner Training**: Training a model to combine base predictions
@@ -156,6 +164,32 @@ The system follows this workflow:
 | `MKL_NUM_THREADS` | Number of MKL threads | `4` |
 | `OPENBLAS_NUM_THREADS` | Number of OpenBLAS threads | `4` |
 | `PYTHONHASHSEED` | Python hash seed for reproducibility | `19` |
+| `NUMEXPR_NUM_THREADS` | Number of NumExpr threads | `4` |
+| `VECLIB_MAXIMUM_THREADS` | Number of VecLib threads | `4` |
+
+### Primary Base Models
+
+The ensemble includes the following primary base models:
+
+1. **XGBoost**: CPU-optimized with `tree_method='hist'` and `device='cpu'`
+2. **TabNet**: Neural network configuration with parameters:
+   - learning_rate: 0.02196
+   - n_d: 11
+   - n_a: 16
+   - n_steps: 9
+   - gamma: 1.8
+   - lambda_sparse: 2.48893e-05
+   - momentum: 0.95
+   - mask_type: 'entmax'
+3. **LightGBM**: Configured with binary objective and optimized parameters
+
+### Extra Model Options
+
+Additional models that can be used as extra base models:
+- CatBoost (moved from primary to extra options)
+- RandomForest
+- SVM
+- MLP
 
 ### Model Parameters
 
@@ -229,6 +263,34 @@ model = EnsembleModel(
     extra_base_model_type='mlp',
     batch_size=32  # Smaller batch size
 )
+```
+
+#### TabNet CPU Core Configuration
+
+**Problem**: TabNet using more CPU cores than allocated.
+
+**Solution**: Explicitly configure thread limits for TabNet:
+
+```python
+import os
+import torch
+
+# Set environment variables
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["NUMEXPR_NUM_THREADS"] = "4"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+
+# Configure PyTorch threads
+torch.set_num_threads(4)
+torch.set_num_interop_threads(4)
+
+# When initializing TabNet
+tabnet_params = {
+    'device_name': 'cpu',
+    'num_workers': 4
+}
 ```
 
 ## 👥 Contributing

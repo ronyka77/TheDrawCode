@@ -113,3 +113,4 @@ optuna_xgboost.db
 optuna_lightgbm.db
 tasks/
 optuna_tabnet.db
+optuna_xgboost_base.db

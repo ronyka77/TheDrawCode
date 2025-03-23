@@ -6,20 +6,26 @@ Functions for training the ensemble models.
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
-from sklearn.linear_model import SGDClassifier
-from sklearn.neural_network import MLPClassifier
-from xgboost import XGBClassifier
 from typing import Dict, List, Tuple, Optional, Union
 import mlflow
 import time
 import random
 import xgboost as xgb
+from xgboost import XGBClassifier
 import lightgbm as lgb
+from lightgbm import LGBMClassifier
 import tensorflow as tf
 from tensorflow.keras import layers, regularizers, callbacks
+from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
+from sklearn.linear_model import SGDClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import precision_score, recall_score, f1_score
+from pytorch_tabnet.tab_model import TabNetClassifier
+import torch
 import os
 import warnings
+import optuna
+from optuna.samplers import TPESampler
 
 from utils.logger import ExperimentLogger
 logger = ExperimentLogger(experiment_name="ensemble_model_training",
@@ -29,6 +35,7 @@ logger = ExperimentLogger(experiment_name="ensemble_model_training",
 from models.ensemble.bayesian_meta_learner import BayesianMetaLearner, train_with_optimal_parameters
 from models.ensemble.ResNet import ResNetMetaLearner
 from utils.create_evaluation_set import import_selected_features_ensemble
+from models.ensemble.thresholds import tune_threshold_for_precision
 
 # Filter scikit-learn parameter renaming warnings
 warnings.filterwarnings("ignore", message=".*force_all_finite.*", category=FutureWarning)
@@ -48,6 +55,14 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+# PyTorch specific reproducibility settings
+torch.manual_seed(random_seed)
+torch.use_deterministic_algorithms(True)  # Force deterministic algorithms
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+# Configure PyTorch threads
+torch.set_num_threads(4)
+torch.set_num_interop_threads(4)
 
 def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
     """
@@ -83,9 +98,6 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
         
         logger.info("XGBoost meta-learner initialized with CPU-optimized settings")
     elif meta_learner_type.lower() == 'tabnet':
-        # Import TabNetClassifier
-        from pytorch_tabnet.tab_model import TabNetClassifier
-        
         # TabNet meta-learner with CPU settings
         meta_learner = TabNetClassifier(
             learning_rate=0.02,
@@ -103,8 +115,6 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
         
         logger.info("TabNet meta-learner initialized with CPU-optimized settings")
     elif meta_learner_type.lower() == 'lgb':
-        from lightgbm import LGBMClassifier
-        import lightgbm as lgb
         meta_learner = LGBMClassifier(
             objective='binary',
             boosting_type='gbdt',
@@ -187,15 +197,12 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
         )
         
         logger.info("SGDClassifier meta-learner initialized with log_loss loss function")
-
     elif meta_learner_type.lower() == 'resnet':
         meta_learner = ResNetMetaLearner()
         logger.info("ResNetMetaLearner meta-learner initialized")
-
     elif meta_learner_type.lower() == 'bayesian':
         meta_learner = BayesianMetaLearner()
         logger.info("BayesianMetaLearner meta-learner initialized")
-
     else:
         logger.error(f"Unknown meta_learner_type: {meta_learner_type}")
         raise ValueError(f"Unknown meta_learner_type: {meta_learner_type}. "
@@ -495,18 +502,41 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     Returns:
         tuple: (best_meta_learner, best_threshold)
     """
-    from utils.logger import ExperimentLogger
+    import os
     import optuna
-    from optuna.samplers import TPESampler
-    import mlflow
+    import random
     import numpy as np
-    from sklearn.metrics import precision_score, recall_score, f1_score
-    from models.ensemble.thresholds import tune_threshold_for_precision
+    import tensorflow as tf
+    import xgboost as xgb
+    from xgboost import XGBClassifier
+    import lightgbm as lgb
+    from lightgbm import LGBMClassifier
+    from pytorch_tabnet.tab_model import TabNetClassifier
+    import torch    
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.neural_network import MLPClassifier
+    from sklearn.linear_model import SGDClassifier
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import roc_auc_score, precision_recall_curve, auc, accuracy_score, f1_score, confusion_matrix
+    
+    # Set random seeds for reproducibility
+    random_seed = 19
+    random.seed(random_seed)
+    np.random.seed(random_seed)
+    tf.random.set_seed(random_seed)
+    os.environ['PYTHONHASHSEED'] = str(random_seed)
+
+    # Restrict parallel threads across various libraries
+    os.environ["OMP_NUM_THREADS"] = "4"
+    os.environ["MKL_NUM_THREADS"] = "4"
+    os.environ["OPENBLAS_NUM_THREADS"] = "4"
+    os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+    os.environ["NUMEXPR_NUM_THREADS"] = "4"
+    os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
     logger.info(f"Hyperparameter tuning for meta-learner type: {meta_learner_type}")
     def objective(trial):
         # Define hyperparameters based on meta-learner type
         if meta_learner_type == 'xgb':
-            from xgboost import XGBClassifier
             base_params = {
                 'tree_method': 'hist',
                 'objective': 'binary:logistic',
@@ -531,7 +561,6 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             params.update(base_params)
             meta_learner = XGBClassifier(**params)
         elif meta_learner_type == 'tabnet':
-            from pytorch_tabnet.tab_model import TabNetClassifier
             base_params = {
                 'device_name': 'cpu',
                 'verbose': 0,
@@ -551,8 +580,6 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             params.update(base_params)
             meta_learner = TabNetClassifier(**params)
         elif meta_learner_type == 'lgb':
-            from lightgbm import LGBMClassifier
-            import lightgbm as lgb
             base_params = {
                 'objective': 'binary',
                 'metric': ['binary_logloss', 'auc'],
@@ -580,7 +607,6 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             params.update(base_params)
             meta_learner = LGBMClassifier(**params)
         elif meta_learner_type == 'logistic':
-            from sklearn.linear_model import LogisticRegression
             base_params = {
                 'solver': 'saga',  # Compatible with all penalties
                 'max_iter': 1000,
@@ -603,7 +629,6 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 
             meta_learner = LogisticRegression(**params)
         elif meta_learner_type == 'mlp':
-            from sklearn.neural_network import MLPClassifier
             base_params = {
                 'early_stopping': True,
                 'random_state': 19
@@ -620,7 +645,6 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             
             meta_learner = MLPClassifier(**params)
         elif meta_learner_type == 'sgd':
-            from sklearn.linear_model import SGDClassifier
             base_params = {
                 'random_state': 19,
                 'n_jobs': 4
