@@ -33,14 +33,12 @@ class MongoDBFeatures:
         fixture_list = list(fixtures)
         print(f"Found {len(fixture_list)} fixtures with home.stats.")
         return fixture_list
-   
+
     def normalize_fixtures_data(self, fixtures_with_stats: List[Dict]) -> pd.DataFrame:
         """
         Normalizes the fixtures data and returns a pandas DataFrame.
-
         Args:
             fixtures_with_stats (List[Dict]): List of fixtures with home.stats.
-
         Returns:
             pd.DataFrame: Normalized fixtures data.
         """
@@ -48,7 +46,7 @@ class MongoDBFeatures:
             normalized_data = []
             
             for fixture in fixtures_with_stats:
-                 # Debug print to see the structure
+                # Debug print to see the structure
                 print(f"Fixture structure: {fixture.keys()}")
                 print(f"Home team data: {fixture['home'].keys()}")
                 

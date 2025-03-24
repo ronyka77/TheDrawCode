@@ -17,6 +17,10 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 from pytorch_tabnet.tab_model import TabNetClassifier
+import mlflow.pyfunc
+from sklearn.base import BaseEstimator
+from sklearn.metrics import precision_score, recall_score, roc_auc_score, f1_score
+from pytorch_tabnet.metrics import Metric
 
 # Set project root similar to xgboost_model.py
 try:
@@ -49,11 +53,38 @@ min_recall = 0.20
 # You can adjust n_trials if needed
 n_trials = 20000
 
-# Base parameters specific for TabNet
+# Define a class for metrics instead of a function
+class Class1Metrics(Metric):
+    def __init__(self):
+        self._name = "class1_metrics"
+        self._maximize = True
+    
+    def __call__(self, y_true, y_pred):
+        # Extract probabilities for class 1
+        y_pred_proba = y_pred[:, 1]
+        
+        # Calculate AUC specifically for class 1
+        auc = roc_auc_score(y_true, y_pred_proba)
+        
+        # Convert probabilities to binary predictions at threshold 0.5
+        y_pred_binary = (y_pred_proba >= 0.5).astype(int)
+        
+        # Calculate class 1 focused metrics
+        precision = precision_score(y_true, y_pred_binary)
+        recall = recall_score(y_true, y_pred_binary)
+        if recall >= min_recall:
+            return precision
+        else:
+            if precision > 0.5:
+                return 0.2
+            else:
+                return precision * 0.5
+
+# Then modify your base_params to include the custom metrics
 base_params = {
     'optimizer_fn': optim.Adam,
     'mask_type': 'sparsemax',
-    'eval_metric': ['auc', 'logloss'],
+    'eval_metric': ['auc', 'logloss'],  # Remove function reference here
     'verbose': 0,
     'seed': 19,
     'device_name': 'cpu'
@@ -138,11 +169,48 @@ def load_hyperparameter_space():
     }
     return hyperparameter_space
 
+class TabNetSklearnWrapper(BaseEstimator):
+    """
+    A scikit-learn compatible wrapper for TabNet that makes it compatible with MLflow's sklearn flavor.
+    """
+    def __init__(self, model=None, **kwargs):
+        self.model = model
+        self.kwargs = kwargs
+        
+    def fit(self, X, y):
+        """
+        Fit method for scikit-learn compatibility.
+        """
+        if self.model is None:
+            self.model = TabNetClassifier(**self.kwargs)
+            self.model.fit(X, y)
+        return self
+    
+    def predict(self, X):
+        """
+        Predict method for scikit-learn compatibility.
+        """
+        if hasattr(X, 'values'):
+            data = X.values
+        else:
+            data = X
+        return self.model.predict(data)
+    
+    def predict_proba(self, X):
+        """
+        Predict probability method for scikit-learn compatibility.
+        """
+        if hasattr(X, 'values'):
+            data = X.values
+        else:
+            data = X
+        return self.model.predict_proba(data)
+
 class TabNetWrapper(mlflow.pyfunc.PythonModel):
     def __init__(self, model):
         self.model = model
         
-    def predict(self, context, model_input):
+    def predict(self, model_input):
         """
         Returns class predictions.
         """
@@ -152,7 +220,7 @@ class TabNetWrapper(mlflow.pyfunc.PythonModel):
             data = model_input
         return self.model.predict(data)
     
-    def predict_proba(self, context, model_input):
+    def predict_proba(self, model_input):
         """
         Returns probability estimates for each class.
         """
@@ -206,13 +274,16 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         # Combine training and testing data similar to xgboost_model.py
         X_combined = np.concatenate([X_train, X_test], axis=0)
         y_combined = np.concatenate([y_train, y_test], axis=0)
-        # Train the model with early stopping on the evaluation set
+        
+        # Use the class (not an instance) in the eval_metric list
+        # TabNet will instantiate it internally
         model.fit(
             X_combined, y_combined,
             eval_set=[(X_eval, y_eval)],
-            eval_metric=model_params.get('eval_metric', ['auc', 'logloss', 'accuracy']),
+            eval_metric=['auc'],  # Pass the class here
             max_epochs=model_params.get('max_epochs', 50),
-            patience=model_params.get('patience', 10)
+            patience=model_params.get('patience', 10),
+            drop_last=False
         )
         # Optimize threshold using shared utility
         best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
@@ -385,6 +456,120 @@ def hypertune_tabnet(experiment_name: str):
         logger.error(f"Error in TabNet hypertuning: {str(e)}")
         return None, None
 
+def log_to_mlflow(model, metrics, params, experiment_name):
+    """
+    Log trained model, metrics, and parameters to MLflow using sklearn flavor.
+    
+    Args:
+        model: Trained TabNet model
+        metrics: Model evaluation metrics
+        params: Model parameters
+        experiment_name: Experiment name
+        
+    Returns:
+        str: Run ID
+    """
+    try:
+        # Set up MLflow tracking
+        mlflow.set_experiment(experiment_name)
+        logger.info(f"Logging model to MLflow: {experiment_name}")
+        
+        # Start a new run
+        with mlflow.start_run(run_name=f"tabnet_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
+            # Log parameters
+            for param_name, param_value in params.items():
+                mlflow.log_param(param_name, param_value)
+            logger.info(f"Logged parameters: {params}")
+            
+            # Log metrics
+            for metric_name, metric_value in metrics.items():
+                mlflow.log_metric(metric_name, metric_value)
+            logger.info(f"Logged metrics: {metrics}")
+            
+            # Create input example for signature
+            input_example = X_eval.iloc[:5] if hasattr(X_eval, 'iloc') else pd.DataFrame(X_eval[:5])
+            # Wrap the TabNet model in a scikit-learn compatible wrapper
+            sklearn_wrapper = TabNetSklearnWrapper(model=model)
+            # Create a signature for the model
+            signature = mlflow.models.infer_signature(
+                input_example,
+                sklearn_wrapper.predict(input_example)
+            )
+            
+            # Log the model using sklearn flavor
+            model_info = mlflow.sklearn.log_model(
+                sk_model=sklearn_wrapper,
+                artifact_path="model",
+                signature=signature,
+                registered_model_name=f"tabnet_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            )
+            
+            # # For backward compatibility, also save in PyFunc format
+            # tabnet_wrapper = TabNetWrapper(model)
+            # mlflow.pyfunc.log_model(
+            #     artifact_path="model_pyfunc",
+            #     python_model=tabnet_wrapper,
+            #     signature=signature
+            # )
+            
+            logger.info(f"Model logged to MLflow: {model_info.model_uri}")
+            logger.info(f"Run ID: {run.info.run_id}")
+            return run.info.run_id
+            
+    except Exception as e:
+        logger.error(f"Error logging to MLflow: {str(e)}")
+        return None
+
+def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
+    """
+    Train XGBoost model with focus on precision target.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_test: Testing features
+        y_test: Testing labels
+        X_eval: Evaluation features
+        y_eval: Evaluation labels
+        
+    Returns:
+        tuple: (best_model, best_metrics)
+    """
+    try:        
+        logger.info("Training model with precision target")
+        params = base_params.copy()
+        params.update({
+            'learning_rate': 0.0020903133670349375,
+            'n_d': 17,
+            'n_a': 16,
+            'n_steps': 9,
+            'gamma': 1.4000000000000001,
+            'lambda_sparse': 6.941514514616901e-05,
+            'momentum': 0.9550000000000001,
+            'patience': 12,
+            'max_epochs': 58,
+            'device_name': 'cpu',
+            'verbose': 1
+        })
+        
+        # Train final model with best parameters
+        logger.info("Training final model with best parameters")
+        model, metrics = train_model(
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, y_eval,
+            params
+            )
+            
+        # Log to MLflow
+        log_to_mlflow(model, metrics, params, experiment_name)
+        
+        return model, metrics
+            
+    except Exception as e:
+        logger.error(f"Error in precision-focused training: {str(e)}")
+        return None, None
+        
 def main():
     """
     Main execution function for TabNet hypertuning.
@@ -402,16 +587,20 @@ def main():
         X_train = X_train[features]
         X_test = X_test[features]
         X_eval = X_eval[features]
-
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
         logger.info(f"Current base parameters: {base_params}")
-        best_params, metrics = hypertune_tabnet(experiment_name)
-
-        logger.info(f"Hypertuning completed with parameters: {best_params}")
-        logger.info(f"Evaluation metrics: {metrics}")
+        
+        # best_params, metrics = hypertune_tabnet(experiment_name)
+        # logger.info(f"Hypertuning completed with parameters: {best_params}")
+        # logger.info(f"Evaluation metrics: {metrics}")
+        
+        # Train model with precision target
+        best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        logger.info(f"Best model: {best_model}")
+        logger.info(f"Best metrics: {best_metrics}")
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
 

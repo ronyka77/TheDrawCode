@@ -7,6 +7,8 @@ from typing import Dict, Tuple, List, Optional
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.linear_model import PoissonRegressor
+from openpyxl import Workbook
+from openpyxl.writer.excel import save_workbook
 
 class PoissonXGCalculator:
     """Enhanced Poisson Expected Goals (xG) Calculator for soccer matches."""
@@ -303,11 +305,37 @@ class PoissonXGCalculator:
         
         # Export results
         try:
-            if output_path.endswith('.xlsx'):
-                df_with_xg.to_excel(output_path, index=False)
-            else:
-                df_with_xg.to_csv(output_path, index=False)
-            self.logger.info(f"Exported {type} data to {output_path}")
+            # Create a write-only workbook and worksheet
+            wb = Workbook(write_only=True)
+            ws = wb.create_sheet('Sheet1')
+            
+            # Convert DataFrame to dictionary of records
+            records = df_with_xg.to_dict('records')
+            
+            # Initialize the prediction generator
+            prediction_generator = iter(records)
+            
+            # Retrieve the first row to determine headers
+            try:
+                first_row = next(prediction_generator)
+            except StopIteration:
+                self.logger.warning(f"No data to export for {type}")
+                return df_with_xg
+            
+            headers = list(first_row.keys())
+            ws.append(headers)
+            ws.append([first_row.get(header) for header in headers])
+            row_count = 1  # Counting first data row already written
+            
+            # Process remaining rows
+            for row_dict in prediction_generator:
+                ws.append([row_dict.get(header) for header in headers])
+                row_count += 1
+                if row_count % 1000 == 0:
+                    self.logger.info(f"Processed {row_count} rows")
+            
+            wb.save(output_path)
+            self.logger.info(f"Successfully exported {row_count} rows to {output_path}")
         except Exception as e:
             self.logger.error(f"Failed to export {type} data: {str(e)}")
             # Try alternative format if Excel export fails

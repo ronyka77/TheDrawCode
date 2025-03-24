@@ -46,7 +46,7 @@ from models.ensemble.meta_features import create_meta_features, create_meta_data
 from models.ensemble.diagnostics import explain_predictions, analyze_prediction_errors
 from models.ensemble.training import train_base_models, hypertune_meta_learner, initialize_meta_learner
 from models.ensemble.weights import compute_precision_focused_weights
-from models.ensemble.thresholds import tune_threshold_for_precision
+from models.ensemble.thresholds import tune_threshold_for_precision_optimized
 from models.ensemble.evaluation import evaluate_model
 
 class EnsembleModel(BaseEstimator, ClassifierMixin):
@@ -65,153 +65,21 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                     X_train=None):
         self.logger = logger or ExperimentLogger(experiment_name="ensemble_model_improved", log_dir="./logs/ensemble_model_improved")
         # Load selected features (for all models)
-        self.selected_features = import_selected_features_ensemble('all')
+        # self.selected_features = import_selected_features_ensemble('all')
         self.required_recall = required_recall
         self.sampling_strategy = sampling_strategy
         self.complexity_penalty = complexity_penalty
         self.target_precision = target_precision
-        self.xgb_run_id = '4acba75e42b54fca8b716ec652eab968'
+        self.xgb_run_id = '61bac8ee0e72409a8f744ac8e94551da'
         self.lgb_run_id = '7f519dc3398e4a6ab7bf8409e936ad37'
-        self.tabnet_run_id = '4e443703c98540858f303495f9ebca3a'
+        self.tabnet_run_id = '5489087d4cf54a0aa3dfb068afe4407f'
         self.rf_run_id = '5ee5fab32da74783944da445e3a20bb6'
-        # Initialize base models: XGBoost, TabNet, LightGBM
-        self.model_xgb = XGBClassifier(
-            tree_method='hist',
-            device='cpu',
-            nthread=4,
-            objective='binary:logistic',
-            eval_metric=['aucpr', 'error', 'logloss'],
-            verbosity=0,
-            learning_rate=0.06,
-            max_depth=12,
-            min_child_weight=400,
-            subsample=0.77,
-            colsample_bytree=0.82,
-            reg_alpha=53.8,
-            reg_lambda=4.91,
-            gamma=0.88,
-            early_stopping_rounds=670,
-            scale_pos_weight=2.28,
-            seed=19
-        )
-        
-        self.model_tabnet = TabNetClassifier(
-            optimizer_fn=torch.optim.Adam,
-            optimizer_params={'lr': 0.05868852179579677},
-            n_d=12,
-            n_a=15,
-            n_steps=9,
-            gamma=1.5,
-            lambda_sparse=6.883596605997507e-05,
-            momentum=0.8600000000000001,
-            mask_type='sparsemax',
-            device_name='cpu',
-            verbose=0,
-            seed=19
-        )
-        
-        self.model_lgb = LGBMClassifier(
-            objective='binary',
-            metric=['binary_logloss', 'auc'],
-            verbose=-1,
-            n_jobs=4,
-            random_state=19,
-            device='cpu',
-            learning_rate=0.125,
-            num_leaves=135,
-            max_depth=5,
-            min_child_samples=300,
-            feature_fraction=0.67,
-            bagging_fraction=0.65,
-            bagging_freq=15,
-            reg_alpha=7.1000000000000005,
-            reg_lambda=10.9,
-            min_split_gain=0.15000000000000002,
-            early_stopping_rounds=650,
-            path_smooth=0.13,
-            cat_smooth=18.1,
-            max_bin=570
-        )
 
         # Set feature sets; use xgboost features for tabnet as fallback
-        self.xgb_features = import_selected_features_ensemble(model_type='xgb')
-        self.tabnet_features = import_selected_features_ensemble(model_type='tabnet')
-        self.lgb_features = import_selected_features_ensemble(model_type='lgbm')
-        self.rf_features = import_selected_features_ensemble(model_type='rf')
-
-        # Initialize extra model options, extended with CatBoost option
-        self.extra_base_model_type = extra_base_model_type.lower()
-        if self.extra_base_model_type == 'random_forest':
-            from sklearn.ensemble import RandomForestClassifier
-            self.model_extra = RandomForestClassifier(
-                n_estimators=540,
-                max_depth=12,
-                min_samples_split=10,
-                min_samples_leaf=32,
-                max_features=0.18,
-                bootstrap=True,
-                class_weight={0: 1.0, 1: 2.2},
-                criterion='entropy',
-                random_state=19,
-                n_jobs=4
-            )
-            self.logger.info("Extra base model initialized as RandomForestClassifier.")
-        elif self.extra_base_model_type == 'svm':
-            from sklearn.svm import SVC
-            self.model_extra = SVC(
-                probability=True,
-                kernel='rbf',
-                C=1.0,
-                gamma='scale',
-                class_weight='balanced',
-                random_state=19
-            )
-            self.logger.info("Extra base model initialized as SVC.")
-        elif self.extra_base_model_type == 'mlp':
-            from tensorflow import keras
-            from tensorflow.keras import layers, regularizers
-            self.model_extra = keras.Sequential()
-            self.model_extra.add(layers.InputLayer(shape=(X_train.shape[1],)))
-            for _ in range(1):
-                self.model_extra.add(layers.Dense(
-                    120,
-                    activation='tanh',
-                    kernel_regularizer=regularizers.l1_l2(l1=0.0006252292488020048, l2=0.0010179804312458536)
-                ))
-                self.model_extra.add(layers.BatchNormalization())
-                self.model_extra.add(layers.Dropout(0.2685783444324335))
-            self.model_extra.add(layers.Dense(1, activation='sigmoid'))
-            optimizer = keras.optimizers.Adam(
-                learning_rate=0.0008586241362721754,
-                beta_1=0.9,
-                beta_2=0.999,
-                epsilon=1e-8
-            )
-            self.model_extra.compile(
-                optimizer=optimizer,
-                loss='binary_crossentropy',
-                metrics=['accuracy', keras.metrics.AUC(name='auc')]
-            )
-            self.logger.info("Extra base model initialized as MLPClassifier.")
-        elif self.extra_base_model_type == 'catboost':
-            from catboost import CatBoostClassifier
-            self.model_extra = CatBoostClassifier(
-                learning_rate=0.021,
-                depth=6,
-                min_data_in_leaf=77,
-                subsample=0.57,
-                colsample_bylevel=0.50,
-                reg_lambda=2.1,
-                early_stopping_rounds=480,
-                loss_function='Logloss',
-                eval_metric='AUC',
-                task_type='CPU',
-                thread_count=4,
-                verbose=-1
-            )
-            self.logger.info("Extra base model initialized as CatBoostClassifier.")
-        else:
-            raise ValueError(f"Unknown extra_base_model_type: {self.extra_base_model_type}")
+        # self.xgb_features = import_selected_features_ensemble(model_type='xgb')
+        # self.tabnet_features = import_selected_features_ensemble(model_type='tabnet')
+        # self.lgb_features = import_selected_features_ensemble(model_type='lgbm')
+        # self.rf_features = import_selected_features_ensemble(model_type='rf')
 
         # Meta-learner settings
         self.meta_learner_type = meta_learner_type
@@ -227,10 +95,12 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.model_lgb_calibrated = None
         self.model_extra_calibrated = None
         self.extra_model_scaler = None
+        self.load_models_from_mlflow()
 
     def train(self, X_train, y_train, X_val=None, y_val=None, X_test=None, y_test=None, split_validation=True, val_size=0.2) -> dict:
         self.logger.info("Starting ensemble model training...")
         # Data preparation
+        self.selected_features = X_train.columns
         X_train_prepared = prepare_data(X_train, self.selected_features)
         if X_val is not None:
             X_val_prepared = prepare_data(X_val, self.selected_features)
@@ -250,11 +120,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             'lgb': self.model_lgb,
             'extra': self.model_extra
         } 
-        trained_models = train_base_models(base_models, X_train_prepared, y_train, X_test_prepared, y_test, X_val_prepared, y_val)
-        self.model_xgb = trained_models.get('xgb', self.model_xgb)
-        self.model_tabnet = trained_models.get('tabnet', self.model_tabnet)
-        self.model_lgb = trained_models.get('lgb', self.model_lgb)
-        self.model_extra = trained_models.get('extra', self.model_extra)
         # Prepare feature subsets
         X_val_prepared_xgb = X_val_prepared[self.xgb_features]
         X_val_prepared_tabnet = X_val_prepared[self.tabnet_features]
@@ -320,7 +185,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # Get meta-learner predictions on validation data
         meta_val_probs = self.meta_learner.predict_proba(meta_df)[:, 1]
         # Tune threshold
-        best_threshold, threshold_metrics = tune_threshold_for_precision(
+        best_threshold, threshold_metrics = tune_threshold_for_precision_optimized(
             meta_val_probs, y_val, 
             target_precision=self.target_precision,
             required_recall=self.required_recall,
@@ -401,10 +266,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             return {"error": str(e)}
 
     def load_models_from_mlflow(self, 
-                            xgb_run_id=None, 
-                            lgb_run_id=None, 
-                            tabnet_run_id=None, 
-                            rf_run_id=None,
                             xgb_path="model",
                             lgb_path="model", 
                             tabnet_path="model",
@@ -413,17 +274,13 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         Load pre-trained models from MLflow repository and update feature signatures.
         
         Args:
-            xgb_run_id: MLflow run ID for XGBoost model (required)
-            lgb_run_id: MLflow run ID for LightGBM model (required)
-            tabnet_run_id: MLflow run ID for TabNet model (required)
-            rf_run_id: MLflow run ID for Random Forest model (required)
             xgb_path: Artifact path for XGBoost model within run
             lgb_path: Artifact path for LightGBM model within run
             tabnet_path: Artifact path for TabNet model within run
             rf_path: Artifact path for Random Forest model within run
             
         Raises:
-            ValueError: If any required run ID is missing or model loading fails
+            ValueError: If any model loading fails
         """
         import mlflow
         import mlflow.xgboost
@@ -433,135 +290,106 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         
         self.logger.info("Loading models from MLflow repository...")
         
-        # Validate run IDs
-        if not xgb_run_id:
-            raise ValueError("XGBoost run ID is required")
-        if not lgb_run_id:
-            raise ValueError("LightGBM run ID is required")
-        if not tabnet_run_id:
-            raise ValueError("TabNet run ID is required")
-        if not rf_run_id:
-            raise ValueError("Random Forest run ID is required")
-        
         # Load XGBoost model
         try:
-            self.logger.info(f"Loading XGBoost model from run {xgb_run_id}...")
-            mlflow_client = mlflow.tracking.MlflowClient()
+            self.logger.info(f"Loading XGBoost model from run {self.xgb_run_id}...")
+            # Use direct artifact URI format instead of get_latest_versions
+            xgb_uri = f"runs:/{self.xgb_run_id}/{xgb_path}"
+            self.model_xgb = mlflow.xgboost.load_model(xgb_uri)
             
-            # Get the latest model version if multiple exist
-            model_versions = mlflow_client.get_latest_versions(f"runs:/{xgb_run_id}/{xgb_path}")
-            if model_versions:
-                # Use the latest version
-                model_version = model_versions[0]
-                self.model_xgb = mlflow.xgboost.load_model(f"runs:/{xgb_run_id}/{xgb_path}")
-            else:
-                # Direct loading if no versions found
-                self.model_xgb = mlflow.xgboost.load_model(f"runs:/{xgb_run_id}/{xgb_path}")
+            # Also load as pyfunc to access metadata/signature
+            xgb_pyfunc = mlflow.pyfunc.load_model(xgb_uri)
             
-            # Update feature signature from model metadata
-            model_info = mlflow_client.get_model_version_download_uri(f"runs:/{xgb_run_id}/{xgb_path}")
-            model_signature = mlflow.models.get_model_info(model_info).signature
-            if model_signature and model_signature.inputs:
-                self.xgb_features = model_signature.inputs.input_names()
+            # Extract feature signature from loaded model
+            if xgb_pyfunc.metadata.signature and xgb_pyfunc.metadata.signature.inputs:
+                self.xgb_features = xgb_pyfunc.metadata.signature.inputs.input_names()
                 self.logger.info(f"Updated XGBoost feature signature with {len(self.xgb_features)} features")
             else:
                 self.logger.warning("No feature signature found for XGBoost model")
+                # Try to get feature names directly from the model
+                if hasattr(self.model_xgb, 'feature_names'):
+                    self.xgb_features = self.model_xgb.feature_names
+                    self.logger.info(f"Retrieved {len(self.xgb_features)} feature names directly from XGBoost model")
         except Exception as e:
             self.logger.error(f"Failed to load XGBoost model: {str(e)}")
             raise ValueError(f"Failed to load XGBoost model: {str(e)}")
         
         # Load LightGBM model
         try:
-            self.logger.info(f"Loading LightGBM model from run {lgb_run_id}...")
+            self.logger.info(f"Loading LightGBM model from run {self.lgb_run_id}...")
+            # Use direct artifact URI format
+            lgb_uri = f"runs:/{self.lgb_run_id}/{lgb_path}"
+            self.model_lgb = mlflow.lightgbm.load_model(lgb_uri)
             
-            # Get the latest model version if multiple exist
-            model_versions = mlflow_client.get_latest_versions(f"runs:/{lgb_run_id}/{lgb_path}")
-            if model_versions:
-                # Use the latest version
-                model_version = model_versions[0]
-                self.model_lgb = mlflow.lightgbm.load_model(f"runs:/{lgb_run_id}/{lgb_path}")
-            else:
-                # Direct loading if no versions found
-                self.model_lgb = mlflow.lightgbm.load_model(f"runs:/{lgb_run_id}/{lgb_path}")
+            # Also load as pyfunc to access metadata/signature
+            lgb_pyfunc = mlflow.pyfunc.load_model(lgb_uri)
             
-            # Update feature signature from model metadata
-            model_info = mlflow_client.get_model_version_download_uri(f"runs:/{lgb_run_id}/{lgb_path}")
-            model_signature = mlflow.models.get_model_info(model_info).signature
-            if model_signature and model_signature.inputs:
-                self.lgb_features = model_signature.inputs.input_names()
+            # Extract feature signature from loaded model
+            if lgb_pyfunc.metadata.signature and lgb_pyfunc.metadata.signature.inputs:
+                self.lgb_features = lgb_pyfunc.metadata.signature.inputs.input_names()
                 self.logger.info(f"Updated LightGBM feature signature with {len(self.lgb_features)} features")
             else:
                 self.logger.warning("No feature signature found for LightGBM model")
+                # Try to get feature names directly from the model
+                if hasattr(self.model_lgb, 'feature_name_'):
+                    self.lgb_features = self.model_lgb.feature_name_
+                    self.logger.info(f"Retrieved {len(self.lgb_features)} feature names directly from LightGBM model")
         except Exception as e:
             self.logger.error(f"Failed to load LightGBM model: {str(e)}")
             raise ValueError(f"Failed to load LightGBM model: {str(e)}")
         
-        # Load TabNet model (using PyFunc for the TabNetWrapper)
+        # Load TabNet model (using sklearn flavor since TabNet is saved as sklearn)
         try:
-            self.logger.info(f"Loading TabNet model from run {tabnet_run_id}...")
+            self.logger.info(f"Loading TabNet model from run {self.tabnet_run_id}...")
+            # Use direct artifact URI format
+            tabnet_uri = f"runs:/{self.tabnet_run_id}/{tabnet_path}"
             
-            # TabNet will be loaded as a PyFunc model since it uses a custom wrapper
-            tabnet_pyfunc = mlflow.pyfunc.load_model(f"runs:/{tabnet_run_id}/{tabnet_path}")
+            # Load TabNet model using sklearn flavor
+            self.model_tabnet = mlflow.sklearn.load_model(tabnet_uri)
             
-            # Extract the underlying TabNetClassifier from the wrapper
-            if hasattr(tabnet_pyfunc, "_model_impl") and hasattr(tabnet_pyfunc._model_impl, "model"):
-                # If loaded with mlflow.pyfunc.load_model
-                self.model_tabnet = tabnet_pyfunc._model_impl.model
-            elif hasattr(tabnet_pyfunc, "model"):
-                # If the wrapper structure is directly accessible
-                self.model_tabnet = tabnet_pyfunc.model
-            else:
-                # Fallback if structure is different
-                self.logger.warning("TabNet wrapper structure is unexpected. Using as-is.")
-                self.model_tabnet = tabnet_pyfunc
+            # Also load as pyfunc to access metadata/signature
+            tabnet_pyfunc = mlflow.pyfunc.load_model(tabnet_uri)
             
-            # Update feature signature from model metadata
-            model_info = mlflow_client.get_model_version_download_uri(f"runs:/{tabnet_run_id}/{tabnet_path}")
-            model_signature = mlflow.models.get_model_info(model_info).signature
-            if model_signature and model_signature.inputs:
-                self.tabnet_features = model_signature.inputs.input_names()
+            # Extract feature signature from loaded model
+            if tabnet_pyfunc.metadata.signature and tabnet_pyfunc.metadata.signature.inputs:
+                self.tabnet_features = tabnet_pyfunc.metadata.signature.inputs.input_names()
                 self.logger.info(f"Updated TabNet feature signature with {len(self.tabnet_features)} features")
             else:
                 self.logger.warning("No feature signature found for TabNet model")
+                # Try to get feature names directly from the model
+                if hasattr(self.model_tabnet, 'feature_names_in_'):
+                    self.tabnet_features = self.model_tabnet.feature_names_in_
+                    self.logger.info(f"Retrieved {len(self.tabnet_features)} feature names directly from TabNet model")
+                elif hasattr(self.model_tabnet, 'input_dim'):
+                    feature_count = self.model_tabnet.input_dim
+                    self.logger.warning(f"Using generic feature names for TabNet ({feature_count} features)")
+                    self.tabnet_features = [f"feature_{i}" for i in range(feature_count)]
         except Exception as e:
             self.logger.error(f"Failed to load TabNet model: {str(e)}")
             raise ValueError(f"Failed to load TabNet model: {str(e)}")
         
-        # If signature-based extraction fails, try direct feature extraction
-        if not hasattr(self, 'tabnet_features') or not self.tabnet_features:
-            if hasattr(self.model_tabnet, 'input_dim'):
-                # TabNet might store feature dimension but not names
-                feature_count = self.model_tabnet.input_dim
-                self.logger.warning(f"No named features found for TabNet. Using {feature_count} unnamed features.")
-                # Use existing features list or fallback
-                if self.tabnet_features and len(self.tabnet_features) == feature_count:
-                    self.logger.info("Using existing feature list for TabNet")
-                else:
-                    self.logger.warning("Using generic feature names for TabNet")
-                    self.tabnet_features = [f"feature_{i}" for i in range(feature_count)]
-        
         # Load Random Forest model
         try:
-            self.logger.info(f"Loading Random Forest model from run {rf_run_id}...")
+            self.logger.info(f"Loading Random Forest model from run {self.rf_run_id}...")
+            # Use direct artifact URI format
+            rf_uri = f"runs:/{self.rf_run_id}/{rf_path}"
             
-            # Get the latest model version if multiple exist
-            model_versions = mlflow_client.get_latest_versions(f"runs:/{rf_run_id}/{rf_path}")
-            if model_versions:
-                # Use the latest version
-                model_version = model_versions[0]
-                self.model_extra = mlflow.sklearn.load_model(f"runs:/{rf_run_id}/{rf_path}")
-            else:
-                # Direct loading if no versions found
-                self.model_extra = mlflow.sklearn.load_model(f"runs:/{rf_run_id}/{rf_path}")
+            # Load RF model using sklearn flavor
+            self.model_extra = mlflow.sklearn.load_model(rf_uri)
             
-            # Update feature signature from model metadata
-            model_info = mlflow_client.get_model_version_download_uri(f"runs:/{rf_run_id}/{rf_path}")
-            model_signature = mlflow.models.get_model_info(model_info).signature
-            if model_signature and model_signature.inputs:
-                self.rf_features = model_signature.inputs.input_names()
+            # Also load as pyfunc to access metadata/signature
+            rf_pyfunc = mlflow.pyfunc.load_model(rf_uri)
+            
+            # Extract feature signature from loaded model
+            if rf_pyfunc.metadata.signature and rf_pyfunc.metadata.signature.inputs:
+                self.rf_features = rf_pyfunc.metadata.signature.inputs.input_names()
                 self.logger.info(f"Updated Random Forest feature signature with {len(self.rf_features)} features")
             else:
                 self.logger.warning("No feature signature found for Random Forest model")
+                # Try to get feature names directly from the model
+                if hasattr(self.model_extra, 'feature_names_in_'):
+                    self.rf_features = self.model_extra.feature_names_in_
+                    self.logger.info(f"Retrieved {len(self.rf_features)} feature names directly from Random Forest model")
         except Exception as e:
             self.logger.error(f"Failed to load Random Forest model: {str(e)}")
             raise ValueError(f"Failed to load Random Forest model: {str(e)}")
@@ -570,4 +398,5 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.extra_base_model_type = 'random_forest'
         
         self.logger.info("All models successfully loaded from MLflow")
+        self.selected_features = self.xgb_features  # Use XGBoost features as default selected features
         return True 

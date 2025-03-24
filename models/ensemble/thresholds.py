@@ -241,3 +241,73 @@ def tune_threshold_for_precision(y_prob: np.ndarray, y_true: pd.Series,
     })
     
     return optimal_threshold, metrics
+    
+def tune_threshold_for_precision_optimized(y_prob: np.ndarray, y_true: pd.Series, 
+                                target_precision: float = 0.50, 
+                                required_recall: float = 0.25,
+                                min_threshold: float = 0.1,
+                                max_threshold: float = 0.9,
+                                step: float = 0.01,
+                                logger: ExperimentLogger = None):
+    """
+    A simplified version of threshold optimization that uses numpy operations
+    instead of looping through each threshold individually.
+    """
+    if logger is None:
+        logger = ExperimentLogger(experiment_name="ensemble_model_thresholds",
+                                log_dir="./logs/ensemble_model_thresholds")
+    # Generate threshold array
+    thresholds = np.arange(min_threshold, max_threshold + step, step)
+    
+    # Calculate metrics for all thresholds at once using vectorized operations
+    metrics_by_threshold = []
+    for threshold in thresholds:
+        y_pred = (y_prob >= threshold).astype(int)
+        # Calculate confusion matrix components
+        tp = np.sum((y_true == 1) & (y_pred == 1))
+        fp = np.sum((y_true == 0) & (y_pred == 1))
+        fn = np.sum((y_true == 1) & (y_pred == 0))
+            
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
+        f1 = 2 * precision * recall / (precision + recall)
+        metrics_by_threshold.append({
+            'threshold': threshold,
+            'precision': precision,
+            'recall': recall,
+            'f1': f1
+        })
+    
+    # Convert to DataFrame for easier filtering and analysis
+    metrics_df = pd.DataFrame(metrics_by_threshold)
+    
+    # Filter thresholds that meet minimum recall
+    valid_thresholds = metrics_df[metrics_df['recall'] >= required_recall]
+    
+    if len(valid_thresholds) > 0:
+        # Find threshold with best precision among those with sufficient recall
+        best_threshold_idx = valid_thresholds['precision'].idxmax()
+        best_metrics = valid_thresholds.loc[best_threshold_idx].to_dict()
+    else:
+        # Fallback: find threshold with best F1 score
+        logger.warning(f"No thresholds meet minimum recall of {required_recall}. Selecting best F1 score.")
+        best_threshold_idx = metrics_df['f1'].idxmax()
+        best_metrics = metrics_df.loc[best_threshold_idx].to_dict()
+    
+    logger.info(f"Selected threshold: {best_metrics['threshold']:.4f}")
+    logger.info(f"Metrics at selected threshold: Precision={best_metrics['precision']:.4f}, " 
+                f"Recall={best_metrics['recall']:.4f}, F1={best_metrics['f1']:.4f}")
+    
+    # Log to MLflow
+    mlflow.log_metrics({
+        'precision_tuned_threshold': best_metrics['threshold'],
+        'precision_at_threshold': best_metrics['precision'],
+        'recall_at_threshold': best_metrics['recall']
+    })
+    
+    return best_metrics['threshold'], {
+        'threshold': best_metrics['threshold'],
+        'precision': best_metrics['precision'],
+        'recall': best_metrics['recall'],
+        'f1': best_metrics['f1']
+    }

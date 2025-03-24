@@ -528,25 +528,29 @@ def log_to_mlflow(model, metrics, params, experiment_name):
             for metric_name, metric_value in metrics.items():
                 mlflow.log_metric(metric_name, metric_value)
             
-            # Log model
+            # Handle integer columns by converting them to float64 to properly manage missing values
+            input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, 'iloc') else X_eval[:5].copy()
+            
+            # Identify and convert integer columns to float64 to prevent schema enforcement errors
+            if hasattr(input_example, 'dtypes'):
+                for col in input_example.columns:
+                    if X_eval[col].dtype.kind == 'i':
+                        logger.info(f"Converting integer column '{col}' to float64 to handle potential missing values")
+                        X_eval[col] = X_eval[col].astype('float64')
+            
+            # Infer signature with proper handling for integer columns with potential missing values
+            signature = mlflow.models.infer_signature(
+                input_example,
+                model.predict(input_example)
+            )
+            
+            # Update model registration with signature
             model_info = mlflow.xgboost.log_model(
                 model,
                 "model",
-                registered_model_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}"
+                registered_model_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}",
+                signature=signature
             )
-            
-            # Log feature importance using the shared utility
-            importance_df = calculate_feature_importance(
-                model, 
-                feature_names=X_train.columns if hasattr(X_train, 'columns') else None
-            )
-            
-            if not importance_df.empty:
-                # Save to CSV and log as artifact
-                importance_path = "feature_importance.csv"
-                importance_df.to_csv(importance_path, index=False)
-                mlflow.log_artifact(importance_path)
-                os.remove(importance_path)
             
             logger.info(f"Model logged to MLflow: {model_info.model_uri}")
             logger.info(f"Run ID: {run.info.run_id}")
@@ -571,24 +575,22 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
     Returns:
         tuple: (best_model, best_metrics)
     """
-    try:
-        # Run hyperparameter tuning
-        logger.info("Running hyperparameter tuning")
-        best_params, _ = hypertune_xgboost(experiment_name)
-        
-        if not best_params:
-            logger.warning("Hyperparameter tuning failed. Using default parameters.")
-            best_params = base_params.copy()
-            best_params.update({
-                'learning_rate': 0.05,
-                'max_depth': 6,
-                'min_child_weight': 20,
-                'colsample_bytree': 0.8,
-                'subsample': 0.8,
-                'alpha': 0.1,
-                'lambda': 0.1,
-                'gamma': 0.01
-            })
+    try:        
+        logger.info("Training model with precision target")
+        params = base_params.copy()
+        params.update({
+            'learning_rate': 0.07500000000000001,
+            'max_depth': 11,
+            'min_child_weight': 300,
+            'colsample_bytree': 0.6599999999999999,
+            'subsample': 0.74,
+            'gamma': 0.52,
+            'lambda': 5.16,
+            'alpha': 27.3,
+            'scale_pos_weight': 3.18,
+            'early_stopping_rounds': 1150,
+            'tree_method': 'hist'  # Enforce CPU-only training
+        })
         
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
@@ -596,14 +598,14 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
             X_train, y_train,
             X_test, y_test,
             X_eval, y_eval,
-            best_params
-        )
-        
+            params
+            )
+            
         # Log to MLflow
-        log_to_mlflow(model, metrics, best_params, experiment_name)
+        log_to_mlflow(model, metrics, params, experiment_name)
         
         return model, metrics
-        
+            
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
@@ -639,10 +641,14 @@ def main():
         
         logger.info(f"Current base parameters: {base_params}")
         
-        current_params, current_metrics = hypertune_xgboost(experiment_name)
-        
-        logger.info(f"Run completed with parameters: {current_params}")
-        logger.info(f"Run metrics: {current_metrics}")
+        # current_params, current_metrics = hypertune_xgboost(experiment_name)
+        # logger.info(f"Run completed with parameters: {current_params}")
+        # logger.info(f"Run metrics: {current_metrics}")
+
+        # Train model with precision target
+        best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        logger.info(f"Best model: {best_model}")
+        logger.info(f"Best metrics: {best_metrics}")
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
 

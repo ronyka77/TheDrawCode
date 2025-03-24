@@ -1,24 +1,25 @@
 import pymongo
-from typing import List, Dict
+from typing import List, Dict, Any
 import pandas as pd
 import os
 try:
     # Set the configuration key
     pd.set_option('future.no_silent_downcasting', True)
-
 except KeyError as e:
     print(f"Configuration key not found: {e}")
+
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from datetime import datetime, timedelta
-
+from openpyxl import Workbook
+from openpyxl.writer.excel import save_workbook
 class MongoDBFeatures:
     """
     A class to interact with MongoDB and retrieve fixtures where home.stats is not empty.
     """
     def __init__(self, logger=None):
         self.logger = logger
-        self.mongo_uri = 'mongodb://192.168.0.75:27017/'
+        self.mongo_uri = 'mongodb://drawcode:drawcode@192.168.0.73:27017/'
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]
         self.fixtures_collection = self.db["fixtures"]
@@ -42,35 +43,34 @@ class MongoDBFeatures:
         print(f"Found {len(fixture_list)} fixtures with home.stats.")
         return fixture_list
 
-    def get_fixtures_with_predictions(self) -> List[Dict]:
+    def get_fixtures_with_predictions(self) -> Any:
         """
         Retrieves all fixtures from the MongoDB fixtures collection where there is a corresponding prediction document.
         Returns:
-            List[Dict]: List of fixtures with predictions.
+            An iterator over fixture documents with predictions.
         """
         query = {
             "fixture_id": {"$ne": None}
         }
-        fixtures = self.predictions_collection.find(query)
-        fixture_list = list(fixtures)
-        print(f"Found {len(fixture_list)} fixtures with predictions.")
-        return fixture_list
+        fixtures = self.predictions_collection.find(query).batch_size(100)
+        count = self.predictions_collection.count_documents(query)
+        print(f"Found {count} fixtures with predictions (cursor returned, not full list).")
+        return fixtures
 
-    def normalize_predictions_data(self, fixtures_with_predictions: List[Dict]) -> pd.DataFrame:
+    def yield_normalized_predictions(self, fixtures_with_predictions: List[Dict]):
         """
-        Normalizes the prediction data and returns a pandas DataFrame.
+        Generator that yields normalized prediction data one row at a time.
         
         Args:
             fixtures_with_predictions (List[Dict]): List of fixtures with predictions
             
-        Returns:
-            pd.DataFrame: Normalized prediction data
+        Yields:
+            dict: Normalized prediction data for one fixture
         """
-        try:
-            normalized_data = []
-            error_count = 0
-            
-            for fixture in fixtures_with_predictions:
+        error_count = 0
+        
+        for fixture in fixtures_with_predictions:
+            try:
                 # Extract prediction data with safety checks
                 predictions = fixture.get('predictions', {})
                 if not predictions:
@@ -103,42 +103,70 @@ class MongoDBFeatures:
                 # Add h2h data
                 h2h_matches = fixture.get('h2h', [])
                 if h2h_matches:
-                    # Calculate h2h stats
-                    home_wins = 0
-                    away_wins = 0
-                    draws = 0
-                    total_matches = len(h2h_matches)
+                    home_wins = sum(1 for match in h2h_matches if match['teams']['home']['winner'] is True)
+                    away_wins = sum(1 for match in h2h_matches if match['teams']['away']['winner'] is True)
+                    draws = sum(1 for match in h2h_matches if match['teams']['home']['winner'] is None)
                     
-                    for match in h2h_matches:
-                        if match['teams']['home']['winner'] is True:
-                            home_wins += 1
-                        elif match['teams']['away']['winner'] is True:
-                            away_wins += 1
-                        else:
-                            draws += 1
-                            
-                    fixture_data['h2h_home_wins'] = home_wins
-                    fixture_data['h2h_away_wins'] = away_wins
-                    fixture_data['h2h_draws'] = draws
-                    fixture_data['h2h_total_matches'] = total_matches
+                    fixture_data.update({
+                        'h2h_home_wins': home_wins,
+                        'h2h_away_wins': away_wins,
+                        'h2h_draws': draws,
+                        'h2h_total_matches': len(h2h_matches)
+                    })
                 
-                normalized_data.append(fixture_data)
+                yield fixture_data
                 
-            if error_count > 0:
-                print(f"Skipped {error_count} fixtures due to missing prediction data")
-            # Export normalized data to Excel file
-            if len(normalized_data) > 0:
-                df = pd.DataFrame(normalized_data)
-                output_file = 'data/Create_data/data_files/base/predictions.xlsx'
-                self.export_to_excel(df, output_file)
-                print(f"Successfully exported {len(normalized_data)} predictions to {output_file}")
-            else:
-                print("No data to export to Excel")
-            return df
+            except Exception as e:
+                print(f"Error processing fixture {fixture.get('fixture_id')}: {e}")
+                error_count += 1
+                continue
+        
+        if error_count > 0:
+            print(f"Skipped {error_count} fixtures due to errors or missing prediction data")
+
+    def normalize_predictions_data(self, fixtures_with_predictions: List[Dict]) -> None:
+        """
+        Normalizes the prediction data using a generator approach and streams directly to an XLSX file.
+        Uses openpyxl's write-only mode for memory-efficient Excel export.
+        
+        Args:
+            fixtures_with_predictions (List[Dict]): List of fixtures with predictions
+            
+        This function writes the XLSX file directly without retaining extra data in memory.
+        """
+        try:
+            # Create a write-only workbook and worksheet
+            wb = Workbook(write_only=True)
+            ws = wb.create_sheet()
+            
+            # Initialize the prediction generator
+            prediction_generator = self.yield_normalized_predictions(fixtures_with_predictions)
+            
+            # Retrieve the first row to determine headers
+            try:
+                first_row = next(prediction_generator)
+            except StopIteration:
+                print("No prediction data to process")
+                return
+            
+            headers = list(first_row.keys())
+            ws.append(headers)
+            ws.append([first_row.get(header) for header in headers])
+            row_count = 1  # Counting first data row already written
+            
+            # Process remaining rows without storing a sample list
+            for row_dict in prediction_generator:
+                ws.append([row_dict.get(header) for header in headers])
+                row_count += 1
+                if row_count % 1000 == 0:
+                    print(f"Processed {row_count} predictions")
+            
+            output_file = 'data/Create_data/data_files/base/predictions.xlsx'
+            wb.save(output_file)
+            print(f"Successfully exported {row_count} predictions to {output_file}")
             
         except Exception as e:
             print(f"Error normalizing prediction data: {e}")
-            return pd.DataFrame()
 
     def normalize_fixtures_data(self, fixtures_with_stats: List[Dict]) -> pd.DataFrame:
         """
@@ -929,7 +957,6 @@ def main():
     print("Exporting predictions")
     fixtures_with_predictions = mongodb_features.get_fixtures_with_predictions()
     predictions = mongodb_features.normalize_predictions_data(fixtures_with_predictions)
-    print(f"Predictions shape: {predictions.shape}")
     
     print("Exporting venues")
     venues = mongodb_features.export_venues()

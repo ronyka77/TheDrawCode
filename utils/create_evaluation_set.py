@@ -11,6 +11,8 @@ from pymongo import MongoClient
 import time
 from functools import wraps
 from datetime import datetime
+from openpyxl import Workbook
+from openpyxl.writer.excel import save_workbook
 
 # Add project root to Python path
 try:
@@ -400,17 +402,17 @@ def update_api_data_for_draws():
         updated_data = pd.concat([api_prediction_eval, api_prediction_data], ignore_index=True)
         
         # Export df_before_2024_11_01 to data/api_training_final.xlsx and .parquet
-        api_training_data.to_excel("data/api_training_final.xlsx", index=False)
+        save_data_to_excel(api_training_data, "data/api_training_final.xlsx", "api_training_final")
         create_parquet_files(api_training_data, "data/api_training_final.parquet")
         logger.info(f"api_training_final.xlsx and .parquet updated")
         
         # Export df_after_2024_11_01_not_blank to data/prediction/api_predictions_eval.xlsx and .parquet
-        api_prediction_eval.to_excel("data/prediction/api_prediction_eval.xlsx", index=False)
+        save_data_to_excel(api_prediction_eval, "data/prediction/api_prediction_eval.xlsx", "api_prediction_eval")
         create_parquet_files(api_prediction_eval, "data/prediction/api_prediction_eval.parquet")
         logger.info(f"api_prediction_eval.xlsx and .parquet updated")
         
         # Export df_after_2024_11_01_blank to data/prediction/api_predictions_data.xlsx and .parquet
-        api_prediction_data.to_excel("data/prediction/api_predictions_data.xlsx", index=False)
+        save_data_to_excel(api_prediction_data, "data/prediction/api_predictions_data.xlsx", "api_prediction_data")
         create_parquet_files(api_prediction_data, "data/prediction/api_predictions_data.parquet")
         logger.info(f"api_predictions_data.xlsx and .parquet updated")
         # Save updated data back to Excel
@@ -1322,6 +1324,60 @@ def import_training_data_ensemble():
     y_test = test_data['is_draw']
 
     return X_train, y_train, X_test, y_test
+
+def save_data_to_excel(df, output_path, type):
+    """
+    Save DataFrame to Excel using a memory-efficient approach.
+    
+    Args:
+        df: DataFrame to save
+        output_path: Path to save the Excel file
+        type: Type of data being saved (for logging purposes)
+    
+    Returns:
+        The original DataFrame
+    """
+    try:
+        # Create a write-only workbook and worksheet
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet('Sheet1')
+        
+        # Convert DataFrame to dictionary of records
+        records = df.to_dict('records')
+        
+        # Initialize the prediction generator
+        prediction_generator = iter(records)
+        
+        # Retrieve the first row to determine headers
+        try:
+            first_row = next(prediction_generator)
+        except StopIteration:
+            logger.warning(f"No data to export for {type}")
+            return df
+        
+        headers = list(first_row.keys())
+        ws.append(headers)
+        ws.append([first_row.get(header) for header in headers])
+        row_count = 1  # Counting first data row already written
+        
+        # Process remaining rows
+        for row_dict in prediction_generator:
+            ws.append([row_dict.get(header) for header in headers])
+            row_count += 1
+            if row_count % 5000 == 0:
+                logger.info(f"Processed {row_count} rows")
+        
+        wb.save(output_path)
+        logger.info(f"Successfully exported {row_count} rows to {output_path}")
+    except Exception as e:
+        logger.error(f"Failed to export {type} data: {str(e)}")
+        # Try alternative format if Excel export fails
+        if output_path.endswith('.xlsx'):
+            alt_path = output_path.replace('.xlsx', '.csv')
+            df.to_csv(alt_path, index=False)
+            logger.info(f"Exported {type} data to alternative format: {alt_path}")
+    
+    return df
 
 @retry_on_error(max_retries=3, delay=1.0)
 def create_prediction_set_ensemble() -> pd.DataFrame:

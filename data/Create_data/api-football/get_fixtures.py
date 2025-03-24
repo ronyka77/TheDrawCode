@@ -41,7 +41,7 @@ class ApiFootball:
         self.data_dir = os.path.join(self.project_root, "data", "create_data", "api-football")
         os.makedirs(self.data_dir, exist_ok=True)
         # MongoDB setup
-        self.mongo_uri = 'mongodb://192.168.0.75:27017/'
+        self.mongo_uri = 'mongodb://192.168.0.73:27017/'
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]  # Database name
         self.fixtures_collection = self.db["fixtures"] # Collection name
@@ -340,12 +340,15 @@ class ApiFootball:
         Returns:
             List[int]: List of fixture IDs without predictions that meet the criteria.
         """
-        # Read fixture IDs from Excel file
-        excel_path=os.path.join(project_root, 'data', 'Create_data', 'data_files', 'base', 'api_future_matches.xlsx')
+        # Get fixture IDs from MongoDB fixtures collection that don't exist in predictions collection
         try:
-            df = pd.read_excel(excel_path)
-            fixture_ids = df['fixture_id'].tolist()
-            self.logger.info(f"Successfully read {len(fixture_ids)} fixture IDs from Excel file")
+            # Find all fixture IDs in fixtures collection
+            all_fixtures = self.fixtures_collection.distinct("fixture_id")
+            # Find all fixture IDs in predictions collection
+            existing_predictions = self.predictions_collection.distinct("fixture_id")
+            # Get difference between all fixtures and those with predictions
+            fixture_ids = list(set(all_fixtures) - set(existing_predictions))
+            self.logger.info(f"Found {len(fixture_ids)} fixtures without predictions in MongoDB")
         except Exception as e:
             self.logger.error(f"Error reading fixture IDs from Excel file: {e}")
             fixture_ids = []
@@ -724,7 +727,7 @@ def main():
     logger = ExperimentLogger()
     api_football = ApiFootball(api_key, logger)
 
-    api_football.get_fixtures_for_leagues()
+    # api_football.get_fixtures_for_leagues()
 
     api_football.get_statistics_for_fixtures()
 

@@ -35,7 +35,7 @@ logger = ExperimentLogger(experiment_name="ensemble_model_training",
 from models.ensemble.bayesian_meta_learner import BayesianMetaLearner, train_with_optimal_parameters
 from models.ensemble.ResNet import ResNetMetaLearner
 from utils.create_evaluation_set import import_selected_features_ensemble
-from models.ensemble.thresholds import tune_threshold_for_precision
+from models.ensemble.thresholds import tune_threshold_for_precision_optimized, tune_threshold_for_precision
 
 # Filter scikit-learn parameter renaming warnings
 warnings.filterwarnings("ignore", message=".*force_all_finite.*", category=FutureWarning)
@@ -408,7 +408,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
             y_pred = (y_proba >= best_threshold).astype(int)
             
             # Find optimal threshold
-            best_threshold, metrics = tune_threshold_for_precision(
+            best_threshold, metrics = tune_threshold_for_precision_optimized(
                 y_proba, eval_meta_targets, target_precision, min_recall
             )
         
@@ -727,7 +727,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 y_proba = meta_learner.predict_proba(eval_features_np)[:, 1]
                 
                 # Find optimal threshold
-                best_threshold, metrics = tune_threshold_for_precision(
+                best_threshold, metrics = tune_threshold_for_precision_optimized(
                     y_proba, eval_meta_targets, target_precision, min_recall
                 )
                 
@@ -764,7 +764,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 y_pred = (y_proba >= best_threshold).astype(int)
                 
                 # Find optimal threshold
-                best_threshold, metrics = tune_threshold_for_precision(
+                best_threshold, metrics = tune_threshold_for_precision_optimized(
                     y_proba, eval_meta_targets, target_precision, min_recall
                 )
             elif meta_learner_type == 'lgb':
@@ -792,7 +792,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                     y_proba = meta_learner.predict(eval_meta_features)
                     
                 # Find optimal threshold
-                best_threshold, metrics = tune_threshold_for_precision(
+                best_threshold, metrics = tune_threshold_for_precision_optimized(
                     y_proba, eval_meta_targets, target_precision, min_recall
                 )
             
@@ -950,7 +950,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         y_pred = (y_proba >= best_threshold).astype(int)
         
         # Find optimal threshold
-        best_threshold, metrics = tune_threshold_for_precision(
+        best_threshold, metrics = tune_threshold_for_precision_optimized(
             y_proba, eval_meta_targets, target_precision, min_recall
         )
         
@@ -987,7 +987,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     else:
         y_proba = best_meta_learner.predict(eval_meta_features)
     
-    best_threshold, metrics = tune_threshold_for_precision(
+    best_threshold, metrics = tune_threshold_for_precision_optimized(
         y_proba, eval_meta_targets, target_precision, min_recall
     )
     

@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple, Optional, Union
 import mlflow
 
 from utils.logger import ExperimentLogger
-from models.ensemble.thresholds import tune_threshold_for_precision
+from models.ensemble.thresholds import tune_threshold_for_precision_optimized, tune_threshold_for_precision
 
 def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray, 
                             p_lgb: np.ndarray, p_extra: np.ndarray, 
@@ -62,10 +62,10 @@ def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray,
         return best_threshold, best_precision, best_recall, best_f1
     
     # Calculate metrics for each model with optimized thresholds
-    xgb_threshold, xgb_precision, xgb_recall, xgb_f1 = find_best_threshold(p_xgb, targets)
-    tabnet_threshold, tabnet_precision, tabnet_recall, tabnet_f1 = find_best_threshold(p_tabnet, targets)
-    lgb_threshold, lgb_precision, lgb_recall, lgb_f1 = find_best_threshold(p_lgb, targets)
-    extra_threshold, extra_precision, extra_recall, extra_f1 = find_best_threshold(p_extra, targets)
+    xgb_threshold, xgb_precision, xgb_recall, xgb_f1 = tune_threshold_for_precision_optimized(p_xgb, targets)
+    tabnet_threshold, tabnet_precision, tabnet_recall, tabnet_f1 = tune_threshold_for_precision_optimized(p_tabnet, targets)
+    lgb_threshold, lgb_precision, lgb_recall, lgb_f1 = tune_threshold_for_precision_optimized(p_lgb, targets)
+    extra_threshold, extra_precision, extra_recall, extra_f1 = tune_threshold_for_precision_optimized(p_extra, targets)
     
     # Log individual model metrics
     logger.info(f"XGBoost: threshold={xgb_threshold:.3f}, precision={xgb_precision:.4f}, recall={xgb_recall:.4f}, f1={xgb_f1:.4f}")
@@ -171,10 +171,10 @@ def compute_precision_focused_weights(p_xgb, p_tabnet, p_lgb, p_extra, y_true, t
     """
     logger.info("Computing precision-focused weights...")
     # Find precision-optimal thresholds
-    xgb_threshold, xgb_metrics = tune_threshold_for_precision(p_xgb, y_true, target_precision, required_recall)
-    tabnet_threshold, tabnet_metrics = tune_threshold_for_precision(p_tabnet, y_true, target_precision, required_recall)
-    lgb_threshold, lgb_metrics = tune_threshold_for_precision(p_lgb, y_true, target_precision, required_recall)
-    extra_threshold, extra_metrics = tune_threshold_for_precision(p_extra, y_true, target_precision, required_recall)
+    xgb_threshold, xgb_metrics = tune_threshold_for_precision_optimized(p_xgb, y_true, target_precision, required_recall)
+    tabnet_threshold, tabnet_metrics = tune_threshold_for_precision_optimized(p_tabnet, y_true, target_precision, required_recall)
+    lgb_threshold, lgb_metrics = tune_threshold_for_precision_optimized(p_lgb, y_true, target_precision, required_recall)
+    extra_threshold, extra_metrics = tune_threshold_for_precision_optimized(p_extra, y_true, target_precision, required_recall)
     
     # Calculate weight based on precision^2 (to emphasize precision differences)
     xgb_weight = xgb_metrics['precision']**2

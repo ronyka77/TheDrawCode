@@ -48,7 +48,7 @@ experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name,
                             log_dir="./logs/ensemble_model_improved")
 from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
-from models.ensemble.ensemble_model_0323 import EnsembleModel
+from models.ensemble.ensemble_model_0324 import EnsembleModel
 from models.ensemble.data_utils import balance_and_clean_dataset
 
 def run_ensemble(extra_base_model_type: str = 'random_forest',
@@ -120,14 +120,14 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
             selected_features = import_selected_features_ensemble('all')
             
             # Filter features for all datasets
-            X_train_filtered = X_train[selected_features]
-            X_test_filtered = X_test[selected_features]
-            X_val_filtered = X_val[selected_features]
+            X_train_filtered = X_train
+            X_test_filtered = X_test
+            X_val_filtered = X_val
             # Convert all columns to float64 for consistent data types
             logger.info("Converting all feature columns to float64 for consistency...")
-            X_train_filtered = X_train_filtered.astype('float64')
-            X_test_filtered = X_test_filtered.astype('float64')
-            X_val_filtered = X_val_filtered.astype('float64')
+            X_train_filtered = X_train_filtered
+            X_test_filtered = X_test_filtered
+            X_val_filtered = X_val_filtered
             
             # Log the conversion
             mlflow.log_param('data_type_conversion', 'all_columns_to_float64')

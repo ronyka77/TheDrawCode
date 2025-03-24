@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import os
 import logging
+from openpyxl import Workbook
+from openpyxl.writer.excel import save_workbook 
 
 class ELOCalculator:
     """
@@ -213,7 +215,7 @@ class ELOCalculator:
                 on='fixture_id',
                 how='left'
             )
-            api_prediction_copy.to_excel(self.api_prediction_export_path, index=False)
+            self.save_data_to_excel(api_prediction_copy, self.api_prediction_export_path, "API prediction data")
             self.logger.info("API prediction data processed and saved")
 
             # Process API training data
@@ -228,12 +230,66 @@ class ELOCalculator:
                 on='fixture_id',
                 how='left'
             )
-            api_training_copy.to_excel(self.api_training_export_path, index=False)
+            self.save_data_to_excel(api_training_copy, self.api_training_export_path, "API training data")
             self.logger.info("API training data processed and saved")
             
         except Exception as e:
             self.logger.error(f"Error in process_data: {str(e)}")
             raise
+
+    def save_data_to_excel(self, df, output_path, type):
+        """
+        Save DataFrame to Excel using a memory-efficient approach.
+        
+        Args:
+            df: DataFrame to save
+            output_path: Path to save the Excel file
+            type: Type of data being saved (for logging purposes)
+        
+        Returns:
+            The original DataFrame
+        """
+        try:
+            # Create a write-only workbook and worksheet
+            wb = Workbook(write_only=True)
+            ws = wb.create_sheet('Sheet1')
+            
+            # Convert DataFrame to dictionary of records
+            records = df.to_dict('records')
+            
+            # Initialize the prediction generator
+            prediction_generator = iter(records)
+            
+            # Retrieve the first row to determine headers
+            try:
+                first_row = next(prediction_generator)
+            except StopIteration:
+                self.logger.warning(f"No data to export for {type}")
+                return df
+            
+            headers = list(first_row.keys())
+            ws.append(headers)
+            ws.append([first_row.get(header) for header in headers])
+            row_count = 1  # Counting first data row already written
+            
+            # Process remaining rows
+            for row_dict in prediction_generator:
+                ws.append([row_dict.get(header) for header in headers])
+                row_count += 1
+                if row_count % 5000 == 0:
+                    self.logger.info(f"Processed {row_count} rows")
+            
+            wb.save(output_path)
+            self.logger.info(f"Successfully exported {row_count} rows to {output_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to export {type} data: {str(e)}")
+            # Try alternative format if Excel export fails
+            if output_path.endswith('.xlsx'):
+                alt_path = output_path.replace('.xlsx', '.csv')
+                df.to_csv(alt_path, index=False)
+                self.logger.info(f"Exported {type} data to alternative format: {alt_path}")
+        
+        return df
 
 def main():
     """Main execution function."""

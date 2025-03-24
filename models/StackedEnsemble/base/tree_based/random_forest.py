@@ -133,19 +133,6 @@ def load_hyperparameter_space():
             'high': 5.0,
             'step': 0.05
         }
-        # 'min_impurity_decrease': {
-        #     'type': 'float',
-        #     'low': 0.01,
-        #     'high': 0.5,
-        #     'step': 0.01
-        # }
-        
-        # 'ccp_alpha': {
-        #     'type': 'float',
-        #     'low': 0.002,
-        #     'high': 0.2,
-        #     'step': 0.002
-        # }
     }
     return hyperparameter_space
 
@@ -163,7 +150,7 @@ def create_model(model_params):
         params = base_params.copy()
         params.update(model_params)
         # Convert class_weight parameter to dictionary format
-        if 'class_weight' in params:
+        if 'class_weight' in params and not isinstance(params['class_weight'], dict):
             class_weight_value = params.pop('class_weight')
             params['class_weight'] = {0: 1.0, 1: class_weight_value}
         model = RandomForestClassifier(**params)
@@ -482,25 +469,29 @@ def log_to_mlflow(model, metrics, params, experiment_name):
             for metric_name, metric_value in metrics.items():
                 mlflow.log_metric(metric_name, metric_value)
             
+            # Handle integer columns by converting them to float64 to properly manage missing values
+            input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, 'iloc') else X_eval[:5].copy()
+            
+            # Identify and convert integer columns to float64 to prevent schema enforcement errors
+            if hasattr(input_example, 'dtypes'):
+                for col in input_example.columns:   
+                    if X_eval[col].dtype.kind == 'i':   
+                        logger.info(f"Converting integer column '{col}' to float64 to handle potential missing values")
+                        X_eval[col] = X_eval[col].astype('float64')
+            
+            # Infer signature with proper handling for integer columns with potential missing values
+            signature = mlflow.models.infer_signature(
+                input_example,
+                model.predict(input_example)
+            )
+            
             # Log model
             model_info = mlflow.sklearn.log_model(
                 model,
                 "model",
-                registered_model_name=f"rf_{datetime.now().strftime('%Y%m%d_%H%M')}"
+                registered_model_name=f"rf_{datetime.now().strftime('%Y%m%d_%H%M')}",
+                signature=signature
             )
-            
-            # Log feature importance using the shared utility
-            importance_df = calculate_feature_importance(
-                model, 
-                feature_names=X_train.columns if hasattr(X_train, 'columns') else None
-            )
-            
-            if not importance_df.empty:
-                # Save to CSV and log as artifact
-                importance_path = "feature_importance.csv"
-                importance_df.to_csv(importance_path, index=False)
-                mlflow.log_artifact(importance_path)
-                os.remove(importance_path)
             
             logger.info(f"Model logged to MLflow: {model_info.model_uri}")
             logger.info(f"Run ID: {run.info.run_id}")
@@ -526,21 +517,20 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         tuple: (best_model, best_metrics)
     """
     try:
-        # Run hyperparameter tuning
-        logger.info("Running hyperparameter tuning")
-        best_params, _ = hypertune_random_forest(experiment_name)
-        
-        if not best_params:
-            logger.warning("Hyperparameter tuning failed. Using default parameters.")
-            best_params = base_params.copy()
-            best_params.update({
-                'n_estimators': 500,
-                'max_depth': 20,
-                'min_samples_split': 2,
-                'min_samples_leaf': 1,
-                'max_features': 0.5,
-                'class_weight': 2.0
-            })
+        logger.warning("Hyperparameter tuning failed. Using default parameters.")
+        params = base_params.copy()
+        params.update({
+            'n_estimators': 540,
+            'max_depth': 12,
+            'min_samples_split': 10,
+            'min_samples_leaf': 32,
+            'max_features': 0.18,
+            'bootstrap': True,
+            'class_weight': {0: 1.0, 1: 2.2},
+            'criterion': 'entropy',
+            'random_state': 19,
+            'n_jobs': 4
+        })
         
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
@@ -548,11 +538,11 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
             X_train, y_train,
             X_test, y_test,
             X_eval, y_eval,
-            best_params
+            params
         )
         
         # Log to MLflow
-        log_to_mlflow(model, metrics, best_params, experiment_name)
+        log_to_mlflow(model, metrics, params, experiment_name)
         
         return model, metrics
         
@@ -585,10 +575,14 @@ def main():
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
         
-        current_params, current_metrics = hypertune_random_forest(experiment_name)
+        # current_params, current_metrics = hypertune_random_forest(experiment_name)
+        # logger.info(f"Run completed with parameters: {current_params}")
+        # logger.info(f"Run metrics: {current_metrics}")
         
-        logger.info(f"Run completed with parameters: {current_params}")
-        logger.info(f"Run metrics: {current_metrics}")
+        # Train model with precision target
+        best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        logger.info(f"Best model: {best_model}")
+        logger.info(f"Best metrics: {best_metrics}")
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
 

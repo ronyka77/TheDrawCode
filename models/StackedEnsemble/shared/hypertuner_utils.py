@@ -202,9 +202,9 @@ def optimize_threshold(
             fp = np.sum((y == 0) & (y_pred == 1))
             fn = np.sum((y == 1) & (y_pred == 0))
             
-            precision = tp / (tp + fp + 1e-10)
-            recall = tp / (tp + fn + 1e-10)
-            f1 = 2 * precision * recall / (precision + recall + 1e-10)
+            precision = tp / (tp + fp)
+            recall = tp / (tp + fn)
+            f1 = 2 * precision * recall / (precision + recall)
             
             # Select metric to optimize
             if metric_to_optimize == 'precision':
