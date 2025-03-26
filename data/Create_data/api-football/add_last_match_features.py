@@ -4,6 +4,10 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from datetime import datetime
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class MongoDBFeatures:
     """
@@ -11,7 +15,7 @@ class MongoDBFeatures:
     """
     def __init__(self, logger=None):
         self.logger = logger
-        self.mongo_uri = 'mongodb://192.168.0.77:27017/'
+        self.mongo_uri = os.getenv('MONGODB_URI')
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]
         self.fixtures_collection = self.db["fixtures"]

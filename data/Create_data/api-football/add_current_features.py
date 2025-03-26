@@ -13,13 +13,17 @@ from sklearn.preprocessing import LabelEncoder
 from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.writer.excel import save_workbook
+from dotenv import load_dotenv
+
+load_dotenv()
+
 class MongoDBFeatures:
     """
     A class to interact with MongoDB and retrieve fixtures where home.stats is not empty.
     """
     def __init__(self, logger=None):
         self.logger = logger
-        self.mongo_uri = 'mongodb://drawcode:drawcode@192.168.0.73:27017/'
+        self.mongo_uri = os.getenv('MONGODB_URI')
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]
         self.fixtures_collection = self.db["fixtures"]
@@ -509,7 +513,7 @@ class MongoDBFeatures:
             if self.logger:
                 self.logger.error(f"Error in load_and_prepare_data: {e}")
             return pd.DataFrame()
-    
+
     def add_cumulative_sums(self, dataframe):
         try:
             cumulative_columns = ['fixture_id','Date','home_encoded','away_encoded', 'season_encoded', 'league_encoded','home_saves','away_saves',
@@ -569,7 +573,7 @@ class MongoDBFeatures:
             if self.logger:
                 self.logger.error(f"Error in add_cumulative_sums: {e}")
             return dataframe
-    
+
     def add_rolling_averages(self, dataframe):
         try:
             rolling_columns = ['fixture_id','year','week_of_year','home_encoded','away_encoded', 'season_encoded', 'league_encoded','home_saves','away_saves',
