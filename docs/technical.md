@@ -6,14 +6,22 @@ The Soccer Prediction Project is designed to predict soccer match draws and goal
 ## Development Environment
 - **Operating System:** Windows 11
 - **Python Version:** 3.9+
-- **Hardware:** CPU-only (configured with device='cpu' for all training tasks)
+- **Hardware:** CPU-only (explicitly configured with tree_method='hist' for XGBoost and device='cpu' for all training tasks)
+- **Environment Variables:**
+  - `PYTHONHASHSEED=19` (for reproducibility)
+  - `OMP_NUM_THREADS=4`, `MKL_NUM_THREADS=4`, `OPENBLAS_NUM_THREADS=4` (for parallel computations)
+  - `TF_ENABLE_ONEDNN_OPTS=0` (to disable oneDNN optimizations and ensure numerical consistency)
 
 ## Project Structure
 The project is organized into clearly defined modules:
 
 - **/models:**
   - Contains implementations of base machine learning models including those in `/models/StackedEnsemble` and `/models/ensemble`.
-  - Models such as LightGBM, XGBoost, and other ensemble techniques are implemented here.
+  - Current implementation in `ensemble_model_0324.py` integrates XGBoost, TabNet, and LightGBM as primary models with RandomForest as the default extra model.
+  - Includes specialized modules for:
+    - Dynamic weighting (`weights.py`)
+    - Threshold optimization (`thresholds.py`)
+    - MLflow integration and model loading
 
 - **/utils:**
   - Provides utility functions for logging (`logger.py`), MLflow integration (`mlflow_utils.py`), and feature engineering (`advanced_goal_features.py`).
@@ -24,25 +32,55 @@ The project is organized into clearly defined modules:
 
 ## Key Technologies and Dependencies
 
-- **Machine Learning Libraries:** LightGBM, XGBoost, scikit-learn, and Optuna for hyperparameter tuning.
-- **Experiment Tracking:** MLflow for logging parameters, model metrics, and model registration.
-- **Data Processing:** Pandas and NumPy for data manipulation.
-- **Utilities:** Joblib for model serialization; custom logging via `ExperimentLogger` in `/utils/logger.py`.
+- **Machine Learning Libraries:** 
+  - XGBoost: Used with CPU-only settings (tree_method='hist', device='cpu')
+  - LightGBM: Configured with binary objective and optimal hyperparameters
+  - TabNet: Implemented via pytorch_tabnet.tab_model.TabNetClassifier 
+  - scikit-learn: For metrics, preprocessing, and model compatibility
+
+- **Experiment Tracking:** 
+  - MLflow for tracking experiments, logging parameters, metrics, and model registration
+  - Models are registered with timestamp-based naming (ensemble_YYYYMMDD_HHMM)
+
+- **Data Processing:** 
+  - Pandas and NumPy for data manipulation and vectorized operations
+  - Feature selection and validation for each base model
+
+- **Utilities:** 
+  - Joblib for model serialization
+  - Custom logging via `ExperimentLogger` in `/utils/logger.py`
+  - Precision-focused weighting and threshold optimization
 
 ## Configuration and Environment Management
 
-- **Environment Variables:**
-  - `PYTHONHASHSEED=19` (for reproducibility)
-  - `OMP_NUM_THREADS=4`, `MKL_NUM_THREADS=4`, `OPENBLAS_NUM_THREADS=4` (for parallel computations)
-  - `TF_ENABLE_ONEDNN_OPTS=0` (to disable oneDNN optimizations and ensure numerical consistency)
-
 - **Virtual Environment:** Use a Python virtual environment; install dependencies using `pip install -r requirements.txt`.
+- **Reproducibility:** Fixed seeds and controlled environment variables ensure consistency:
+  ```python
+  SEED = 19
+  os.environ["PYTHONHASHSEED"] = str(SEED)
+  random.seed(SEED)
+  np.random.seed(SEED)
+  torch.manual_seed(SEED)
+  torch.use_deterministic_algorithms(True)
+  ```
 
 ## MLflow Integration
 
-- Experiments are tracked with MLflow, with models registered using timestamped registry names.
+- Experiments are tracked with MLflow, with models registered using timestamp-based registry names.
 - Parameters, metrics, and artifacts (including feature importance and analysis reports) are logged for reproducibility.
-- Launch the MLflow UI with: `mlflow ui --port 5000`.
+- Base models are loaded from MLflow with specific run IDs:
+  ```python
+  self.xgb_run_id = '30402608b8dc4c899d675e5b56c48c01'
+  self.lgb_run_id = '8312e6c4f0184ed9afb56f87c10f45a0'
+  self.tabnet_run_id = '46e86bfb663e4548a1a91360f9827de7'
+  self.rf_run_id = 'cbfda1f197654fd2bdcb610a73cf8fad'
+  ```
+
+## Precision-Focused Weighting and Threshold Optimization
+
+- **Dynamic Weighting:** The system calculates weights for each base model based on validation performance, focusing on precision.
+- **Threshold Optimization:** Thresholds are tuned to achieve a target precision (≥50%) while maintaining minimum recall requirements (≥25%).
+- **Vectorized Operations:** Performance-optimized functions use vectorized operations for efficiency.
 
 ## Testing and Reproducibility
 
@@ -53,32 +91,14 @@ The project is organized into clearly defined modules:
 
 - **Model Extensions:** Integration of additional base models and exploration of deeper neural network architectures.
 - **GPU Support:** While currently optimized for CPU, future updates may incorporate GPU-based training.
-- **Data Validation:** Continued improvements to data ingestion and anomaly detection mechanisms.
+- **Data Validation:** Continued improvements to data ingestion and anomaly detection mechanisms in the preprocessing pipeline.
 
-## Ensemble Model Implementation Details
+## Model Execution
 
-The ensemble model is implemented in `models/ensemble/ensemble_model_0321.py` and integrates multiple base models as follows:
+To run the ensemble model:
 
-- **XGBoost:** Utilizes `XGBClassifier` with CPU-only settings (e.g., `tree_method='hist'`, `device='cpu'`, `nthread=4`) and parameters tuned for optimal precision.
-- **TabNet:** Integrated using `TabNetClassifier` from the `pytorch_tabnet.tab_model` package. It is configured with the following key parameters:
-    - learning_rate: 0.02196
-    - n_d: 11
-    - n_a: 16
-    - n_steps: 9
-    - gamma: 1.8
-    - lambda_sparse: 2.48893e-05
-    - momentum: 0.95
-    - mask_type: 'entmax'
-- **LightGBM:** Configured with `LGBMClassifier` using a binary objective with hyperparameters set for robust performance.
+```python
+python -m models.ensemble.run_ensemble --extra_model random_forest --meta_learner_type lgb --target_precision 0.5 --required_recall 0.25
+```
 
-Extra base model options have been updated to include **CatBoost** (along with RandomForest, SVM, and MLP), which is now removed from the primary base model lineup.
-
-These base models are trained on selected feature subsets independently. Their probability outputs on validation data are then used to create meta-features through a stacking approach. The ensemble combines these predictions by:
-
-- **Dynamic Weighting:** Calculating model-specific weights based on validation precision, emphasizing the models with stronger performance.
-
-- **Probability Calibration:** Optionally calibrating the outputs (using methods such as sigmoid calibration) to refine each model's probability estimates.
-
-- **Threshold Tuning:** Determining an optimal decision threshold (via functions like `tune_threshold_for_precision`) to achieve a target precision (typically ≥50%), balancing precision and recall effectively.
-
-This configuration is designed to drive improved precision, which is critical for reliable predictions in betting applications.
+This documentation serves as a comprehensive guide to the technical implementation of the Soccer Prediction Project.

@@ -8,7 +8,9 @@ import pymongo
 from datetime import datetime, timedelta
 import time
 import pandas as pd
+from dotenv import load_dotenv
 
+load_dotenv()
 # Add project root to Python path
 try:
     project_root = Path(__file__).parent.parent.parent.parent
@@ -41,7 +43,7 @@ class ApiFootball:
         self.data_dir = os.path.join(self.project_root, "data", "create_data", "api-football")
         os.makedirs(self.data_dir, exist_ok=True)
         # MongoDB setup
-        self.mongo_uri = 'mongodb://192.168.0.73:27017/'
+        self.mongo_uri = os.getenv('MONGODB_URI')
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]  # Database name
         self.fixtures_collection = self.db["fixtures"] # Collection name
@@ -398,6 +400,7 @@ class ApiFootball:
         fixture_ids = self.get_fixture_ids_without_statistics()
         prediction_ids = self.get_fixture_ids_without_predictions()
         fixture_id_count = len(fixture_ids)
+        prediction_id_count = len(prediction_ids)
         request_count = 0
         all_request_count = 0
         start_time = time.time()
@@ -427,7 +430,7 @@ class ApiFootball:
             self.get_predictions_for_fixture(fixture_id)
             request_count += 1
             all_request_count += 1
-            print(f"Processed {all_request_count} of {fixture_id_count} fixtures")
+            print(f"Processed {all_request_count} of {prediction_id_count} fixtures")
             
             # Check if we've made 250 requests
             if request_count >= 250:
@@ -719,23 +722,23 @@ class ApiFootball:
             self.logger.error(f"Error getting prediction data for fixture ID {fixture_id}: {e}")
 
 def main():
-    api_key = '9d97f6f9804b592c86be814e246a077d'
+    api_key = os.getenv('API_FOOTBALL_API_KEY')
     if not api_key:
-        print("API_FOOTBALL_KEY not found.")
+        print("API_FOOTBALL_API_KEY not found.")
         return
 
     logger = ExperimentLogger()
     api_football = ApiFootball(api_key, logger)
 
-    # api_football.get_fixtures_for_leagues()
+    api_football.get_fixtures_for_leagues()
 
     api_football.get_statistics_for_fixtures()
 
     api_football.delete_fixtures_not_in_leagues()
 
-    # api_football.get_teams_for_leagues()
+    api_football.get_teams_for_leagues()
 
-    # api_football.get_teams_missing_venues()
+    api_football.get_teams_missing_venues()
 
 if __name__ == "__main__":
     main()

@@ -58,7 +58,6 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 target_precision: float = 0.50,
                 required_recall: float = 0.25,
                 experiment_name: str = "ensemble_model_improved",
-                time_based_split: bool = True,
                 logger: ExperimentLogger = logger):
     """
     Main function to run the ensemble model training and evaluation.
@@ -71,7 +70,6 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
         target_precision: Target precision for threshold tuning
         required_recall: Minimum required recall for threshold tuning
         experiment_name: Name of the MLflow experiment
-        time_based_split: Whether to use time-based data splits
     """
     
     # Set up MLflow tracking
@@ -89,20 +87,22 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 'calibrate': calibrate,
                 'dynamic_weighting': dynamic_weighting,
                 'target_precision': target_precision,
-                'required_recall': required_recall,
-                'time_based_split': time_based_split
+                'required_recall': required_recall
             })
             
             logger.info("Starting ensemble model execution...")
             
             try:
-                logger.info("Loading data with time-based splits...")
+                logger.info("Loading data...")
                 from models.StackedEnsemble.shared.data_loader import DataLoader
                 X_train, y_train, X_test, y_test, X_val, y_val = DataLoader().load_data()
+                # Convert all columns to float64 to ensure consistent data types
+                X_train = X_train.astype('float64')
+                X_test = X_test.astype('float64')
+                X_val = X_val.astype('float64')
             except Exception as e:
                 logger.error(f"Error loading time-based data: {str(e)}")
                 logger.info("Falling back to standard data loading...")
-                time_based_split = False
             
             # Log dataset sizes
             logger.info(f"Dataset sizes - Training: {X_train.shape}, Test: {X_test.shape}, Validation: {X_val.shape}")
@@ -123,11 +123,6 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
             X_train_filtered = X_train
             X_test_filtered = X_test
             X_val_filtered = X_val
-            # Convert all columns to float64 for consistent data types
-            logger.info("Converting all feature columns to float64 for consistency...")
-            X_train_filtered = X_train_filtered
-            X_test_filtered = X_test_filtered
-            X_val_filtered = X_val_filtered
             
             # Log the conversion
             mlflow.log_param('data_type_conversion', 'all_columns_to_float64')

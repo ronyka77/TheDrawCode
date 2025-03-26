@@ -13,6 +13,13 @@ import mlflow.pyfunc
 from pymongo import MongoClient
 from sklearn.metrics import recall_score, f1_score
 from xgboost import XGBClassifier
+import warnings
+from pandas.errors import SettingWithCopyWarning
+
+# Disable pandas SettingWithCopyWarning
+# This suppresses warnings about chained assignment with inplace operations
+# that will change behavior in pandas 3.0
+warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Suppress pandas chained assignment warnings
 pd.options.mode.chained_assignment = None  # default='warn'
@@ -69,7 +76,7 @@ class DrawPredictor:
         extra_cols = set(df.columns) - set(self.required_features)
         if extra_cols:
             df.drop(columns=list(extra_cols), inplace=True, errors='ignore')
-            # print(f"Dropped columns: {extra_cols}")
+            print(f"Dropped columns: {len(extra_cols)}")
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
 
@@ -181,8 +188,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Ensure data types are compatible with model expectations
         # Convert numeric columns to float64 to match model expectations
         numeric_columns = prediction_df.select_dtypes(include=['number']).columns
-        for col in numeric_columns:
-            prediction_df[col] = prediction_df[col].astype('float64')
+        prediction_df = prediction_df.astype({col: 'float64' for col in numeric_columns})
         
         # Add column validation
         predictor._validate_input(prediction_df)
@@ -333,35 +339,32 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        'f04b93479ee249f6bc77204e5c4b206f', 
-        '035abdf986654b1e8b551d0ce044c929', 
-        '8d80522037ae4a9790b72129c06851a4', 
-        'd3c066618b4d425fbb2ffff99a478238', 
-        '7c12f45bc2c442818cf09c497eef4176', 
-        '58f6a2c94ced4c1a9c724d19224cca8c', 
-        '1b64ed01857f4abf9892de9c22707151', 
-        'ee17cebf244e473ba8e661bcdd442d50', 
-        'f20a9ef589a341bfb39941593e0af0ac', 
-        '5befa2bf2b5d4ae6866f3cc177c7b68f', 
-        '97207cdaab54477fa267d8cd29ce35e9', 
-        '403c8c5eaaf442898594e45e6998cff4', 
-        '835b997b8acd46f7a72ab5350451e427', 
-        '538f96a0c783429f9f2e6967cc4693a2', 
-        'ab80dd2cc30a4eb3a7279c051b07ce90', 
-        '3cf20b90b809469d87fe11bfc79d1234',
-        '01d70371af714f87b0b15393a5ce6853', 
-        '9d1caf1dbee3488187b496c2c61f948d'
+        # '035abdf986654b1e8b551d0ce044c929', 
+        # '8d80522037ae4a9790b72129c06851a4', 
+        # 'd3c066618b4d425fbb2ffff99a478238', 
+        # '7c12f45bc2c442818cf09c497eef4176', 
+        # '58f6a2c94ced4c1a9c724d19224cca8c', 
+        # 'ee17cebf244e473ba8e661bcdd442d50', 
+        # 'f20a9ef589a341bfb39941593e0af0ac', 
+        # '5befa2bf2b5d4ae6866f3cc177c7b68f', 
+        # '97207cdaab54477fa267d8cd29ce35e9', 
+        # '403c8c5eaaf442898594e45e6998cff4', 
+        # '835b997b8acd46f7a72ab5350451e427', 
+        # '538f96a0c783429f9f2e6967cc4693a2', 
+        # '01d70371af714f87b0b15393a5ce6853', 
+        # '9d1caf1dbee3488187b496c2c61f948d',
+        # '355e5d963cf644debba80148a3fcd430',
+        '1aec65aae580476b813fe97fee26e9e0',
+        '355e5d963cf644debba80148a3fcd430'
     ]
     # Filter configuration to remove predictions near specific thresholds
     filter_config = {
-        'f04b93479ee249f6bc77204e5c4b206f': {"remove_thresholds": [0.59]},  
         '8d80522037ae4a9790b72129c06851a4': {"remove_thresholds": [0.45, 0.47]},  
         'd3c066618b4d425fbb2ffff99a478238': {"remove_thresholds": [0.59, 0.60, 0.64, 0.65, 0.66, 0.69]},  
         '5befa2bf2b5d4ae6866f3cc177c7b68f': {"remove_thresholds": [0.30, 0.31, 0.32, 0.33, 0.34, 0.35]},  
         '7c12f45bc2c442818cf09c497eef4176': {"remove_thresholds": [0.32, 0.33]},  
         '58f6a2c94ced4c1a9c724d19224cca8c': {"remove_thresholds": [0.32, 0.35, 0.36, 0.40, 0.41, 0.42]},  
         '835b997b8acd46f7a72ab5350451e427': {"remove_thresholds": [0.36, 0.31, 0.32]},  
-        'ab80dd2cc30a4eb3a7279c051b07ce90': {"remove_thresholds": [0.33, 0.34, 0.38]},  
         '01d70371af714f87b0b15393a5ce6853': {"remove_thresholds": [0.37, 0.41]},  
     }
     
@@ -371,7 +374,6 @@ def main():
         '97207cdaab54477fa267d8cd29ce35e9': {"keep_thresholds": [0.31, 0.32, 0.34, 0.37]},  
         '8d80522037ae4a9790b72129c06851a4': {"keep_thresholds": [0.47, 0.48]},  
         'd3c066618b4d425fbb2ffff99a478238': {"keep_thresholds": [0.66, 0.68, 0.71, 0.72, 0.73]},  
-        '1b64ed01857f4abf9892de9c22707151': {"keep_thresholds": [0.30, 0.34]},  
         'ee17cebf244e473ba8e661bcdd442d50': {"keep_thresholds": [0.33, 0.35]},  
         '035abdf986654b1e8b551d0ce044c929': {"keep_thresholds": [0.61, 0.62, 0.65, 0.68, 0.72]},  
         '538f96a0c783429f9f2e6967cc4693a2': {"keep_thresholds": [0.33, 0.40, 0.41, 0.43, 0.48]},  

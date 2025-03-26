@@ -61,7 +61,7 @@ from models.StackedEnsemble.shared.hypertuner_utils import (
 from models.StackedEnsemble.shared.data_loader import DataLoader
 
 # Global settings
-min_recall = 0.20  # Minimum acceptable recall
+min_recall = 0.30  # Minimum acceptable recall
 n_trials = 100000  # Number of hyperparameter optimization trials as in notebook
 # Get current versions
 xgb_version = xgb.__version__
@@ -222,18 +222,18 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         # Create model with remaining parameters
         model = create_model(model_params)
         # Combine training and validation data while preserving indexes
-        X_combined = pd.concat([X_train, X_test], axis=0)
-        y_combined = pd.concat([y_train, y_test], axis=0)
+        # X_combined = pd.concat([X_train, X_test], axis=0)
+        # y_combined = pd.concat([y_train, y_test], axis=0)
         
         # Reset indexes to ensure proper alignment
-        X_combined.reset_index(drop=True, inplace=True)
-        y_combined.reset_index(drop=True, inplace=True)
+        # X_combined.reset_index(drop=True, inplace=True)
+        # y_combined.reset_index(drop=True, inplace=True)
 
         # Create eval set for early stopping
         eval_set = [(X_eval, y_eval)]
         # Fit model with early stopping
         model.fit(
-            X_combined, y_combined,
+            X_train, y_train,
             eval_set=eval_set,
             verbose=False
         )
@@ -579,17 +579,16 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training model with precision target")
         params = base_params.copy()
         params.update({
-            'learning_rate': 0.07500000000000001,
-            'max_depth': 11,
-            'min_child_weight': 300,
-            'colsample_bytree': 0.6599999999999999,
-            'subsample': 0.74,
-            'gamma': 0.52,
-            'lambda': 5.16,
-            'alpha': 27.3,
-            'scale_pos_weight': 3.18,
-            'early_stopping_rounds': 1150,
-            'tree_method': 'hist'  # Enforce CPU-only training
+            'learning_rate': 0.045,
+            'max_depth': 9,
+            'min_child_weight': 320,
+            'colsample_bytree': 0.7999999999999999,
+            'subsample': 0.75,
+            'gamma': 2.66,
+            'lambda': 5.53,
+            'alpha': 22.200000000000003,
+            'scale_pos_weight': 2.34,
+            'early_stopping_rounds': 1100
         })
         
         # Train final model with best parameters
@@ -629,7 +628,10 @@ def main():
         X_train = X_train[features]
         X_test = X_test[features]
         X_eval = X_eval[features]
-        
+        # Convert all columns to float64 to ensure consistent data types
+        X_train = X_train.astype('float64')
+        X_test = X_test.astype('float64')
+        X_eval = X_eval.astype('float64')
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
@@ -641,9 +643,9 @@ def main():
         
         logger.info(f"Current base parameters: {base_params}")
         
-        # current_params, current_metrics = hypertune_xgboost(experiment_name)
-        # logger.info(f"Run completed with parameters: {current_params}")
-        # logger.info(f"Run metrics: {current_metrics}")
+        current_params, current_metrics = hypertune_xgboost(experiment_name)
+        logger.info(f"Run completed with parameters: {current_params}")
+        logger.info(f"Run metrics: {current_metrics}")
 
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)

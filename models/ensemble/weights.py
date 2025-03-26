@@ -165,6 +165,57 @@ def compute_dynamic_weights(p_xgb: np.ndarray, p_tabnet: np.ndarray,
     
     return normalized_weights
 
+def compute_precision_focused_weights_optimized(p_xgb, p_tabnet, p_lgb, p_extra, y_true, target_precision, required_recalls, logger=None):
+    """
+    Compute weights with strong focus on precision
+    """
+    logger.info("Computing precision-focused weights...")
+    xgb_recall = required_recalls[0]
+    lgb_recall = required_recalls[1]
+    tabnet_recall = required_recalls[2]
+    extra_recall = required_recalls[3]
+    # Find precision-optimal thresholds
+    logger.info("Tuning thresholds for XGBoost...")
+    xgb_threshold, xgb_metrics = tune_threshold_for_precision_optimized(p_xgb, y_true, target_precision, xgb_recall)
+    logger.info("Tuning thresholds for TabNet...")
+    tabnet_threshold, tabnet_metrics = tune_threshold_for_precision_optimized(p_tabnet, y_true, target_precision, tabnet_recall)
+    logger.info("Tuning thresholds for LightGBM...")
+    lgb_threshold, lgb_metrics = tune_threshold_for_precision_optimized(p_lgb, y_true, target_precision, lgb_recall)
+    logger.info("Tuning thresholds for Extra Model...")
+    extra_threshold, extra_metrics = tune_threshold_for_precision_optimized(p_extra, y_true, target_precision, extra_recall)
+    
+    # Calculate weight based on precision^2 (to emphasize precision differences)
+    xgb_weight = xgb_metrics['precision']
+    tabnet_weight = tabnet_metrics['precision']
+    lgb_weight = lgb_metrics['precision']
+    extra_weight = extra_metrics['precision']
+    
+    # Ensure minimum contribution from each model (5%)
+    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight
+    xgb_weight = max(0.05, xgb_weight / total_weight)
+    tabnet_weight = max(0.05, tabnet_weight / total_weight)
+    lgb_weight = max(0.05, lgb_weight / total_weight)
+    extra_weight = max(0.05, extra_weight / total_weight)
+    
+    # Renormalize
+    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight
+    weights = {
+        'xgb': xgb_weight / total_weight,
+        'tabnet': tabnet_weight / total_weight,
+        'lgb': lgb_weight / total_weight,
+        'extra': extra_weight / total_weight
+    }
+    thresholds = {
+        'xgb': xgb_threshold,
+        'tabnet': tabnet_threshold,
+        'lgb': lgb_threshold,
+        'extra': extra_threshold
+    }
+    logger.info("Precision-focused weights calculated:")
+    for model, weight in weights.items():
+        logger.info(f"  {model}: {weight:.4f}")
+    return weights, thresholds
+
 def compute_precision_focused_weights(p_xgb, p_tabnet, p_lgb, p_extra, y_true, target_precision, required_recall, logger=None):
     """
     Compute weights with strong focus on precision

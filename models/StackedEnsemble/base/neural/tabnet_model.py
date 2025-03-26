@@ -49,42 +49,15 @@ warnings.filterwarnings("ignore", message=".*imbalanced.*|.*weight.*|.*class_wei
 warnings.filterwarnings("ignore", message=".*sample_weight.*", category=UserWarning)
 
 # Global settings
-min_recall = 0.20
+min_recall = 0.40
 # You can adjust n_trials if needed
 n_trials = 20000
-
-# Define a class for metrics instead of a function
-class Class1Metrics(Metric):
-    def __init__(self):
-        self._name = "class1_metrics"
-        self._maximize = True
-    
-    def __call__(self, y_true, y_pred):
-        # Extract probabilities for class 1
-        y_pred_proba = y_pred[:, 1]
-        
-        # Calculate AUC specifically for class 1
-        auc = roc_auc_score(y_true, y_pred_proba)
-        
-        # Convert probabilities to binary predictions at threshold 0.5
-        y_pred_binary = (y_pred_proba >= 0.5).astype(int)
-        
-        # Calculate class 1 focused metrics
-        precision = precision_score(y_true, y_pred_binary)
-        recall = recall_score(y_true, y_pred_binary)
-        if recall >= min_recall:
-            return precision
-        else:
-            if precision > 0.5:
-                return 0.2
-            else:
-                return precision * 0.5
 
 # Then modify your base_params to include the custom metrics
 base_params = {
     'optimizer_fn': optim.Adam,
     'mask_type': 'sparsemax',
-    'eval_metric': ['auc', 'logloss'],  # Remove function reference here
+    'eval_metric': ['logloss', 'auc'],  # Remove function reference here
     'verbose': 0,
     'seed': 19,
     'device_name': 'cpu'
@@ -272,13 +245,13 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
             X_eval = X_eval.values if hasattr(X_eval, 'values') else X_eval
             y_eval = y_eval.values if hasattr(y_eval, 'values') else y_eval
         # Combine training and testing data similar to xgboost_model.py
-        X_combined = np.concatenate([X_train, X_test], axis=0)
-        y_combined = np.concatenate([y_train, y_test], axis=0)
+        # X_combined = np.concatenate([X_train, X_test], axis=0)
+        # y_combined = np.concatenate([y_train, y_test], axis=0)
         
         # Use the class (not an instance) in the eval_metric list
         # TabNet will instantiate it internally
         model.fit(
-            X_combined, y_combined,
+            X_train, y_train,
             eval_set=[(X_eval, y_eval)],
             eval_metric=['auc'],  # Pass the class here
             max_epochs=model_params.get('max_epochs', 50),
@@ -539,17 +512,17 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training model with precision target")
         params = base_params.copy()
         params.update({
-            'learning_rate': 0.0020903133670349375,
-            'n_d': 17,
-            'n_a': 16,
-            'n_steps': 9,
-            'gamma': 1.4000000000000001,
-            'lambda_sparse': 6.941514514616901e-05,
-            'momentum': 0.9550000000000001,
+            'learning_rate': 0.011297870092838641,
+            'n_d': 4,
+            'n_a': 18,
+            'n_steps': 6,
+            'gamma': 1.75,
+            'lambda_sparse': 4.20874158625355e-05,
+            'momentum': 0.895,
             'patience': 12,
-            'max_epochs': 58,
+            'max_epochs': 86,
             'device_name': 'cpu',
-            'verbose': 1
+            'verbose': 0
         })
         
         # Train final model with best parameters
@@ -569,7 +542,7 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
-        
+
 def main():
     """
     Main execution function for TabNet hypertuning.
@@ -587,15 +560,19 @@ def main():
         X_train = X_train[features]
         X_test = X_test[features]
         X_eval = X_eval[features]
+        # Convert all columns to float64 to ensure consistent data types
+        X_train = X_train.astype('float64')
+        X_test = X_test.astype('float64')
+        X_eval = X_eval.astype('float64')
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
         logger.info(f"Current base parameters: {base_params}")
         
-        # best_params, metrics = hypertune_tabnet(experiment_name)
-        # logger.info(f"Hypertuning completed with parameters: {best_params}")
-        # logger.info(f"Evaluation metrics: {metrics}")
+        best_params, metrics = hypertune_tabnet(experiment_name)
+        logger.info(f"Hypertuning completed with parameters: {best_params}")
+        logger.info(f"Evaluation metrics: {metrics}")
         
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)

@@ -19,6 +19,8 @@ import mlflow
 from mlflow.tracking import MlflowClient
 from mlflow.exceptions import MlflowException
 from mlflow.models.signature import ModelSignature
+import shutil
+
 
 # Add project root to path
 try:
@@ -379,3 +381,29 @@ def setup_mlflow(base_path: Optional[Union[str, Path]] = None) -> MLflowIntegrat
     except Exception as e:
         logger.error(f"Error setting up MLflow: {str(e)}")
         raise 
+
+def cleanup_deleted_runs(mlruns_dir="mlruns"):
+    client = MlflowClient()
+    experiments = client.search_experiments() 
+    for exp in experiments:
+        print(f"Processing Experiment: {exp.name} (ID: {exp.experiment_id})")
+        try:
+            # Search for runs with lifecycle_stage 'deleted'
+            runs = client.search_runs([exp.experiment_id], run_view_type=mlflow.entities.ViewType.DELETED_ONLY)
+            print(f"Found {len(runs)} runs in experiment {exp.name} (ID: {exp.experiment_id})")
+            for run in runs:
+                run_id = run.info.run_id
+                run_path = os.path.join(mlruns_dir, exp.experiment_id, run_id)
+                try:
+                    if os.path.exists(run_path):
+                        print(f"Deleting run folder for run_id {run_id} at {run_path}")
+                        shutil.rmtree(run_path)
+                except Exception as e:
+                    print(f"Error deleting run folder for run_id {run_id} at {run_path}: {str(e)}")
+                    continue
+        except Exception as e:
+            print(f"Error processing experiment {exp.name} (ID: {exp.experiment_id}): {str(e)}")
+            continue
+
+if __name__ == "__main__":
+    cleanup_deleted_runs()

@@ -240,12 +240,12 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
     try:
         # Combine training and validation data while preserving indexes
-        X_combined = pd.concat([X_train, X_test], axis=0)
-        y_combined = pd.concat([y_train, y_test], axis=0)
+        # X_combined = pd.concat([X_train, X_test], axis=0)
+        # y_combined = pd.concat([y_train, y_test], axis=0)
         
-        # Reset indexes to ensure proper alignment
-        X_combined.reset_index(drop=True, inplace=True)
-        y_combined.reset_index(drop=True, inplace=True)
+        # # Reset indexes to ensure proper alignment
+        # X_combined.reset_index(drop=True, inplace=True)
+        # y_combined.reset_index(drop=True, inplace=True)
         # Extract early stopping rounds if present
         early_stopping_rounds = model_params.pop('early_stopping_rounds', 100)
         
@@ -257,7 +257,7 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         
         # Fit model with early stopping
         model.fit(
-            X_combined, y_combined,
+            X_train, y_train,
             eval_set=eval_set,
             callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)]
         )
@@ -606,21 +606,20 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training model with precision target")
         params = base_params.copy()
         params.update({
-            'learning_rate': 0.15000000000000002,
-            'num_leaves': 125,
+            'learning_rate': 0.105,
+            'num_leaves': 110,
             'max_depth': 4,
-            'min_child_samples': 250,
-            'feature_fraction': 0.65,
-            'bagging_fraction': 0.64,
-            'bagging_freq': 10,
-            'reg_alpha': 0.7,
-            'reg_lambda': 5.1000000000000005,
-            'min_split_gain': 0.23,
-            'early_stopping_rounds': 820,
-            'path_smooth': 0.37,
-            'cat_smooth': 9.3,
-            'max_bin': 520,
-            'tree_method': 'hist'  # Enforce CPU-only training
+            'min_child_samples': 180,
+            'feature_fraction': 0.68,
+            'bagging_fraction': 0.7,
+            'bagging_freq': 13,
+            'reg_alpha': 13.8,
+            'reg_lambda': 8.7,
+            'min_split_gain': 0.16,
+            'early_stopping_rounds': 560,
+            'path_smooth': 0.005,
+            'cat_smooth': 29.3,
+            'max_bin': 640
         })
         
         # Train final model with best parameters
@@ -660,6 +659,10 @@ def main():
         X_train = X_train[features]
         X_test = X_test[features]
         X_eval = X_eval[features]
+        # Convert all columns to float64 to ensure consistent data types
+        X_train = X_train.astype('float64')
+        X_test = X_test.astype('float64')
+        X_eval = X_eval.astype('float64')
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
@@ -671,10 +674,10 @@ def main():
         best_overall_params = None
         best_overall_metrics = None
         
-        # logger.info(f"Starting hyperparameter optimization run")
-        # current_params, current_metrics = hypertune_lightgbm(experiment_name)
-        # logger.info(f"Run completed with parameters: {current_params}")
-        # logger.info(f"Run metrics: {current_metrics}")
+        logger.info(f"Starting hyperparameter optimization run")
+        current_params, current_metrics = hypertune_lightgbm(experiment_name)
+        logger.info(f"Run completed with parameters: {current_params}")
+        logger.info(f"Run metrics: {current_metrics}")
 
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)

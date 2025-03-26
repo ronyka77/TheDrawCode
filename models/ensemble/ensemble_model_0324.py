@@ -21,6 +21,7 @@ import time
 import torch
 from pytorch_tabnet.tab_model import TabNetClassifier
 
+
 # Set fixed seed and hash seed for determinism
 SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
@@ -42,10 +43,10 @@ torch.backends.cudnn.benchmark = False
 from utils.logger import ExperimentLogger
 from utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
 from models.ensemble.data_utils import prepare_data
-from models.ensemble.meta_features import create_meta_features, create_meta_dataframe
+from models.ensemble.meta_features import create_meta_features_optimized, create_meta_dataframe
 from models.ensemble.diagnostics import explain_predictions, analyze_prediction_errors
 from models.ensemble.training import train_base_models, hypertune_meta_learner, initialize_meta_learner
-from models.ensemble.weights import compute_precision_focused_weights
+from models.ensemble.weights import compute_precision_focused_weights_optimized
 from models.ensemble.thresholds import tune_threshold_for_precision_optimized
 from models.ensemble.evaluation import evaluate_model
 
@@ -70,17 +71,11 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.sampling_strategy = sampling_strategy
         self.complexity_penalty = complexity_penalty
         self.target_precision = target_precision
-        self.xgb_run_id = '61bac8ee0e72409a8f744ac8e94551da'
-        self.lgb_run_id = '7f519dc3398e4a6ab7bf8409e936ad37'
-        self.tabnet_run_id = '5489087d4cf54a0aa3dfb068afe4407f'
-        self.rf_run_id = '5ee5fab32da74783944da445e3a20bb6'
-
-        # Set feature sets; use xgboost features for tabnet as fallback
-        # self.xgb_features = import_selected_features_ensemble(model_type='xgb')
-        # self.tabnet_features = import_selected_features_ensemble(model_type='tabnet')
-        # self.lgb_features = import_selected_features_ensemble(model_type='lgbm')
-        # self.rf_features = import_selected_features_ensemble(model_type='rf')
-
+        self.xgb_run_id = '30402608b8dc4c899d675e5b56c48c01'
+        self.lgb_run_id = '8312e6c4f0184ed9afb56f87c10f45a0'
+        self.tabnet_run_id = '46e86bfb663e4548a1a91360f9827de7'
+        self.rf_run_id = 'cbfda1f197654fd2bdcb610a73cf8fad'
+        self.min_recalls = [0.30, 0.20, 0.40, 0.40]
         # Meta-learner settings
         self.meta_learner_type = meta_learner_type
         self.optimal_threshold = 0.5
@@ -89,7 +84,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.calibration_method = calibration_method
         self.dynamic_weighting = dynamic_weighting
         if self.dynamic_weighting:
-            self.dynamic_weights = {'xgb': 1/3, 'tabnet': 1/3, 'lgb': 1/3}
+            self.dynamic_weights = {'xgb': 1/4, 'tabnet': 1/4, 'lgb': 1/4, 'extra': 1/4}
         self.meta_learner = None
         self.model_xgb_calibrated = None
         self.model_lgb_calibrated = None
@@ -111,8 +106,8 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.logger.info("Splitting training data for validation...")
             X_train_prepared, X_val_prepared, y_train, y_val = train_test_split(X_train_prepared, y_train, test_size=val_size, random_state=19, stratify=y_train)
         
-        X_combined = pd.concat([X_train_prepared, X_test_prepared], axis=0)
-        y_combined = pd.concat([y_train, y_test], axis=0)
+        # X_combined = pd.concat([X_train_prepared, X_test_prepared], axis=0)
+        # y_combined = pd.concat([y_train, y_test], axis=0)
         # Base models dictionary using updated keys
         base_models = {
             'xgb': self.model_xgb,
@@ -125,48 +120,55 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         X_val_prepared_tabnet = X_val_prepared[self.tabnet_features]
         X_val_prepared_lgb = X_val_prepared[self.lgb_features]
         X_val_prepared_rf = X_val_prepared[self.rf_features]
-        X_combined_xgb = X_combined[self.xgb_features]
-        X_combined_tabnet = X_combined[self.tabnet_features]
-        X_combined_lgb = X_combined[self.lgb_features]
-        X_combined_rf = X_combined[self.rf_features]
+        X_train_prepared_xgb = X_train_prepared[self.xgb_features]
+        X_train_prepared_tabnet = X_train_prepared[self.tabnet_features]
+        X_train_prepared_lgb = X_train_prepared[self.lgb_features]
+        X_train_prepared_rf = X_train_prepared[self.rf_features]
+        X_test_prepared_xgb = X_test_prepared[self.xgb_features]
+        X_test_prepared_tabnet = X_test_prepared[self.tabnet_features]
+        X_test_prepared_lgb = X_test_prepared[self.lgb_features]
+        X_test_prepared_rf = X_test_prepared[self.rf_features]
 
         # Obtain predictions from base models
         self.logger.info("Obtaining predictions from base models...")
         p_xgb = self.model_xgb.predict_proba(X_val_prepared_xgb)[:, 1]
-        p_xgb_train = self.model_xgb.predict_proba(X_combined_xgb)[:, 1]
+        p_xgb_test = self.model_xgb.predict_proba(X_test_prepared_xgb)[:, 1]
         p_tabnet = self.model_tabnet.predict_proba(X_val_prepared_tabnet.values)[:, 1]
-        p_tabnet_train = self.model_tabnet.predict_proba(X_combined_tabnet.values)[:, 1]
+        p_tabnet_test = self.model_tabnet.predict_proba(X_test_prepared_tabnet.values)[:, 1]
         p_lgb = self.model_lgb.predict_proba(X_val_prepared_lgb)[:, 1]
-        p_lgb_train = self.model_lgb.predict_proba(X_combined_lgb)[:, 1]
+        p_lgb_test = self.model_lgb.predict_proba(X_test_prepared_lgb)[:, 1]
         # Extra model predictions
         if self.extra_base_model_type in ['mlp', 'svm'] and self.extra_model_scaler is not None:
             X_val_scaled = self.extra_model_scaler.transform(X_val_prepared)
+            X_test_scaled = self.extra_model_scaler.transform(X_test_prepared)
             if self.extra_base_model_type == 'mlp':
                 p_extra = self.model_extra.predict(X_val_scaled, verbose=0).flatten()
+                p_extra_test = self.model_extra.predict(X_test_scaled, verbose=0).flatten()
             else:
                 p_extra = self.model_extra.predict_proba(X_val_scaled)[:, 1]
+                p_extra_test = self.model_extra.predict_proba(X_test_scaled)[:, 1]
         else:
             p_extra = self.model_extra.predict_proba(X_val_prepared_rf)[:, 1]
-            p_extra_train = self.model_extra.predict_proba(X_combined_rf)[:, 1]
+            p_extra_test = self.model_extra.predict_proba(X_test_prepared_rf)[:, 1]
         
         # Optionally calculate dynamic weights based on validation performance
         if self.dynamic_weighting:
             self.logger.info("Computing dynamic weights based on validation performance...")
             # Combine validation and training predictions for weight computation
             self.logger.info(f"Combined dataset for weight computation: {len(p_xgb)} samples")
-            self.dynamic_weights = compute_precision_focused_weights(
-                p_lgb, p_tabnet, p_lgb, p_extra, y_val, self.target_precision, self.required_recall, self.logger
+            self.dynamic_weights, self.thresholds = compute_precision_focused_weights_optimized(
+                p_xgb, p_tabnet, p_lgb, p_extra, y_val, self.target_precision, self.min_recalls, self.logger
             )
-            self.dynamic_weights_train = compute_precision_focused_weights(
-                p_xgb_train, p_tabnet_train, p_lgb_train, p_extra_train, y_combined, self.target_precision, self.required_recall, self.logger
+            self.dynamic_weights_train, self.thresholds_train = compute_precision_focused_weights_optimized(
+                p_xgb_test, p_tabnet_test, p_lgb_test, p_extra_test, y_test, self.target_precision, self.min_recalls, self.logger
             )
         # Create meta-features from base model predictions
         self.logger.info("Creating meta-features for meta-learner...")
-        meta_features = create_meta_features(
-            p_xgb, p_tabnet, p_lgb, p_extra, self.dynamic_weights if self.dynamic_weighting else None
+        meta_features = create_meta_features_optimized(
+            p_xgb, p_tabnet, p_lgb, p_extra, self.dynamic_weights if self.dynamic_weighting else None, self.thresholds if self.dynamic_weighting else None
         )
-        meta_features_train = create_meta_features(
-            p_xgb_train, p_tabnet_train, p_lgb_train, p_extra_train, self.dynamic_weights_train if self.dynamic_weighting else None
+        meta_features_train = create_meta_features_optimized(
+            p_xgb_test, p_tabnet_test, p_lgb_test, p_extra_test, self.dynamic_weights_train if self.dynamic_weighting else None, self.thresholds_train if self.dynamic_weighting else None
         )
         # Convert to DataFrame for better interpretability
         meta_df = create_meta_dataframe(meta_features)
@@ -178,7 +180,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
         # Train meta-learner
         self.logger.info("Training meta-learner...")
-        self.meta_learner = hypertune_meta_learner(meta_df_train, y_combined, meta_df, y_val, 
+        self.meta_learner = hypertune_meta_learner(meta_df_train, y_test, meta_df, y_val, 
                                                     meta_learner_type=self.meta_learner_type, target_precision=self.target_precision, min_recall=self.required_recall)
         # Tune threshold for optimal precision-recall trade-off
         self.logger.info(f"Tuning threshold for target precision {self.target_precision}...")
@@ -228,7 +230,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             p_xgb = xgb_model.predict_proba(X_prepared_xgb)[:, 1]
             p_tabnet = tabnet_model.predict_proba(X_prepared_tabnet.values)[:, 1]
             p_lgb = lgb_model.predict_proba(X_prepared_lgb)[:, 1]
-            meta_features = create_meta_features(p_xgb, p_tabnet, p_lgb, p_extra, self.dynamic_weights if self.dynamic_weighting else None)
+            meta_features = create_meta_features_optimized(p_xgb, p_tabnet, p_lgb, p_extra, self.dynamic_weights if self.dynamic_weighting else None, self.thresholds if self.thresholds else None)
             meta_probs = self.meta_learner.predict_proba(meta_features)
             return meta_probs[:, 1]
         except Exception as e:
