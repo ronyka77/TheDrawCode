@@ -52,7 +52,6 @@ from utils.logger import ExperimentLogger
 experiment_name = "random_forest_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
-from utils.dynamic_sampler import DynamicTPESampler
 from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
@@ -521,13 +520,13 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.warning("Hyperparameter tuning failed. Using default parameters.")
         params = base_params.copy()
         params.update({
-            'n_estimators': 1380,
-            'max_depth': 15,
-            'min_samples_split': 4,
-            'min_samples_leaf': 26,
-            'max_features': 0.16,
+            'n_estimators': 180,
+            'max_depth': 18,
+            'min_samples_split': 61,
+            'min_samples_leaf': 19,
+            'max_features': 0.64,
             'bootstrap': True,
-            'class_weight': 2.55,
+            'class_weight': 3.52,
             'criterion': 'entropy',
             'random_state': 19,
             'n_jobs': 4,
@@ -586,9 +585,9 @@ def main():
         logger.info(f"Run metrics: {current_metrics}")
         
         # Train model with precision target
-        best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
-        logger.info(f"Best model: {best_model}")
-        logger.info(f"Best metrics: {best_metrics}")
+        # best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        # logger.info(f"Best model: {best_model}")
+        # logger.info(f"Best metrics: {best_metrics}")
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
 

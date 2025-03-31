@@ -107,7 +107,7 @@ def load_hyperparameter_space():
         },
         'n_steps': {
             'type': 'int',
-            'low': 3,
+            'low': 2,
             'high': 10
         },
         'gamma': {
@@ -136,7 +136,7 @@ def load_hyperparameter_space():
         'max_epochs': {
             'type': 'int',
             'low': 40,
-            'high': 100,
+            'high': 120,
             'step': 2
         }
     }
@@ -512,15 +512,15 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training model with precision target")
         params = base_params.copy()
         params.update({
-            'learning_rate': 0.011297870092838641,
-            'n_d': 4,
-            'n_a': 18,
-            'n_steps': 6,
-            'gamma': 1.75,
-            'lambda_sparse': 4.20874158625355e-05,
-            'momentum': 0.895,
-            'patience': 12,
-            'max_epochs': 86,
+            'learning_rate': 0.006410351277717539,
+            'n_d': 11,
+            'n_a': 20,
+            'n_steps': 10,
+            'gamma': 1.0,
+            'lambda_sparse': 0.00011864928029354735,
+            'momentum': 0.99,
+            'patience': 14,
+            'max_epochs': 82,
             'device_name': 'cpu',
             'verbose': 0
         })

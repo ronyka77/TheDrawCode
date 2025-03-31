@@ -71,10 +71,10 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.sampling_strategy = sampling_strategy
         self.complexity_penalty = complexity_penalty
         self.target_precision = target_precision
-        self.xgb_run_id = '30402608b8dc4c899d675e5b56c48c01'
-        self.lgb_run_id = '8312e6c4f0184ed9afb56f87c10f45a0'
-        self.tabnet_run_id = '46e86bfb663e4548a1a91360f9827de7'
-        self.rf_run_id = 'cbfda1f197654fd2bdcb610a73cf8fad'
+        self.xgb_run_id = 'ddb71abe2f0e4f91a3e5ffc3e4c10ffb'
+        self.lgb_run_id = '8c33c9c3805449cb9048475e23d27914'
+        self.tabnet_run_id = '7188f690235741fe83f872d44b229f6e'
+        self.rf_run_id = 'f7be1d96055445b3abc1d7cb76033da2'
         self.min_recalls = [0.30, 0.20, 0.40, 0.40]
         # Meta-learner settings
         self.meta_learner_type = meta_learner_type

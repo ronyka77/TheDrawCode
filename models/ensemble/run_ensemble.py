@@ -52,7 +52,7 @@ from models.ensemble.ensemble_model_0324 import EnsembleModel
 from models.ensemble.data_utils import balance_and_clean_dataset
 
 def run_ensemble(extra_base_model_type: str = 'random_forest',
-                meta_learner_type: str = 'lgb',
+                meta_learner_type: str = 'xgb',
                 calibrate: bool = False,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,

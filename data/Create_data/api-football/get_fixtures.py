@@ -299,7 +299,7 @@ class ApiFootball:
             try:
                 fixture_date_str = self.fixtures_collection.find_one({"fixture_id": fixture_id}, {"date": 1})["date"]
                 fixture_date = datetime.strptime(fixture_date_str, '%Y-%m-%d %H:%M')
-                if fixture_date < datetime(2025, 3, 15):
+                if fixture_date < datetime(2025, 3, 25):
                     self.fixtures_collection.delete_one({"fixture_id": fixture_id})
                     self.logger.info(f"Fixture {fixture_id} dropped from MongoDB due to date constraint.")
                     return {}
@@ -326,12 +326,32 @@ class ApiFootball:
         query = {
             "date": {"$lte": today},
             "league_id": {"$in": target_league_ids},
-            "home.stats": {},
+            "$or": [
+                {"home.stats": {"$exists": False}},
+                {"home.stats": {}}
+            ],
             "score.fulltime.home": {"$ne": None}
         }
-        fixtures = self.fixtures_collection.find(query, {"fixture_id": 1})
-        fixture_ids = [fixture["fixture_id"] for fixture in fixtures]
-        self.logger.info(f"Found {len(fixture_ids)} fixtures without statistics for league IDs {target_league_ids}.")
+        fixtures = self.fixtures_collection.find(query, {"fixture_id": 1, "league_id": 1, "league_name": 1})
+        
+        # Fetch all results into a list first
+        fixtures_list = list(fixtures)
+        # Now you can iterate over the list multiple times
+        fixture_ids = [fixture["fixture_id"] for fixture in fixtures_list]
+        league_mapping = {item['league_id']: item['league_name'] for item in league_ids_data}
+        league_counts = {}
+        # Iterate over the list, not the original cursor
+        for fixture in fixtures_list:
+            league_id = fixture.get("league_id")
+            if league_id:
+                league_counts[league_id] = league_counts.get(league_id, 0) + 1
+        # If you want to log the *final* counts after processing all fixtures:
+        self.logger.info("--- Final League Counts for Fixtures Without Statistics ---")
+        for league_id, count in league_counts.items():
+            league_name = league_mapping.get(league_id, f"Unknown League ({league_id})")
+            self.logger.info(f"League: {league_name} ({league_id}) - Count: {count}")
+        self.logger.info("--- End Final League Counts ---")
+
         return fixture_ids
 
     def get_fixture_ids_without_predictions(self) -> List[int]:
@@ -388,8 +408,6 @@ class ApiFootball:
                         self.logger.warning(f"No fixtures found for league ID: {league_id} season: {season}")
                         fixtures = self.get_fixtures(league_id, 2024)
                         self.logger.info(f"Retrieved {fixtures} fixtures for league ID: {league_id} season: 2024")
-
-
         except Exception as e:
             self.logger.error(f"Error processing league IDs: {e}")
 

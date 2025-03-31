@@ -606,20 +606,20 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training model with precision target")
         params = base_params.copy()
         params.update({
-            'learning_rate': 0.105,
-            'num_leaves': 110,
+            'learning_rate': 0.14,
+            'num_leaves': 65,
             'max_depth': 4,
-            'min_child_samples': 180,
-            'feature_fraction': 0.68,
-            'bagging_fraction': 0.7,
-            'bagging_freq': 13,
-            'reg_alpha': 13.8,
-            'reg_lambda': 8.7,
-            'min_split_gain': 0.16,
-            'early_stopping_rounds': 560,
-            'path_smooth': 0.005,
-            'cat_smooth': 29.3,
-            'max_bin': 640
+            'min_child_samples': 160,
+            'feature_fraction': 0.6000000000000001,
+            'bagging_fraction': 0.6100000000000001,
+            'bagging_freq': 11,
+            'reg_alpha': 6.4,
+            'reg_lambda': 11.5,
+            'min_split_gain': 0.19,
+            'early_stopping_rounds': 700,
+            'path_smooth': 0.5650000000000001,
+            'cat_smooth': 28.3,
+            'max_bin': 320
         })
         
         # Train final model with best parameters
@@ -674,10 +674,10 @@ def main():
         best_overall_params = None
         best_overall_metrics = None
         
-        logger.info(f"Starting hyperparameter optimization run")
-        current_params, current_metrics = hypertune_lightgbm(experiment_name)
-        logger.info(f"Run completed with parameters: {current_params}")
-        logger.info(f"Run metrics: {current_metrics}")
+        # logger.info(f"Starting hyperparameter optimization run")
+        # current_params, current_metrics = hypertune_lightgbm(experiment_name)
+        # logger.info(f"Run completed with parameters: {current_params}")
+        # logger.info(f"Run metrics: {current_metrics}")
 
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)

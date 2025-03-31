@@ -50,7 +50,7 @@ class PoissonXGCalculator:
         self.scaler = StandardScaler()
         self.home_model = None
         self.away_model = None
-        
+
     def _validate_data(self, df: pd.DataFrame, is_training: bool = True) -> None:
         """Validate input data for required columns and quality."""
         # Check required features
@@ -331,7 +331,7 @@ class PoissonXGCalculator:
             for row_dict in prediction_generator:
                 ws.append([row_dict.get(header) for header in headers])
                 row_count += 1
-                if row_count % 1000 == 0:
+                if row_count % 5000 == 0:
                     self.logger.info(f"Processed {row_count} rows")
             
             wb.save(output_path)

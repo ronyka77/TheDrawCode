@@ -88,6 +88,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 base_params = {
     'objective': 'binary:logistic',
     'verbosity': 0,
+    'eval_metric': ['aucpr', 'error', 'logloss'],
     'nthread': 4,
     'seed': 19,
     'device': 'cpu',
@@ -106,7 +107,7 @@ def load_hyperparameter_space():
     hyperparameter_space = {
         'learning_rate': {
             'type': 'float',
-            'low': 0.005,               # narrowed based on top trials (0.06-0.09)
+            'low': 0.03,               # narrowed based on top trials (0.06-0.09)
             'high': 0.08,
             'log': False,
             'step': 0.005
@@ -166,8 +167,8 @@ def load_hyperparameter_space():
         },
         'scale_pos_weight': {
             'type': 'float',
-            'low': 1.8,                # narrowed based on top trials (1.8-2.28)
-            'high': 4.5,
+            'low': 1.5,                # narrowed based on top trials (1.8-2.28)
+            'high': 3.5,
             'log': False,
             'step': 0.02
         }
@@ -579,16 +580,16 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training model with precision target")
         params = base_params.copy()
         params.update({
-            'learning_rate': 0.045,
-            'max_depth': 9,
-            'min_child_weight': 320,
-            'colsample_bytree': 0.7999999999999999,
-            'subsample': 0.75,
-            'gamma': 2.66,
-            'lambda': 5.53,
-            'alpha': 22.200000000000003,
-            'scale_pos_weight': 2.34,
-            'early_stopping_rounds': 1100
+            'learning_rate': 0.06,
+            'max_depth': 12,
+            'min_child_weight': 340,
+            'colsample_bytree': 0.64,
+            'subsample': 0.81,
+            'gamma': 1.76,
+            'lambda': 8.31,
+            'alpha': 42.9,
+            'scale_pos_weight': 1.92,
+            'early_stopping_rounds': 780
         })
         
         # Train final model with best parameters
@@ -615,10 +616,8 @@ def main():
     """
     try:
         logger.info("Starting XGBoost model training")
-        
         # Import data at runtime to avoid global scope issues
         from models.StackedEnsemble.shared.data_loader import DataLoader
-        
         global X_train, y_train, X_test, y_test, X_eval, y_eval
         
         # Load data
@@ -638,14 +637,9 @@ def main():
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
         
-        # Update base parameters to use aucpr and custom precision metric
-        base_params['eval_metric'] =  ['aucpr', 'error', 'logloss']
-        
-        logger.info(f"Current base parameters: {base_params}")
-        
-        current_params, current_metrics = hypertune_xgboost(experiment_name)
-        logger.info(f"Run completed with parameters: {current_params}")
-        logger.info(f"Run metrics: {current_metrics}")
+        # current_params, current_metrics = hypertune_xgboost(experiment_name)
+        # logger.info(f"Run completed with parameters: {current_params}")
+        # logger.info(f"Run metrics: {current_metrics}")
 
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)

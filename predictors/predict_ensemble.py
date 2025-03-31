@@ -339,23 +339,25 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        # '035abdf986654b1e8b551d0ce044c929', 
-        # '8d80522037ae4a9790b72129c06851a4', 
-        # 'd3c066618b4d425fbb2ffff99a478238', 
-        # '7c12f45bc2c442818cf09c497eef4176', 
-        # '58f6a2c94ced4c1a9c724d19224cca8c', 
-        # 'ee17cebf244e473ba8e661bcdd442d50', 
-        # 'f20a9ef589a341bfb39941593e0af0ac', 
-        # '5befa2bf2b5d4ae6866f3cc177c7b68f', 
-        # '97207cdaab54477fa267d8cd29ce35e9', 
-        # '403c8c5eaaf442898594e45e6998cff4', 
-        # '835b997b8acd46f7a72ab5350451e427', 
-        # '538f96a0c783429f9f2e6967cc4693a2', 
-        # '01d70371af714f87b0b15393a5ce6853', 
-        # '9d1caf1dbee3488187b496c2c61f948d',
-        # '355e5d963cf644debba80148a3fcd430',
+        '035abdf986654b1e8b551d0ce044c929', 
+        '8d80522037ae4a9790b72129c06851a4', 
+        'd3c066618b4d425fbb2ffff99a478238', 
+        '7c12f45bc2c442818cf09c497eef4176', 
+        '58f6a2c94ced4c1a9c724d19224cca8c', 
+        'ee17cebf244e473ba8e661bcdd442d50', 
+        '5befa2bf2b5d4ae6866f3cc177c7b68f', 
+        '97207cdaab54477fa267d8cd29ce35e9', 
+        '403c8c5eaaf442898594e45e6998cff4', 
+        '835b997b8acd46f7a72ab5350451e427', 
+        '538f96a0c783429f9f2e6967cc4693a2', 
+        '01d70371af714f87b0b15393a5ce6853', 
+        '9d1caf1dbee3488187b496c2c61f948d',
+        '355e5d963cf644debba80148a3fcd430',
         '1aec65aae580476b813fe97fee26e9e0',
-        '355e5d963cf644debba80148a3fcd430'
+        '355e5d963cf644debba80148a3fcd430',
+        '41c904cbec1246a7881875ad087bb63c',
+        '94b35c3a239f493880d6f35e4fde7035',
+        '8872f92118a24521800d05c96d5e6f16'
     ]
     # Filter configuration to remove predictions near specific thresholds
     filter_config = {

@@ -116,3 +116,4 @@ optuna_tabnet.db
 optuna_xgboost_base.db
 optuna_random_forest.db
 AI_instuctions.md
+data/api_training_final_0325.xlsx

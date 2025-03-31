@@ -542,7 +542,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                 'objective': 'binary:logistic',
                 'n_jobs': 4,
                 'eval_metric': ['aucpr', 'error', 'logloss'],
-                'device': 'cpu',
+                # 'device': 'cpu',
                 'random_state': 19
             }
             
@@ -880,17 +880,18 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             'tree_method': 'hist',
             'objective': 'binary:logistic',
             'n_jobs': 4,
-            'eval_metric': ['aucpr', 'logloss', 'error'],
-            'device': 'cpu',
+            'eval_metric': ['aucpr', 'error', 'logloss'],
+            # 'device': 'cpu',
             'random_state': 19
         }
     elif meta_learner_type == 'lgb':
         base_params = {
             'objective': 'binary',
-            'boosting_type': 'gbdt',
+            'metric': ['binary_logloss', 'auc'],
             'n_jobs': 4,
             'random_state': 19,
-            'device': 'cpu'
+            'device': 'cpu',
+            'verbose': -1
         }
     elif meta_learner_type == 'logistic':
         base_params = {

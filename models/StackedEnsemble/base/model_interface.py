@@ -30,7 +30,6 @@ class BaseModel(ABC):
         experiment_name: str = None,
         logger: ExperimentLogger = None):
         """Initialize base model.
-        
         Args:
             model_type: Type of model (e.g., 'bert', 'xgboost')
             experiment_name: Name for experiment tracking
@@ -39,26 +38,16 @@ class BaseModel(ABC):
         self.model_type = model_type
         self.experiment_name = experiment_name or f"{model_type}_experiment"
         self.logger = logger or ExperimentLogger(self.experiment_name)
-        
         # Initialize configuration loader
         self.config_loader = ConfigurationLoader(model_type)
-        
         # Load configurations
         self.model_config = self.config_loader.load_model_config(model_type)
         self.hyperparameter_space = self.config_loader.load_hyperparameter_space(model_type)
-        
-        # # Initialize validator
-        # self.validator = OptunaValidator(
-        #     model_type=model_type,
-        #     logger=self.logger
-        # )
-        
         # Initialize state
         self.best_params = {}
         self.best_score = 0.0
         self.model = None
         self.is_fitted = False
-        
         self.logger.info(f"Initialized {model_type} model")
 
     @abstractmethod
@@ -108,7 +97,6 @@ class BaseModel(ABC):
         X_test: Any,
         y_test: Any) -> Dict[str, Any]:
         """Run hyperparameter optimization.
-        
         Args:
             X, y: Training data
             X_val, y_val: Validation data
@@ -119,18 +107,13 @@ class BaseModel(ABC):
         """
         try:
             self.logger.info(f"Starting hyperparameter optimization for {self.model_type}")
-            
             # Run optimization
             best_params = {0: 0}
-            
             # Store best parameters
             self.best_params = best_params
-            
             # Save optimization results
             self._save_optimization_results(best_params)
-            
             return best_params
-            
         except Exception as e:
             self.logger.error(f"Error in hyperparameter optimization: {str(e)}")
             return {}
@@ -145,7 +128,6 @@ class BaseModel(ABC):
             # Create results directory
             results_dir = Path(project_root) / "results" / "hypertuning" / self.model_type
             results_dir.mkdir(parents=True, exist_ok=True)
-            
             # Prepare results
             results = {
                 'model_type': self.model_type,
@@ -153,16 +135,13 @@ class BaseModel(ABC):
                 'timestamp': datetime.now().isoformat(),
                 'best_parameters': best_params
             }
-            
             # Save results
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             results_file = results_dir / f"optimization_results_{timestamp}.json"
             
             with open(results_file, 'w') as f:
                 json.dump(results, f, indent=2)
-                
             self.logger.info(f"Optimization results saved to {results_file}")
-            
         except Exception as e:
             self.logger.error(f"Error saving optimization results: {str(e)}")
 
@@ -176,7 +155,6 @@ class BaseModel(ABC):
         y_test: Optional[Any] = None,
         **kwargs) -> Dict[str, float]:
         """Train model with validation data.
-        
         Args:
             X, y: Training data
             X_val, y_val: Validation data
@@ -190,15 +168,11 @@ class BaseModel(ABC):
             # Initialize model if not already done
             if self.model is None:
                 self.model = self._create_model(**kwargs)
-            
             # Train model
             metrics = self._train_model(X, y, X_val, y_val, X_test, y_test, **kwargs)
-            
             # Update state
             self.is_fitted = True
-            
             return metrics
-            
         except Exception as e:
             self.logger.error(f"Error in model training: {str(e)}")
             return {
@@ -211,7 +185,6 @@ class BaseModel(ABC):
 
     def predict(self, X: Any) -> np.ndarray:
         """Make predictions using trained model.
-        
         Args:
             X: Features to predict on
             
@@ -224,7 +197,6 @@ class BaseModel(ABC):
 
     def predict_proba(self, X: Any) -> np.ndarray:
         """Get prediction probabilities.
-        
         Args:
             X: Features to predict on
             
@@ -237,7 +209,6 @@ class BaseModel(ABC):
 
     def save(self, path: Union[str, Path]) -> None:
         """Save model to file.
-        
         Args:
             path: Path to save model
         """
@@ -250,7 +221,6 @@ class BaseModel(ABC):
 
     def load(self, path: Union[str, Path]) -> None:
         """Load model from file.
-        
         Args:
             path: Path to load model from
         """
@@ -261,7 +231,6 @@ class BaseModel(ABC):
 
     def get_params(self) -> Dict[str, Any]:
         """Get current model parameters.
-        
         Returns:
             Dictionary of parameters
         """
@@ -269,7 +238,6 @@ class BaseModel(ABC):
 
     def set_params(self, **params) -> None:
         """Set model parameters.
-        
         Args:
             **params: Parameters to set
         """

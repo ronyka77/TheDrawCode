@@ -227,3 +227,26 @@ class ExperimentLogger:
         extra: Optional[Dict[str, Any]] = None) -> None:
         """Log a debug message."""
         self._log('DEBUG', msg, extra)
+
+# --- Example Usage --- #
+if __name__ == "__main__":
+    # Example of using the logger
+    logger = ExperimentLogger(experiment_name="test_experiment", log_to_console=True)
+
+    logger.start_run("example_run_1")
+    logger.info("This is an informational message.")
+    logger.log_params({"learning_rate": 0.01, "epochs": 100})
+    logger.warning("This is a warning message.")
+
+    try:
+        result = 1 / 0
+    except ZeroDivisionError:
+        logger.error("Division by zero occurred!", exc_info=True)
+        logger.exception("Caught an exception during calculation.")
+
+    logger.log_metrics({"accuracy": 0.95, "loss": 0.1})
+    logger.log_artifact("/path/to/model.pkl")
+    logger.debug("This is a debug message.")
+    logger.end_run()
+
+    print(f"Log file created at: {logger.log_file}")

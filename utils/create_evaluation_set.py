@@ -249,17 +249,13 @@ def create_parquet_files(
 @retry_on_error(max_retries=3, delay=1.0)
 def setup_mlflow_tracking(experiment_name: str) -> str:
     """Configure MLflow tracking for experiment monitoring.
-
     This function sets up MLflow tracking for experiment monitoring and model versioning.
     It configures the tracking URI, creates or gets the experiment, and ensures proper
     directory structure for MLflow artifacts.
-
     Args:
         experiment_name (str): Name of the MLflow experiment to create or get.
-
     Returns:
         str: Path to the mlruns directory where MLflow stores its data.
-
     Raises:
         ConnectionError: If MLflow tracking server is not accessible
         ValueError: If experiment name is invalid
@@ -350,17 +346,13 @@ def update_api_training_data_for_draws():
         # Load existing training data
         data_path = "data/api_training_final.xlsx"
         data = pd.read_excel(data_path)
-
         # Initialize the feature engineer
         feature_engineer = AdvancedGoalFeatureEngineer()
-
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
         logger.info(updated_data.shape)
-
         # Save updated data back to Excel
         updated_data.to_excel(data_path, index=False)
-
     except Exception as e:
         logger.info(f"Error updating training data for draws: {str(e)}")
 
@@ -432,14 +424,11 @@ def update_api_prediction_data():
         # Load existing prediction data
         data_path_eval = "data/prediction/api_prediction_eval.xlsx"
         data_eval = pd.read_excel(data_path_eval)
-
         # Initialize the feature engineer
         feature_engineer = AdvancedGoalFeatureEngineer()
-
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
         logger.info(f"Updated prediction data shape: {updated_data.shape}")
-
         # Merge with api_prediction_eval but only add columns which are not
         # exists in prediction_data
         merged_data = merge_and_append(updated_data, data_eval)
@@ -448,7 +437,6 @@ def update_api_prediction_data():
             subset=['fixture_id'], keep='first')
         # Save updated data back to Excel
         merged_data.to_excel(data_path_new, index=False)
-
     except Exception as e:
         logger.info(f"Error updating prediction data: {str(e)}")
 
@@ -457,12 +445,10 @@ def merge_and_append(updated_data, data_eval):
     Merge two DataFrames:
     - For same columns: Append rows from data_eval to the bottom of updated_data.
     - For new columns: Add new columns from data_eval to updated_data.
-
     Parameters:
         updated_data (pd.DataFrame): The primary DataFrame to be updated.
         data_eval (pd.DataFrame): The DataFrame to merge and append.
         on (str): The column to merge on (default: 'fixture_id').
-
     Returns:
         pd.DataFrame: The merged and updated DataFrame.
     """
@@ -471,18 +457,15 @@ def merge_and_append(updated_data, data_eval):
         col for col in updated_data.columns if col in data_eval.columns]
     new_columns = [
         col for col in updated_data.columns if col not in data_eval.columns]
-
     # Append rows for common columns
     merged_data = pd.concat(
         [data_eval, updated_data[common_columns]],
         axis=0,
         ignore_index=True
     )
-
     # Add new columns
     for col in new_columns:
         merged_data[col] = updated_data[col]
-
     # logger.info updated shape
     logger.info(f"Updated prediction data shape after merge: {merged_data.shape}")
     return merged_data
@@ -505,7 +488,6 @@ def get_selected_api_columns_draws() -> List[str]:
         - venue_draw_rate
         - form_weighted_xg_diff
         - home_draw_rate
-
     Note:
         The feature selection is based on a combination of:
         - Feature importance scores from trained models
@@ -577,18 +559,15 @@ def get_selected_api_columns_draws() -> List[str]:
 @retry_on_error(max_retries=3, delay=1.0)
 def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
     """Import training data for API-based draw predictions.
-
     This function loads and preprocesses training data specifically for the API-based
     draw prediction model. It handles data cleaning, type conversion, and train-test
     splitting with proper stratification.
-
     Returns:
         Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]: A tuple containing:
             - X_train (pd.DataFrame): Training features
             - y_train (pd.Series): Training targets (1 for draw, 0 for non-draw)
             - X_test (pd.DataFrame): Testing features
             - y_test (pd.Series): Testing targets (1 for draw, 0 for non-draw)
-
     Raises:
         FileNotFoundError: If the data file cannot be found
         ValueError: If data validation fails
@@ -684,19 +663,16 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
             random_state=42,
             stratify=data['is_draw']
         )
-
         # Select features and target
         X_train = train_data[selected_columns]
         y_train = train_data['is_draw']
         X_test = test_data[selected_columns]
         y_test = test_data['is_draw']
-
         # Final validation
         logger.info(f"Training set shape: {X_train.shape}")
         logger.info(f"Test set shape: {X_test.shape}")
         logger.info(f"Training draw rate: {y_train.mean():.2%}")
         logger.info(f"Test draw rate: {y_test.mean():.2%}")
-
         return X_train, y_train, X_test, y_test
 
     except FileNotFoundError as e:
@@ -748,7 +724,6 @@ def import_feature_select_draws_api():
         'ref_goal_tendency'
     ]
     data = data.drop(columns=columns_to_drop, errors='ignore')
-
     # Convert all numeric-like columns (excluding problematic_cols that have
     # already been handled)
     data = convert_numeric_columns(
@@ -758,18 +733,15 @@ def import_feature_select_draws_api():
         fill_value=0.0,
         verbose=True
     )
-
     # Define integer columns that should remain as int64
     int_columns = [
         'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
         'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
     ]
-
     # Convert integer columns back to int64
     for col in int_columns:
         if col in data.columns:
             data[col] = data[col].astype('int64')
-
     # Split into train and test sets
     train_data, test_data = train_test_split(
         data,
@@ -777,27 +749,20 @@ def import_feature_select_draws_api():
         random_state=42,
         stratify=data['is_draw']
     )
-
-   
     X_train = train_data.drop(columns='is_draw', errors='ignore')
     y_train = train_data['is_draw']
     X_test = test_data.drop(columns='is_draw', errors='ignore')
     y_test = test_data['is_draw']
-
-
-
     # Add verification of dtypes
     logger.info("\nVerifying final dtypes:")
     non_numeric_cols = X_train.select_dtypes(include=['object']).columns
     if len(non_numeric_cols) > 0:
         logger.info(
             f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
-
     logger.info("\nInteger columns dtypes:")
     for col in int_columns:
         if col in X_train.columns:
             logger.info(f"{col}: {X_train[col].dtype}")
-
     return X_train, y_train, X_test, y_test
 
 @retry_on_error(max_retries=3, delay=1.0)
@@ -829,15 +794,12 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
             raise ValueError("Dataset is empty")
             
         logger.info(f"Successfully loaded data with shape: {data.shape}")
-
         # Filter data where match_outcome is not NA
         data = data.dropna(subset=['match_outcome'])
         logger.info(f"Data shape after filtering NA match outcomes: {data.shape}")
-
         # Replace inf and nan values
         data = data.replace([np.inf, -np.inf], np.nan)
         logger.info("Replaced infinite values with NaN")
-
         # Get selected columns if needed
         if use_selected_columns:
             selected_columns = get_selected_api_columns_draws()
@@ -852,7 +814,6 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
             # Use all columns except the target and date columns
             selected_columns = [col for col in data.columns if col not in ['match_outcome', 'is_draw', 'Date']]
             logger.info("Using all available columns for evaluation set")
-
         # Process match outcome and create target variable
         try:
             data['match_outcome'] = data['match_outcome'].astype(int)
@@ -864,7 +825,6 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
                 error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
             )
             raise ValueError("Invalid match outcome values")
-
         # Ensure date_encoded exists
         if 'date_encoded' not in data.columns:
             try:
@@ -877,7 +837,6 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
                     error_code=DataProcessingError.FEATURE_CREATION_FAILED
                 )
                 raise ValueError("Could not create date_encoded column")
-
         # Convert integer columns
         int_columns = [
             'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
@@ -892,7 +851,6 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
                         f"Failed to convert {col} to integer: {str(e)}",
                         error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
                     )
-
         # Convert numeric columns
         logger.info("Starting numeric conversion")
         data = convert_numeric_columns(
@@ -903,7 +861,6 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
             verbose=True
         )
         logger.info(f"Data shape after numeric conversion: {data.shape}")
-
         # Verify numeric conversion
         object_columns = []
         for col in selected_columns:
@@ -920,17 +877,13 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
                 error_code=DataProcessingError.INVALID_DATA_TYPE
             )
             raise ValueError(f"Non-numeric columns found: {object_columns}")
-
         # Create final feature set and target
         X = data[selected_columns]
         y = data['is_draw']
-
         # Final validation
         logger.info(f"Final feature set shape: {X.shape}")
         logger.info(f"Draw rate in evaluation set: {y.mean():.2%}")
-
         return X, y
-
     except FileNotFoundError as e:
         logger.info(
             f"Data file not found: {file_path}",
@@ -976,7 +929,6 @@ def create_prediction_set_api() -> pd.DataFrame:
             raise ValueError("Dataset is empty")
             
         logger.info(f"Successfully loaded data with shape: {data.shape}")
-
         # Get selected columns
         selected_columns = ['fixture_id', 'Home', 'Away', 'Date'] + get_selected_api_columns_draws()
         missing_columns = [col for col in selected_columns if col not in data.columns]
@@ -986,7 +938,6 @@ def create_prediction_set_api() -> pd.DataFrame:
                 error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
             )
             raise ValueError(f"Missing required columns: {missing_columns}")
-
         # Ensure date_encoded exists
         if 'date_encoded' not in data.columns:
             try:
@@ -999,8 +950,6 @@ def create_prediction_set_api() -> pd.DataFrame:
                     error_code=DataProcessingError.FEATURE_CREATION_FAILED
                 )
                 raise ValueError("Could not create date_encoded column")
-
-        
         data_copy = data.copy()
         # Drop Date, Home, and Away columns from original data
         if 'Date' in data.columns:
@@ -1020,7 +969,6 @@ def create_prediction_set_api() -> pd.DataFrame:
             verbose=True
         )
         logger.info(f"Data shape after numeric conversion: {data.shape}")
-
         # Add Date column back from original copy
         if 'Date' not in data.columns and 'Date' in data_copy.columns:
             data['Date'] = data_copy['Date']
@@ -1032,9 +980,7 @@ def create_prediction_set_api() -> pd.DataFrame:
         # Final validation
         logger.info(f"Final feature set shape: {X.shape}")
         logger.info("Feature set ready for prediction")
-
         return X
-
     except FileNotFoundError as e:
         logger.info(
             f"Data file not found: {file_path}",
@@ -1057,7 +1003,6 @@ def create_prediction_set_api() -> pd.DataFrame:
 # ENSEMBLE FUNCTIONS
 def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union[dict, list]:
     """Import selected features for XGBoost, CatBoost, and LightGBM models from JSON file.
-
     This function loads the pre-selected features for each model type from the
     selected_features_ensemble.json file. The features were selected based on
     composite importance scores from feature selection analysis.
@@ -1081,15 +1026,12 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
     try:
         # Define path to JSON file
         json_path = project_root / "utils" / "selected_features_ensemble.json"
-        
         # Load and parse JSON file
         with open(json_path, 'r') as f:
             features = json.load(f)
-            
         # Validate loaded data structure
         if not all(key in features for key in ['xgb', 'cat', 'lgbm', 'rf', 'tabnet']):
             raise ValueError("JSON file missing required model keys")
-            
         # Return specific model type if requested
         if model_type is not None:
             if model_type == 'all':
@@ -1103,10 +1045,8 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
                 raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'all'")
             logger.info(f"Returning selected features for model type: {model_type}")
             return features[model_type]
-            
         logger.info(f"Successfully loaded all selected features from JSON file")
         return features
-        
     except FileNotFoundError as e:
         logger.info(
             f"Selected features JSON file not found: {str(e)}",
@@ -1145,7 +1085,6 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
         data_path = os.path.join(project_root, "data", "prediction", "api_prediction_eval.parquet")
         logger.info(f"Loading training data from: {data_path}")
         data = pd.read_parquet(data_path)
-
         # Create target variable
         data['is_draw'] = (data['match_outcome'] == 2).astype(int)
         # Select features and target 
@@ -1188,11 +1127,9 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
                 error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
             )
             raise ValueError(f"Missing required features: {missing_features}")
-
         # Select features and add evaluator column
         evaluation_data = data[selected_features].copy()
         evaluation_data['is_draw'] = data['is_draw']
-        
         # Convert numeric columns
         evaluation_data = convert_numeric_columns(
             data=evaluation_data,
@@ -1201,11 +1138,9 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
             fill_value=0.0,
             verbose=True
         )
-        
         # Split into features and target
         X_val = evaluation_data.drop(columns=['is_draw'])
         y_val = evaluation_data['is_draw']
-        
         # Final validation
         logger.info(f"Ensemble evaluation set created with shape: {evaluation_data.shape}")
         logger.info(f"Draw rate: {evaluation_data['is_draw'].mean():.2%}")
@@ -1299,30 +1234,24 @@ def import_training_data_ensemble():
             'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
             'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
         ]
-
         # Convert integer columns back to int64
         for col in int_columns:
             if col in data.columns:
                 data[col] = data[col].astype('int64')
-
         # Export processed data to parquet for efficient storage and retrieval
         create_parquet_files(data, "data/api_training_final.parquet")
         logger.info("Exported processed training data to parquet format")
-
     # Split into train and test sets
-
     train_data, test_data = train_test_split(
         data,
         test_size=0.3,
         random_state=42,
         stratify=data['is_draw']
     )
-
     X_train = train_data.drop(columns='is_draw', errors='ignore')
     y_train = train_data['is_draw']
     X_test = test_data.drop(columns='is_draw', errors='ignore')
     y_test = test_data['is_draw']
-
     return X_train, y_train, X_test, y_test
 
 def save_data_to_excel(df, output_path, type):
@@ -1392,7 +1321,6 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
             engine='openpyxl',
             dtype={'fixture_id': 'int64'}
         )
-        
         # Validate early
         if data.empty:
             logger.info("Empty dataset loaded", error_code=DataProcessingError.EMPTY_DATASET)
@@ -1441,7 +1369,6 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
                     how='left',
                     validate='one_to_one'  # Ensure no duplicate fixture_ids
                 )
-            
         logger.info(f"Final feature shape: {data.shape}")
         return data
     except Exception as e:
@@ -1478,11 +1405,9 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
             raise ValueError("Dataset is empty")
             
         logger.info(f"Successfully loaded data with shape: {df.shape}")
-
         # Filter rows where match_outcome is not NA
         df = df.dropna(subset=['match_outcome'])
         logger.info(f"Data shape after filtering NA match outcomes: {df.shape}")
-
         # Convert fixture_id column to integer type
         df['fixture_id'] = pd.to_numeric(df['fixture_id'], errors='coerce').astype('Int64')
         
@@ -1501,14 +1426,12 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
         
         logger.info(f"Successfully retrieved {len(results_df)} matches")
         return results_df
-        
     except KeyError as e:
         logger.info(
             f"Missing required columns: {str(e)}",
             error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
         )
         raise ValueError(f"Missing required columns: {str(e)}")
-        
     except FileNotFoundError:
         logger.info(
             f"Data file not found: {file_path}",
