@@ -56,7 +56,7 @@ class MongoDBFeatures:
         query = {
             "fixture_id": {"$ne": None}
         }
-        fixtures = self.predictions_collection.find(query).batch_size(100)
+        fixtures = self.predictions_collection.find(query).batch_size(1000)
         count = self.predictions_collection.count_documents(query)
         print(f"Found {count} fixtures with predictions (cursor returned, not full list).")
         return fixtures
@@ -110,21 +110,17 @@ class MongoDBFeatures:
                     home_wins = sum(1 for match in h2h_matches if match['teams']['home']['winner'] is True)
                     away_wins = sum(1 for match in h2h_matches if match['teams']['away']['winner'] is True)
                     draws = sum(1 for match in h2h_matches if match['teams']['home']['winner'] is None)
-                    
                     fixture_data.update({
                         'h2h_home_wins': home_wins,
                         'h2h_away_wins': away_wins,
                         'h2h_draws': draws,
                         'h2h_total_matches': len(h2h_matches)
                     })
-                
                 yield fixture_data
-                
             except Exception as e:
                 print(f"Error processing fixture {fixture.get('fixture_id')}: {e}")
                 error_count += 1
                 continue
-        
         if error_count > 0:
             print(f"Skipped {error_count} fixtures due to errors or missing prediction data")
 
@@ -145,7 +141,6 @@ class MongoDBFeatures:
             
             # Initialize the prediction generator
             prediction_generator = self.yield_normalized_predictions(fixtures_with_predictions)
-            
             # Retrieve the first row to determine headers
             try:
                 first_row = next(prediction_generator)
@@ -157,12 +152,11 @@ class MongoDBFeatures:
             ws.append(headers)
             ws.append([first_row.get(header) for header in headers])
             row_count = 1  # Counting first data row already written
-            
             # Process remaining rows without storing a sample list
             for row_dict in prediction_generator:
                 ws.append([row_dict.get(header) for header in headers])
                 row_count += 1
-                if row_count % 1000 == 0:
+                if row_count % 5000 == 0:
                     print(f"Processed {row_count} predictions")
             
             output_file = 'data/Create_data/data_files/base/predictions.xlsx'
@@ -412,10 +406,8 @@ class MongoDBFeatures:
             print("Data Collected, Start Cleaning and Feature Engineering...")
             if self.logger:
                 self.logger.info("Data Collected, Start Cleaning and Feature Engineering...")
-
             # Drop irrelevant columns
             data = data.drop(columns=['prediction_outcome', 'model_prediction'], errors='ignore')
-
             # Type conversions and extracting date components
             data['home_advantage'] = 1
             data['Date'] = pd.to_datetime(data['date'], errors='coerce')
@@ -424,7 +416,6 @@ class MongoDBFeatures:
             data['day_of_month'] = data['Date'].dt.day
             data['day_of_week'] = data['Date'].dt.dayofweek
             data['week_of_year'] = data['Date'].dt.isocalendar().week
-            
             # Label encoding for categorical variables
             le = LabelEncoder()
             data['venue_encoded'] = data['venue_id']
@@ -435,11 +426,9 @@ class MongoDBFeatures:
             
             # First, sort the data based on the year, month, and day_of_month for each group.
             data = data.sort_values(by=['fixture_id'])
-
             # Numeric conversion and NaN handling
             data['home_xG'] = pd.to_numeric(data['home_expected_goals'], errors='coerce').fillna(0)
             data['away_xG'] = pd.to_numeric(data['away_expected_goals'], errors='coerce').fillna(0)
-
             print('Start possession and shooting...')
             if self.logger:
                 self.logger.info('Start possession and shooting...')
@@ -449,16 +438,13 @@ class MongoDBFeatures:
             data['away_cards'] = data['away_yellow_cards'] + data['away_red_cards']
             data['home_possession_shooting'] = data['home_passes_accuracy'] * data['home_shots_on_goal']
             data['away_possession_shooting'] = data['away_passes_accuracy'] * data['away_shots_on_goal']
-
             # Referee Stats
             if 'referee' in data.columns:
                 data['referee_encoded'] = le.fit_transform(data['referee'].astype(str))
             else:
                 raise KeyError("Error: 'referee' column not found in DataFrame.")
-
             referee_stats = data.groupby('referee_encoded')['total_fouls'].mean()
             data['referee_foul_rate'] = data['referee_encoded'].map(referee_stats)
-
             # Additional feature engineering
             print('Base feature engineering done, start additional features...')
             if self.logger:
@@ -471,15 +457,12 @@ class MongoDBFeatures:
             data['away_shots_on_target_ratio'] = data['away_shots_on_goal'] / data['home_shots_on_goal']
             data['home_saves_accuracy'] = data['home_saves'] / data['away_shots_on_goal']
             data['away_saves_accuracy'] = data['away_saves'] / data['home_shots_on_goal']
-
             # Defensive activity based on available data, including interceptions and duels won
             data['home_defensive_activity'] = data['home_blocked_shots'] + data['home_yellow_cards'] + data['home_red_cards'] + data['home_prevented_goals']
             data['away_defensive_activity'] = data['away_blocked_shots'] + data['away_yellow_cards'] + data['away_red_cards'] + data['away_prevented_goals']
-
             # Set-piece threat and foul impact
             data['home_set_piece_threat'] = data['home_corners'] + data['away_fouls']
             data['away_set_piece_threat'] = data['away_corners'] + data['home_fouls']
-
             # Outcome calculation
             print('Outcome calculation')
             if self.logger:
@@ -487,7 +470,6 @@ class MongoDBFeatures:
             data['home_win'] = data['match_outcome'].apply(lambda x: 1 if x == 1 else 0)
             data['away_win'] = data['match_outcome'].apply(lambda x: 1 if x == 3 else 0)
             data['draw'] = data['match_outcome'].apply(lambda x: 1 if x == 2 else 0)
-            
             # Points 
             print('Points calculation')
             if self.logger:
@@ -497,7 +479,6 @@ class MongoDBFeatures:
             
             data['home_goal_difference'] = data['home_goals'] - data['away_goals']
             data['away_goal_difference'] = data['away_goals'] - data['home_goals']
-
             # Rolling averages and cumulative sums
             print('Start calculating Cumulative values...')
             if self.logger:
@@ -506,8 +487,7 @@ class MongoDBFeatures:
             data['away_points_cumulative'] = data.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_points'].cumsum()
             data['home_goal_diff_cumulative'] = data.groupby(['home_encoded', 'season_encoded', 'league_encoded'])['home_goal_difference'].cumsum()
             data['away_goal_diff_cumulative'] = data.groupby(['away_encoded', 'season_encoded', 'league_encoded'])['away_goal_difference'].cumsum()
-            return data 
-        
+            return data
         except Exception as e:
             print(f"Error in load_and_prepare_data: {e}")
             if self.logger:
@@ -885,7 +865,6 @@ class MongoDBFeatures:
         try:
             # Get all venues from MongoDB collection
             venues = list(self.venues_collection.find({}))
-            
             # Normalize the nested structure
             normalized_data = []
             for venue in venues:
@@ -893,7 +872,6 @@ class MongoDBFeatures:
                 team_data = venue.get('team', {})
                 # Extract venue data
                 venue_data = venue.get('venue', {})
-                
                 # Create normalized record
                 normalized_record = {
                     'team_id': team_data.get('id'),
@@ -912,10 +890,8 @@ class MongoDBFeatures:
                     'venue_image': venue_data.get('image')
                 }
                 normalized_data.append(normalized_record)
-            
             # Create DataFrame from normalized data
             df = pd.DataFrame(normalized_data)
-            
             # Handle missing values
             for col in df.columns:
                 if df[col].isnull().any():
@@ -927,13 +903,11 @@ class MongoDBFeatures:
                             df[col].fillna(0, inplace=True)
                         else:
                             df[col].fillna('Unknown', inplace=True)
-            
             # Export to Excel
             export_path = 'data/Create_data/data_files/base/api_venues.xlsx'
             df.to_excel(export_path, index=False)
             print(f"Normalized venues data exported to Excel: {export_path}")
             return df
-            
         except Exception as e:
             print(f"Error exporting venues data: {e}")
             if self.logger:

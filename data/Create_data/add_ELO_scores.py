@@ -4,6 +4,7 @@ import os
 import logging
 from openpyxl import Workbook
 from openpyxl.writer.excel import save_workbook 
+import python_calamine as calamine
 
 class ELOCalculator:
     """
@@ -205,7 +206,7 @@ class ELOCalculator:
             
             # Process API data
             self.logger.info("Processing API prediction data...")
-            api_prediction_data = pd.read_excel(self.api_prediction_data_path)
+            api_prediction_data = load_excel_with_calamine(self.api_prediction_data_path)
             api_prediction_copy = api_prediction_data.copy()
             api_prediction_data = convert_numeric_columns(api_prediction_data)
             api_prediction_data = api_prediction_data.sort_values('Date')
@@ -220,7 +221,7 @@ class ELOCalculator:
 
             # Process API training data
             self.logger.info("Processing API training data...")
-            api_training_data = pd.read_excel(self.api_training_data_path)
+            api_training_data = load_excel_with_calamine(self.api_training_data_path)
             api_training_copy = api_training_data.copy()
             api_training_data = convert_numeric_columns(api_training_data)
             api_training_data = api_training_data.sort_values('Date')
@@ -290,6 +291,53 @@ class ELOCalculator:
                 self.logger.info(f"Exported {type} data to alternative format: {alt_path}")
         
         return df
+
+def load_excel_with_calamine(file_path, logger=None):
+    """Load Excel file using calamine for improved performance with version 0.3.1."""
+    if logger:
+        logger.info(f"Loading data from {file_path} using calamine")
+    try:
+        # Load workbook with calamine
+        workbook = calamine.load_workbook(file_path)
+        # Get the first sheet (sheet_index=0)
+        sheet_name = workbook.sheet_names[0]
+        sheet = workbook.get_sheet_by_name(sheet_name)
+        # Get sheet dimensions and data using correct calamine method
+        rows = sheet.to_python()
+        if not rows:
+            return pd.DataFrame()
+        
+        # First row contains headers
+        headers = rows[0]
+        # Convert data to a list of dictionaries
+        data = []
+        for row in rows[1:]:
+            # Make sure row is the same length as headers
+            row_data = row + [None] * (len(headers) - len(row)) if len(row) < len(headers) else row[:len(headers)]
+            data.append(dict(zip(headers, row_data)))
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        # Replace NA values
+        na_values = ['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
+        df = df.replace(na_values, np.nan)
+        # Replace infinities
+        df = df.replace([np.inf, -np.inf], np.nan)
+        # Close workbook to release resources
+        workbook.close()
+        return df
+    except Exception as e:
+        if logger:
+            logger.error(f"Error loading Excel file with calamine: {str(e)}")
+        # Fallback to pandas if needed
+        if logger:
+            logger.info(f"Falling back to pandas for file: {file_path}")
+        try:
+            return pd.read_excel(file_path)
+        except Exception as fallback_e:
+            if logger:
+                logger.error(f"Fallback to pandas also failed: {str(fallback_e)}")
+            raise
+
 
 def main():
     """Main execution function."""

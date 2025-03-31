@@ -9,6 +9,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.linear_model import PoissonRegressor
 from openpyxl import Workbook
 from openpyxl.writer.excel import save_workbook
+import python_calamine as calamine
 
 class PoissonXGCalculator:
     """Enhanced Poisson Expected Goals (xG) Calculator for soccer matches."""
@@ -366,25 +367,13 @@ class PoissonXGCalculator:
 
             # Read Excel files with openpyxl, treating 'Infinity' and similar strings as NaN
             self.logger.info(f"Loading prediction data from {api_prediction_path}")
-            api_prediction_data = pd.read_excel(
-                api_prediction_path,
-                engine='openpyxl',
-                na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
-            ).replace([np.inf, -np.inf], np.nan)
+            api_prediction_data = load_excel_with_calamine(api_prediction_path, self.logger)
             
             self.logger.info(f"Loading training data from {api_training_path}")
-            api_training_data = pd.read_excel(
-                api_training_path,
-                engine='openpyxl',
-                na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
-            ).replace([np.inf, -np.inf], np.nan)
+            api_training_data = load_excel_with_calamine(api_training_path, self.logger)
             
             self.logger.info(f"Loading future data from {api_future_path}")
-            api_future_data = pd.read_excel(
-                api_future_path,
-                engine='openpyxl',
-                na_values=['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
-            ).replace([np.inf, -np.inf], np.nan)
+            api_future_data = load_excel_with_calamine(api_future_path, self.logger)
             
             api_training_data = api_training_data.rename(columns={
                 'home_possession_mean': 'Home_possession_mean',
@@ -448,6 +437,61 @@ class PoissonXGCalculator:
             
         except Exception as e:
             self.logger.error(f"Error loading models: {str(e)}")
+            raise
+
+def load_excel_with_calamine(file_path, logger=None):
+    """Load Excel file using calamine for improved performance with version 0.3.1."""
+    if logger:
+        logger.info(f"Loading data from {file_path} using calamine")
+    try:
+        # Load workbook with calamine
+        workbook = calamine.load_workbook(file_path)
+        # Get the first sheet (sheet_index=0)
+        sheet_name = workbook.sheet_names[0]
+        sheet = workbook.get_sheet_by_name(sheet_name)
+        
+        # Get sheet dimensions and data using correct calamine method
+        rows = sheet.to_python()
+        
+        if not rows:
+            return pd.DataFrame()
+        
+        # First row contains headers
+        headers = rows[0]
+        
+        # Convert data to a list of dictionaries
+        data = []
+        for row in rows[1:]:
+            # Make sure row is the same length as headers
+            row_data = row + [None] * (len(headers) - len(row)) if len(row) < len(headers) else row[:len(headers)]
+            data.append(dict(zip(headers, row_data)))
+        
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        
+        # Replace NA values
+        na_values = ['NaN', 'N/A', 'NA', 'null', 'None', '', 'Infinity', '-Infinity', 'inf', '-inf']
+        df = df.replace(na_values, np.nan)
+        
+        # Replace infinities
+        df = df.replace([np.inf, -np.inf], np.nan)
+        
+        # Close workbook to release resources
+        workbook.close()
+        
+        return df
+        
+    except Exception as e:
+        if logger:
+            logger.error(f"Error loading Excel file with calamine: {str(e)}")
+        # Fallback to pandas if needed
+        if logger:
+            logger.info(f"Falling back to pandas for file: {file_path}")
+        try:
+            return pd.read_excel(file_path)
+        except Exception as fallback_e:
+            if logger:
+                logger.error(f"Fallback to pandas also failed: {str(fallback_e)}")
             raise
 
 def main():
