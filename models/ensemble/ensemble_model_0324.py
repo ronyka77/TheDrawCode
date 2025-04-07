@@ -36,9 +36,6 @@ os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 # PyTorch specific reproducibility settings
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True)  # Force deterministic algorithms
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
 
 from utils.logger import ExperimentLogger
 from utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
@@ -71,11 +68,11 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.sampling_strategy = sampling_strategy
         self.complexity_penalty = complexity_penalty
         self.target_precision = target_precision
-        self.xgb_run_id = 'ddb71abe2f0e4f91a3e5ffc3e4c10ffb'
-        self.lgb_run_id = '8c33c9c3805449cb9048475e23d27914'
-        self.tabnet_run_id = '7188f690235741fe83f872d44b229f6e'
-        self.rf_run_id = 'f7be1d96055445b3abc1d7cb76033da2'
-        self.min_recalls = [0.30, 0.20, 0.40, 0.40]
+        self.xgb_run_id = 'b67bb1b7722b42ca945722693ebec496'
+        self.lgb_run_id = '31abc83c8f184ab3872465bf0c55d775'
+        self.tabnet_run_id = '19a2b8f15feb44a68838eec74271acbc'
+        self.rf_run_id = '0e61e8e5017540a2bc754b7895d4eb92'
+        self.min_recalls = [0.30, 0.20, 0.30, 0.40]
         # Meta-learner settings
         self.meta_learner_type = meta_learner_type
         self.optimal_threshold = 0.5

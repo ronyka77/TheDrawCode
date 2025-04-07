@@ -89,9 +89,9 @@ base_params = {
     'objective': 'binary:logistic',
     'verbosity': 0,
     'eval_metric': ['aucpr', 'error', 'logloss'],
-    'nthread': 4,
+    'nthread': 8,
     'seed': 19,
-    'device': 'cpu',
+    'device': 'cuda',
     'tree_method': 'hist'
 }
 
@@ -179,67 +179,58 @@ def create_model(model_params):
     """
     Create and configure XGBoost model instance.
     Matches the notebook implementation.
+    Now includes early_stopping_rounds in constructor.
     
     Args:
-        model_params (dict): Model parameters
-        
+        model_params (dict): Model parameters (including early_stopping_rounds)
     Returns:
-        xgb.XGBClassifier: Configured XGBoost model
+        xgb.XGBClassifier: Configured XGBoost model instance
     """
-    try:
-        params = base_params.copy()
-        
-        # Update with provided parameters
-        params.update(model_params)
-        
-        # Create model
-        model = xgb.XGBClassifier(**params)
-        
-        return model
-        
-    except Exception as e:
-        logger.error(f"Error creating XGBoost model: {str(e)}")
-        raise
+    # Update with provided parameters
+    model_params.update(base_params)
+    
+    # Create model
+    # Pass all params, including early_stopping_rounds, to the constructor
+    model = xgb.XGBClassifier(**model_params)
+    
+    return model
 
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
     Train a XGBoost model with early stopping and threshold optimization.
-    Updated to match notebook implementation.
+    Uses DataFrame/Array for fitting (required by XGBClassifier wrapper) 
+    Requires X_eval, y_eval for threshold optimization and eval_set.
+    Early stopping is handled by the model constructor.
     
     Args:
-        X_train: Training features
-        y_train: Training labels
-        X_test: Validation features
-        y_test: Validation labels
-        X_eval: Evaluation features
-        y_eval: Evaluation labels
-        model_params: Model parameters
+        X_train (pd.DataFrame): Training features
+        y_train: Training labels (needed by create_model if scale_pos_weight calculation required, though currently static)
+        X_test: Validation features (currently unused)
+        y_test: Validation labels (currently unused)
+        X_eval (pd.DataFrame): Evaluation features for eval_set and threshold optimization
+        y_eval (pd.Series): Evaluation labels for threshold optimization
+        model_params (dict): Model parameters
         
     Returns:
         tuple: (trained_model, metrics)
     """
     try:
-        
-        # Create model with remaining parameters
+        # Create model - Pass the full model_params including early_stopping_rounds
         model = create_model(model_params)
-        # Combine training and validation data while preserving indexes
-        # X_combined = pd.concat([X_train, X_test], axis=0)
-        # y_combined = pd.concat([y_train, y_test], axis=0)
         
-        # Reset indexes to ensure proper alignment
-        # X_combined.reset_index(drop=True, inplace=True)
-        # y_combined.reset_index(drop=True, inplace=True)
-
-        # Create eval set for early stopping
-        eval_set = [(X_eval, y_eval)]
+        # Create eval set for early stopping using DMatrix
+        # Use DataFrame/Array for eval_set as required by fit when using wrapper
+        eval_set = [(X_test, y_test)]
+        
         # Fit model with early stopping
         model.fit(
-            X_train, y_train,
+            X=X_train, y=y_train, 
             eval_set=eval_set,
             verbose=False
+            # early_stopping_rounds is now part of the model's parameters
         )
         
-        # Get validation predictions
+        # Get validation predictions using the DataFrame for optimize_threshold
         best_threshold, metrics = optimize_threshold(
             model, X_eval, y_eval, min_recall=min_recall
         )
@@ -251,87 +242,27 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         raise
 
 def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
+    """
+    Optimize hyperparameters using Optuna, passing DataFrames.
+    """
     logger.info("Starting hyperparameter optimization")
-    
     if not hyperparameter_space:
         hyperparameter_space = load_hyperparameter_space()
     
     best_score = -float('inf')
-    best_params = {}
+    best_params_from_hpo = {}
     # Global list to store best trials across the entire hypertuning process
     global_top_trials = []
     top_trials = []
-
-    def objective(trial):
-        try:
-            params = base_params.copy()
-            # Add hyperparameters from config with step size if provided
-            for param_name, param_config in hyperparameter_space.items():
-                if param_config['type'] == 'float':
-                    if 'step' in param_config:
-                        params[param_name] = trial.suggest_float(
-                            param_name,
-                            param_config['low'],
-                            param_config['high'],
-                            step=param_config['step'],
-                            log=param_config.get('log', False)
-                        )
-                    else:
-                        params[param_name] = trial.suggest_float(
-                            param_name,
-                            param_config['low'],
-                            param_config['high'],
-                            log=param_config.get('log', False)
-                        )
-                elif param_config['type'] == 'int':
-                    if 'step' in param_config:
-                        params[param_name] = trial.suggest_int(
-                            param_name,
-                            param_config['low'],
-                            param_config['high'],
-                            step=param_config['step']
-                        )
-                    else:
-                        params[param_name] = trial.suggest_int(
-                            param_name,
-                            param_config['low'],
-                            param_config['high']
-                        )
-            
-            # Train model and get metrics
-            model, metrics = train_model(
-                X_train, y_train,
-                X_test, y_test,
-                X_eval, y_eval,
-                params
-            )
-            
-            recall = metrics.get('recall', 0.0)
-            precision = metrics.get('precision', 0.0)
-            threshold = metrics.get('threshold', 0.5)
-            # Optimize for precision while maintaining minimum recall
-            score = precision if recall >= min_recall else 0.0
-            
-            logger.info(f"Trial {trial.number}:")
-            logger.info(f"  Score: {score}")
-            logger.info(f"  Threshold: {threshold}")
-            logger.info(f"  Params: {params}")
-            
-            for metric_name, metric_value in metrics.items():
-                trial.set_user_attr(metric_name, metric_value)
-            return score
-            
-        except Exception as e:
-            logger.error(f"Trial failed: {str(e)}")
-            return 0.0
-
+    # Pass necessary data to the objective function
+    objective_func = lambda trial: objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space)
     # Callback function defined outside the loop so that its modifications affect the outer scope.
     def callback(study, trial):
-        nonlocal best_score, best_params, top_trials
+        nonlocal best_score, best_params_from_hpo, top_trials
         logger.info(f"Current best score in this batch: {best_score:.4f}")
         if trial.value > best_score:
             best_score = trial.value
-            best_params = trial.params
+            best_params_from_hpo = trial.params
             logger.info(f"New best score found in trial {trial.number}: {best_score:.4f}")
         # Create a record for the current trial
         current_run = (trial.value, trial.params, trial.number)
@@ -357,7 +288,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
             for row in table_rows:
                 logger.info(row)
         return best_score
-    
+
     # Set persistent storage path using SQLite
     storage_url = "sqlite:///optuna_xgboost.db"
     study_name = "xgboost_optimization"
@@ -367,7 +298,6 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
-
     # Loop over batches, resetting the sampler each time
     for batch in range(num_batches):
         # Create a new sampler with a dynamic seed
@@ -384,7 +314,8 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         )
         
         logger.info(f"Starting batch {batch+1}/{num_batches} with new sampler (seed={random_seed})")
-        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback])
+        # Pass the lambda function wrapping objective
+        study.optimize(objective_func, n_trials=batch_size, show_progress_bar=True, callbacks=[callback])
         
         # Merge current batch's top trials with global_top_trials
         for trial_record in top_trials:
@@ -395,29 +326,127 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     
     # After all batches, update best_params (assume the best trial is the first in global_top_trials)
     if global_top_trials:
-        best_score, best_params, best_trial_number = global_top_trials[0]
+        best_score, best_params_from_hpo, best_trial_number = global_top_trials[0]
     else:
-        best_params = {}
+        best_params_from_hpo = {} # Initialize if no trials were successful
     
-    best_params.update(base_params)
-    
+    # Combine base parameters with the best HPO parameters.
+    # HPO results (including early_stopping_rounds) take precedence.
+    final_best_params = base_params.copy()
+    final_best_params.update(best_params_from_hpo)
+
     logger.info(f"Best trial value across batches: {best_score:.4f}")
-    logger.info(f"Best parameters found: {best_params}")
+    logger.info(f"Best HPO parameters found: {best_params_from_hpo}") 
+    logger.info(f"Combined best parameters for model: {final_best_params}")
     logger.info("Top 10 trials across all batches:")
     table_header = "| Rank | Trial # | Score | Parameters |"
     table_separator = "|------|---------|-------|------------|"
+    logger.info(table_header)
+    logger.info(table_separator)
     for i, trial_record in enumerate(global_top_trials):
         score_val, params_val, trial_num = trial_record
         logger.info(f"| {i+1} | {trial_num} | {score_val:.4f} | {params_val} |")
     
-    return best_params
+    # Return the fully combined parameters
+    return final_best_params
 
-def hypertune_xgboost(experiment_name: str):
+# Objective function now needs to accept the data explicitly
+def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
+    try:
+        params = base_params.copy()
+        # Extract early_stopping_rounds separately
+        early_stopping_rounds_config = hyperparameter_space.get('early_stopping_rounds')
+        if early_stopping_rounds_config:
+            params['early_stopping_rounds'] = trial.suggest_int(
+                'early_stopping_rounds',
+                early_stopping_rounds_config['low'],
+                early_stopping_rounds_config['high'],
+                step=early_stopping_rounds_config.get('step', 1)
+            )
+        # Add other hyperparameters from config
+        for param_name, param_config in hyperparameter_space.items():
+            if param_name == 'early_stopping_rounds': # Already handled
+                continue 
+            if param_config['type'] == 'float':
+                # ... (suggest float logic remains the same)
+                if 'step' in param_config:
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config['low'],
+                        param_config['high'],
+                        step=param_config['step'],
+                        log=param_config.get('log', False)
+                    )
+                else:
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config['low'],
+                        param_config['high'],
+                        log=param_config.get('log', False)
+                    )
+            elif param_config['type'] == 'int':
+                # ... (suggest int logic remains the same)
+                if 'step' in param_config:
+                    params[param_name] = trial.suggest_int(
+                        param_name,
+                        param_config['low'],
+                        param_config['high'],
+                        step=param_config['step']
+                    )
+                else:
+                    params[param_name] = trial.suggest_int(
+                        param_name,
+                        param_config['low'],
+                        param_config['high']
+                    )
+        # Pruning Callback - Monitor AUC PR on eval set (default name 'validation_0')
+        pruning_callback = XGBoostPruningCallback(trial, "validation_0-aucpr") 
+        # Train model and get metrics using DataFrames
+        model, metrics = train_model(
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, # Pass X_eval for threshold optimization and eval_set
+            y_eval,
+            params # Pass combined params (including early stopping for train_model)
+        )
+        
+        recall = metrics.get('recall', 0.0)
+        precision = metrics.get('precision', 0.0)
+        threshold = metrics.get('threshold', 0.5)
+        # Optimize for precision while maintaining minimum recall
+        score = precision if recall >= min_recall else 0.0
+        
+        # Pruning: report the score back to Optuna
+        trial.report(score, step=model.best_iteration if hasattr(model, 'best_iteration') else 0)
+        if trial.should_prune():
+            raise optuna.TrialPruned()
+        logger.info(f"Trial {trial.number}:")
+        logger.info(f"  Score: {score:.4f} (Precision: {precision:.4f}, Recall: {recall:.4f})")
+        logger.info(f"  Threshold: {threshold:.4f}")
+        logger.info(f"  Params: {trial.params}") # Log trial params directly
+        
+        for metric_name, metric_value in metrics.items():
+            trial.set_user_attr(metric_name, metric_value)
+        return score
+        
+    except optuna.TrialPruned:
+        logger.info(f"Trial {trial.number} pruned.")
+        raise # Re-raise the exception
+    except Exception as e:
+        logger.error(f"Trial {trial.number} failed: {str(e)}")
+        return 0.0 # Return low score for failed trials
+
+def hypertune_xgboost(X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_name: str):
     """
-    Main training function with MLflow tracking.
-    Updated name from hypertune_mlp to hypertune_xgboost to match notebook.
+    Main training function with MLflow tracking using DataFrames.
     
     Args:
+        X_train (pd.DataFrame): Training features
+        y_train: Training labels
+        X_test: Validation features
+        y_test: Validation labels
+        X_eval (pd.DataFrame): Evaluation features for signature/logging
+        y_eval (pd.Series): Evaluation labels
         experiment_name (str): Experiment name for MLflow tracking
         
     Returns:
@@ -430,7 +459,7 @@ def hypertune_xgboost(experiment_name: str):
             mlflow.set_tags({
                 "model_type": "xgboost_base",
                 "training_mode": "global",
-                "cpu_only": True
+                "cpu_only": False # Updated tag
             })
             
             # Load hyperparameter space
@@ -441,17 +470,22 @@ def hypertune_xgboost(experiment_name: str):
             best_params = optimize_hyperparameters(
                 X_train, y_train,
                 X_test, y_test,
-                X_eval, y_eval,
+                X_eval, # Pass X_eval through
+                y_eval,
                 hyperparameter_space=hyperparameter_space
             )
             
             # Train final model with best parameters
             logger.info("Training final model with best parameters")
+            # best_params already contains the combined HPO and base params, including early_stopping_rounds
+            final_train_params = best_params 
+            
             model, metrics = train_model(
                 X_train, y_train,
                 X_test, y_test,
-                X_eval, y_eval,
-                best_params
+                X_eval, # Pass X_eval for threshold optimization within train_model
+                y_eval,
+                final_train_params # Pass the full best parameters including early stopping
             )
             
             # Log final metrics
@@ -464,34 +498,34 @@ def hypertune_xgboost(experiment_name: str):
             })
             
             # Log model
-            # Create input example with a sample from evaluation data
-            # Handle integer columns by converting them to float64 to properly manage missing values
-            input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, 'iloc') else X_eval[:5].copy()
+            # Create input example using the DataFrame X_eval
+            input_example = X_eval.iloc[:5].copy()
             
             # Identify and convert integer columns to float64 to prevent schema enforcement errors
             if hasattr(input_example, 'dtypes'):
                 for col in input_example.columns:
                     if input_example[col].dtype.kind == 'i':
-                        logger.info(f"Converting integer column '{col}' to float64 to handle potential missing values")
+                        logger.info(f"Converting integer column '{col}' to float64 for signature")
                         input_example[col] = input_example[col].astype('float64')
-            # Log best parameters to MLflow
-            logger.info("Logging best parameters to MLflow")
-            for param_name, param_value in best_params.items():
-                mlflow.log_param(param_name, param_value)
+            # Log best parameters to MLflow (excluding device, objective, verbosity, seed, nthread if desired)
+            params_to_log = {k: v for k, v in best_params.items() 
+                                if k not in ['device', 'objective', 'verbosity', 'seed', 'nthread', 'tree_method']}
+            logger.info("Logging best HPO parameters to MLflow")
+            mlflow.log_params(params_to_log)
                 
-            # Infer signature with proper handling for integer columns with potential missing values
+            # Infer signature with proper handling for integer columns
             signature = mlflow.models.infer_signature(
                 input_example,
                 model.predict(input_example)
             )
             
             # Log warning about integer columns in signature
-            logger.info("Model signature created - check logs for any warnings about integer columns")
+            logger.info("Model signature created")
             # When saving model, explicitly specify requirements
             mlflow.xgboost.log_model(
                 model,
                 "model",
-                pip_requirements=pip_requirements,  # Explicitly set requirements
+                pip_requirements=pip_requirements,
                 registered_model_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}",
                 signature=signature
             )
@@ -502,15 +536,17 @@ def hypertune_xgboost(experiment_name: str):
         logger.error(f"Error in hyperparameter tuning: {str(e)}")
         return None, None
 
-def log_to_mlflow(model, metrics, params, experiment_name):
+def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
     """
     Log trained model, metrics, and parameters to MLflow.
+    Requires X_eval DataFrame for signature generation.
     
     Args:
         model: Trained XGBoost model
         metrics: Model evaluation metrics
         params: Model parameters
         experiment_name: Experiment name
+        X_eval (pd.DataFrame): Evaluation features for signature generation
         
     Returns:
         str: Run ID
@@ -520,26 +556,26 @@ def log_to_mlflow(model, metrics, params, experiment_name):
         mlflow.set_experiment(experiment_name)
         
         # Start a new run
-        with mlflow.start_run(run_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
-            # Log parameters
-            for param_name, param_value in params.items():
-                mlflow.log_param(param_name, param_value)
+        with mlflow.start_run(run_name=f"xgboost_final_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
+            # Log parameters (excluding base params if desired)
+            params_to_log = {k: v for k, v in params.items() 
+                                if k not in ['device', 'objective', 'verbosity', 'seed', 'nthread', 'tree_method']}
+            mlflow.log_params(params_to_log)
             
             # Log metrics
-            for metric_name, metric_value in metrics.items():
-                mlflow.log_metric(metric_name, metric_value)
+            mlflow.log_metrics(metrics)
             
-            # Handle integer columns by converting them to float64 to properly manage missing values
-            input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, 'iloc') else X_eval[:5].copy()
+            # Create input example using the DataFrame X_eval
+            input_example = X_eval.iloc[:5].copy()
             
-            # Identify and convert integer columns to float64 to prevent schema enforcement errors
+            # Identify and convert integer columns to float64
             if hasattr(input_example, 'dtypes'):
                 for col in input_example.columns:
-                    if X_eval[col].dtype.kind == 'i':
-                        logger.info(f"Converting integer column '{col}' to float64 to handle potential missing values")
-                        X_eval[col] = X_eval[col].astype('float64')
+                    if input_example[col].dtype.kind == 'i':
+                        logger.info(f"Converting integer column '{col}' to float64 for signature")
+                        input_example[col] = input_example[col].astype('float64')
             
-            # Infer signature with proper handling for integer columns with potential missing values
+            # Infer signature
             signature = mlflow.models.infer_signature(
                 input_example,
                 model.predict(input_example)
@@ -549,6 +585,7 @@ def log_to_mlflow(model, metrics, params, experiment_name):
             model_info = mlflow.xgboost.log_model(
                 model,
                 "model",
+                pip_requirements=pip_requirements, # Add pip_requirements here as well
                 registered_model_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}",
                 signature=signature
             )
@@ -563,49 +600,47 @@ def log_to_mlflow(model, metrics, params, experiment_name):
 
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
-    Train XGBoost model with focus on precision target.
+    Train XGBoost model with focus on precision target using DataFrames.
     
     Args:
-        X_train: Training features
+        X_train (pd.DataFrame): Training features
         y_train: Training labels
-        X_test: Testing features
-        y_test: Testing labels
-        X_eval: Evaluation features
-        y_eval: Evaluation labels
+        X_test: Validation features
+        y_test: Validation labels
+        X_eval (pd.DataFrame): Evaluation features for logging/thresholding
+        y_eval (pd.Series): Evaluation labels
         
     Returns:
         tuple: (best_model, best_metrics)
     """
     try:        
-        logger.info("Training model with precision target")
+        logger.warning("Training model with precision target - Ensure parameters are updated from HPO.")
+        # TODO: Dynamically load best params from HPO instead of hardcoding
         params = base_params.copy()
         params.update({
-            'learning_rate': 0.06,
-            'max_depth': 12,
-            'min_child_weight': 340,
+            'learning_rate': 0.07,
+            'max_depth': 7,
+            'min_child_weight': 250,
             'colsample_bytree': 0.64,
-            'subsample': 0.81,
-            'gamma': 1.76,
-            'lambda': 8.31,
-            'alpha': 42.9,
-            'scale_pos_weight': 1.92,
-            'early_stopping_rounds': 780
+            'subsample': 0.94,
+            'gamma': 2.30,
+            'lambda': 1.41,
+            'alpha': 59.0,
+            'scale_pos_weight': 2.2,
+            'early_stopping_rounds': 610 # From HPO best trial
         })
-        
-        # Train final model with best parameters
-        logger.info("Training final model with best parameters")
+        # Train final model with specific parameters
         model, metrics = train_model(
             X_train, y_train,
             X_test, y_test,
-            X_eval, y_eval,
+            X_eval, # Pass X_eval
+            y_eval,
             params
             )
             
-        # Log to MLflow
-        log_to_mlflow(model, metrics, params, experiment_name)
-        
+        # Log to MLflow using the DataFrame X_eval for signature
+        log_to_mlflow(model, metrics, params, experiment_name, X_eval)
         return model, metrics
-            
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
@@ -618,35 +653,66 @@ def main():
         logger.info("Starting XGBoost model training")
         # Import data at runtime to avoid global scope issues
         from models.StackedEnsemble.shared.data_loader import DataLoader
-        global X_train, y_train, X_test, y_test, X_eval, y_eval
+        # Remove global declarations as data is loaded and passed directly
         
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
+        
+        # Select features
         features = import_selected_features_ensemble(model_type='xgb')
         X_train = X_train[features]
         X_test = X_test[features]
         X_eval = X_eval[features]
+        
         # Convert all columns to float64 to ensure consistent data types
         X_train = X_train.astype('float64')
         X_test = X_test.astype('float64')
         X_eval = X_eval.astype('float64')
+        
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}")
+        current_params = None
+        current_metrics = None
+        # Run Hyperparameter Optimization
+        current_params, current_metrics = hypertune_xgboost(
+            X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass DataFrames
+            experiment_name
+        )
         
-        # current_params, current_metrics = hypertune_xgboost(experiment_name)
-        # logger.info(f"Run completed with parameters: {current_params}")
-        # logger.info(f"Run metrics: {current_metrics}")
-
-        # Train model with precision target
-        best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
-        logger.info(f"Best model: {best_model}")
-        logger.info(f"Best metrics: {best_metrics}")
+        if current_params and current_metrics:
+            logger.info(f"HPO run completed with parameters: {current_params}")
+            logger.info(f"HPO run metrics: {current_metrics}")
+            # Train model with precision target using best HPO params (Ideally pass params dynamically)
+            # For now, it uses hardcoded params, but needs X_eval, y_eval
+            logger.info("Proceeding to train final model with precision target settings.")
+            best_model, best_metrics = train_with_precision_target(
+                X_train, y_train, X_test, y_test, X_eval, y_eval # Pass DataFrames
+            )
+            
+            if best_model and best_metrics:
+                logger.info(f"Precision target training completed.")
+                logger.info(f"Best model info: {best_model}")
+                logger.info(f"Best metrics: {best_metrics}")
+            else:
+                    logger.error("Precision target training failed.")
+        else:
+            logger.info("Proceeding to train final model with precision target settings.")
+            best_model, best_metrics = train_with_precision_target(
+                X_train, y_train, X_test, y_test, X_eval, y_eval # Pass DataFrames
+            )
+            logger.error("Hyperparameter optimization failed. Skipping precision target training.")
+            
     except Exception as e:
-        logger.error(f"Error in main execution: {str(e)}")
+        logger.error(f"Error in main execution: {str(e)}", exc_info=True) # Add traceback
+    finally:
+        # Clean up DMatrix objects if needed (usually not necessary)
+        # del dtrain, dtest, deval
+        gc.collect() # Force garbage collection
+        logger.info("Main execution finished.")
 
 if __name__ == "__main__":
     main() 

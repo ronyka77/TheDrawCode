@@ -340,30 +340,28 @@ def main():
     # Model URIs to evaluate
     model_uris = [
         '035abdf986654b1e8b551d0ce044c929', 
-        '8d80522037ae4a9790b72129c06851a4', 
         'd3c066618b4d425fbb2ffff99a478238', 
         '7c12f45bc2c442818cf09c497eef4176', 
-        '58f6a2c94ced4c1a9c724d19224cca8c', 
-        'ee17cebf244e473ba8e661bcdd442d50', 
-        '5befa2bf2b5d4ae6866f3cc177c7b68f', 
         '97207cdaab54477fa267d8cd29ce35e9', 
         '403c8c5eaaf442898594e45e6998cff4', 
         '835b997b8acd46f7a72ab5350451e427', 
         '538f96a0c783429f9f2e6967cc4693a2', 
-        '01d70371af714f87b0b15393a5ce6853', 
-        '9d1caf1dbee3488187b496c2c61f948d',
         '355e5d963cf644debba80148a3fcd430',
         '1aec65aae580476b813fe97fee26e9e0',
         '355e5d963cf644debba80148a3fcd430',
         '41c904cbec1246a7881875ad087bb63c',
         '94b35c3a239f493880d6f35e4fde7035',
-        '8872f92118a24521800d05c96d5e6f16'
+        '8872f92118a24521800d05c96d5e6f16',
+        'ffacc3add86741a3a91f6115aae22b26',
+        'c3c7d0788ef14f8da4ad02d709e2bca9',
+        'd111479cd80548dd9dad5176f1dca58d',
+        'd437d40570524d18be10da4251fc3c2a',
+        '0ebd3bd3b1f3472d9871100270888c92'
     ]
     # Filter configuration to remove predictions near specific thresholds
     filter_config = {
         '8d80522037ae4a9790b72129c06851a4': {"remove_thresholds": [0.45, 0.47]},  
         'd3c066618b4d425fbb2ffff99a478238': {"remove_thresholds": [0.59, 0.60, 0.64, 0.65, 0.66, 0.69]},  
-        '5befa2bf2b5d4ae6866f3cc177c7b68f': {"remove_thresholds": [0.30, 0.31, 0.32, 0.33, 0.34, 0.35]},  
         '7c12f45bc2c442818cf09c497eef4176': {"remove_thresholds": [0.32, 0.33]},  
         '58f6a2c94ced4c1a9c724d19224cca8c': {"remove_thresholds": [0.32, 0.35, 0.36, 0.40, 0.41, 0.42]},  
         '835b997b8acd46f7a72ab5350451e427': {"remove_thresholds": [0.36, 0.31, 0.32]},  

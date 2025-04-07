@@ -1030,7 +1030,7 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
         with open(json_path, 'r') as f:
             features = json.load(f)
         # Validate loaded data structure
-        if not all(key in features for key in ['xgb', 'cat', 'lgbm', 'rf', 'tabnet']):
+        if not all(key in features for key in ['xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'mlp']):
             raise ValueError("JSON file missing required model keys")
         # Return specific model type if requested
         if model_type is not None:
@@ -1038,11 +1038,11 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
                 # Get intersection of features across all models
                 common_features = list(
                     set(features['xgb']).union(
-                    features['cat'], features['lgbm'], features['rf'], features['tabnet']))
+                    features['cat'], features['lgbm'], features['rf'], features['tabnet'], features['mlp']))
                 logger.info("Returning features common to all models")
                 return common_features
-            elif model_type not in ['xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'all']:
-                raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'all'")
+            elif model_type not in ['xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'mlp', 'all']:
+                raise ValueError(f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'mlp', 'all'")
             logger.info(f"Returning selected features for model type: {model_type}")
             return features[model_type]
         logger.info(f"Successfully loaded all selected features from JSON file")

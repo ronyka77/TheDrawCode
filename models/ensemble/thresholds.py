@@ -268,8 +268,8 @@ def tune_threshold_for_precision_optimized(y_prob: np.ndarray, y_true: pd.Series
         fp = np.sum((y_true == 0) & (y_pred == 1))
         fn = np.sum((y_true == 1) & (y_pred == 0))
             
-        precision = tp / (tp + fp)
-        recall = tp / (tp + fn)
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = 2 * precision * recall / (precision + recall)
         metrics_by_threshold.append({
             'threshold': threshold,

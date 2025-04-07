@@ -26,13 +26,14 @@ import os
 import warnings
 import optuna
 from optuna.samplers import TPESampler
+import torch.optim as optim
 
 from utils.logger import ExperimentLogger
 logger = ExperimentLogger(experiment_name="ensemble_model_training",
                             log_dir="./logs/ensemble_model_training")
 
 # Import the new Bayesian meta learner
-from models.ensemble.bayesian_meta_learner import BayesianMetaLearner, train_with_optimal_parameters
+# from models.ensemble.bayesian_meta_learner import BayesianMetaLearner, train_with_optimal_parameters
 from models.ensemble.ResNet import ResNetMetaLearner
 from utils.create_evaluation_set import import_selected_features_ensemble
 from models.ensemble.thresholds import tune_threshold_for_precision_optimized, tune_threshold_for_precision
@@ -52,17 +53,10 @@ os.environ['PYTHONHASHSEED'] = str(random_seed)
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 # PyTorch specific reproducibility settings
 torch.manual_seed(random_seed)
-torch.use_deterministic_algorithms(True)  # Force deterministic algorithms
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-# Configure PyTorch threads
-torch.set_num_threads(4)
-torch.set_num_interop_threads(4)
 
 def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
     """
@@ -99,21 +93,44 @@ def initialize_meta_learner(meta_learner_type: str = 'xgb') -> object:
         logger.info("XGBoost meta-learner initialized with CPU-optimized settings")
     elif meta_learner_type.lower() == 'tabnet':
         # TabNet meta-learner with CPU settings
-        meta_learner = TabNetClassifier(
-            learning_rate=0.02,
-            n_d=8,  # Dimension of the prediction layer
-            n_a=8,  # Dimension of the attention layer
-            n_steps=5,  # Number of steps in the architecture
-            gamma=1.5,  # Scaling coefficient for attention
-            lambda_sparse=1e-5,  # Sparsity regularization
-            momentum=0.9,
-            mask_type='entmax',  # Used to compute sparse attention weights
-            device_name='cpu',
-            verbose=0,
-            seed=19
-        )
         
-        logger.info("TabNet meta-learner initialized with CPU-optimized settings")
+        params = {
+            'n_d': 56,  # Dimension of the prediction layer
+            'n_a': 12,  # Dimension of the attention layer 
+            'n_steps': 15,  # Number of steps in the architecture
+            'gamma': 1.9500000000000002,  # Scaling coefficient for attention
+            'lambda_sparse': 2.594352900973954e-07,  # Sparsity regularization
+            'momentum': 0.725,
+            'mask_type': 'sparsemax',  # Used to compute sparse attention weights
+            'device_name': 'cuda',
+            'verbose': 0,
+            'seed': 19,
+            'learning_rate': 0.012272866712824772
+        }
+        fit_params = {
+            'max_epochs': 160,
+            'patience': 26,
+            'batch_size': 2408,
+            'virtual_batch_size': 2679
+        }
+        # Handle optimizer params separately
+        if 'learning_rate' in params:
+            params['optimizer_params'] = {'lr': params['learning_rate']}
+            # Optionally remove learning_rate from params to avoid passing it to TabNetClassifier
+            del params['learning_rate']
+        if 'eval_metric' in params:
+            params.pop('eval_metric')
+        if 'patience' in params:
+            params.pop('patience')
+        if 'max_epochs' in params:
+            params.pop('max_epochs')
+        if 'batch_size' in params:
+            params.pop('batch_size')
+        if 'virtual_batch_size' in params:
+            params.pop('virtual_batch_size')
+        
+        meta_learner = TabNetClassifier(**params)
+        logger.info("TabNet meta-learner initialized")
     elif meta_learner_type.lower() == 'lgb':
         meta_learner = LGBMClassifier(
             objective='binary',
@@ -483,7 +500,7 @@ def train_meta_learner(meta_learner, meta_features: np.ndarray, meta_targets: np
 def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
                             eval_meta_features: Optional[np.ndarray] = None, 
                             eval_meta_targets: Optional[np.ndarray] = None,
-                            meta_learner_type='xgb', n_trials=3000, timeout=900000, 
+                            meta_learner_type='xgb', n_trials=6000, timeout=900000, 
                             target_precision=0.5, min_recall=0.25):
     """
     Hypertune meta-learner using Optuna and optimize threshold for precision/recall balance.
@@ -562,23 +579,54 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
             meta_learner = XGBClassifier(**params)
         elif meta_learner_type == 'tabnet':
             base_params = {
-                'device_name': 'cpu',
+                'optimizer_fn': optim.Adam,
+                'mask_type': 'sparsemax', 
+                'eval_metric': ['logloss', 'auc'],
                 'verbose': 0,
-                'seed': 19
+                'seed': 19,
+                'device_name': 'cuda'
             }
             
             params = {
-                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.05, log=True),
-                'n_d': trial.suggest_int('n_d', 8, 16, step=1),
-                'n_a': trial.suggest_int('n_a', 8, 16, step=1),
-                'n_steps': trial.suggest_int('n_steps', 3, 10, step=1),
-                'gamma': trial.suggest_float('gamma', 1.0, 2.0, step=0.1),
-                'lambda_sparse': trial.suggest_float('lambda_sparse', 1e-6, 1e-4, log=True),
-                'momentum': trial.suggest_float('momentum', 0.8, 0.99, step=0.01),
-                'mask_type': trial.suggest_categorical('mask_type', ['sparsemax', 'entmax'])
+                'learning_rate': trial.suggest_float('learning_rate', 1e-4, 5e-1, log=True),
+                'n_d': trial.suggest_int('n_d', 8, 64),
+                'n_a': trial.suggest_int('n_a', 8, 64), 
+                'n_steps': trial.suggest_int('n_steps', 3, 15),
+                'gamma': trial.suggest_float('gamma', 0.5, 3.0, step=0.05),
+                'lambda_sparse': trial.suggest_float('lambda_sparse', 1e-7, 1e-2, log=True),
+                'momentum': trial.suggest_float('momentum', 0.7, 0.99, step=0.005),
+                'mask_type': trial.suggest_categorical('mask_type', ['sparsemax', 'entmax']),
+                'n_independent': trial.suggest_int('n_independent', 1, 5),
+                'n_shared': trial.suggest_int('n_shared', 1, 5)
             }
             params.update(base_params)
+            # Suggest fit parameters
+            fit_params = {
+                'max_epochs': trial.suggest_int('max_epochs', 60, 200, step=5), # Fit param
+                'patience': trial.suggest_int('patience', 5, 30, step=1),      # Fit param 
+                'batch_size': trial.suggest_int('batch_size', 1024, 16384),     # Fit param
+                'virtual_batch_size': trial.suggest_int('virtual_batch_size', 128, 4096) # Fit param
+            }
+            params.update(fit_params)
+            # Handle optimizer params separately
+            if 'learning_rate' in params:
+                params['optimizer_params'] = {'lr': params['learning_rate']}
+                # Optionally remove learning_rate from params to avoid passing it to TabNetClassifier
+                del params['learning_rate']
+            if 'eval_metric' in params:
+                params.pop('eval_metric')
+            if 'patience' in params:
+                params.pop('patience')
+            if 'max_epochs' in params:
+                params.pop('max_epochs')
+            if 'batch_size' in params:
+                params.pop('batch_size')
+            if 'virtual_batch_size' in params:
+                params.pop('virtual_batch_size')
             meta_learner = TabNetClassifier(**params)
+            # Store fit params separately to pass to the fit method
+            params['fit_params'] = fit_params
+
         elif meta_learner_type == 'lgb':
             base_params = {
                 'objective': 'binary',
@@ -702,33 +750,41 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         try:
             if meta_learner_type == 'tabnet':
                 # Special handling for TabNet's training
+                # Get fit parameters stored earlier
+                fit_params = params.pop('fit_params')
+
                 # Convert to numpy arrays if pandas
                 if hasattr(meta_features, 'values'):
-                    meta_features_np = meta_features.values
-                    meta_targets_np = meta_targets.values if hasattr(meta_targets, 'values') else meta_targets
-                    eval_features_np = eval_meta_features.values if hasattr(eval_meta_features, 'values') else eval_meta_features
-                    eval_targets_np = eval_meta_targets.values if hasattr(eval_meta_targets, 'values') else eval_meta_targets
+                    # Use to_numpy() for modern pandas
+                    meta_features_np = meta_features.to_numpy()
+                    meta_targets_np = meta_targets.to_numpy() if hasattr(meta_targets, 'to_numpy') else meta_targets
+                    eval_features_np = eval_meta_features.to_numpy() if hasattr(eval_meta_features, 'to_numpy') else eval_meta_features
+                    eval_targets_np = eval_meta_targets.to_numpy() if hasattr(eval_meta_targets, 'to_numpy') else eval_meta_targets
                 else:
                     meta_features_np = meta_features
                     meta_targets_np = meta_targets
                     eval_features_np = eval_meta_features
                     eval_targets_np = eval_meta_targets
-                
+
                 # Train TabNet with early stopping on eval set
                 meta_learner.fit(
                     meta_features_np, meta_targets_np,
                     eval_set=[(eval_features_np, eval_targets_np)],
-                    max_epochs=150,
-                    patience=17,
-                    eval_metric=['auc', 'logloss']
+                    max_epochs=fit_params['max_epochs'],
+                    patience=fit_params['patience'],
+                    batch_size=fit_params['batch_size'],
+                    virtual_batch_size=fit_params['virtual_batch_size'],
+                    eval_metric=['auc', 'logloss'],
+                    weights=1, # Use automatic class weighting
+                    drop_last=False
                 )
-                
+
                 # Get predictions on validation set
                 y_proba = meta_learner.predict_proba(eval_features_np)[:, 1]
-                
+
                 # Find optimal threshold
                 best_threshold, metrics = tune_threshold_for_precision_optimized(
-                    y_proba, eval_meta_targets, target_precision, min_recall
+                    y_proba, eval_targets_np, target_precision, min_recall # Use numpy targets here
                 )
                 
                 if metrics['recall'] < min_recall:
@@ -813,7 +869,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
     
     # Total trials to conduct
     total_trials = n_trials
-    batch_size = 1000
+    batch_size = 2000
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
@@ -950,7 +1006,7 @@ def hypertune_meta_learner(meta_features: np.ndarray, meta_targets: np.ndarray,
         y_proba = best_meta_learner.predict_proba(eval_meta_features)
         y_pred = (y_proba >= best_threshold).astype(int)
         
-        # Find optimal threshold
+        # Find optimal threshold for Bayesian after training
         best_threshold, metrics = tune_threshold_for_precision_optimized(
             y_proba, eval_meta_targets, target_precision, min_recall
         )

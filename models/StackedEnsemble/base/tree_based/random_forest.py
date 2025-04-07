@@ -33,7 +33,6 @@ from typing import Any, Dict, Tuple
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
 
-
 # Add project root to Python path
 try:
     project_root = Path(__file__).parent.parent.parent.parent.parent
@@ -76,7 +75,7 @@ pip_requirements = [
 # Update base parameters for RandomForest
 base_params = {
     'random_state': 19,
-    'n_jobs': 4,
+    'n_jobs': 12,
     'verbose': 0,
     'criterion': 'entropy'
 }
@@ -87,50 +86,52 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "4"
-os.environ["MKL_NUM_THREADS"] = "4"
-os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "12"
+os.environ["MKL_NUM_THREADS"] = "12"
+os.environ["OPENBLAS_NUM_THREADS"] = "12"
 
-def load_hyperparameter_space():
+def load_hyperparameter_space_for_hpo():
     """
-    Define hyperparameter space for RandomForest tuning.
+    Define an extended hyperparameter space specifically for faster HPO
+    runs with a reduced n_estimators range (e.g., 600-1200).
+    Ranges for other parameters are widened slightly to compensate.
     """
     hyperparameter_space = {
         'n_estimators': {
             'type': 'int',
-            'low': 1000,
-            'high': 2000,
-            'step': 10
+            'low': 600,  # Fixed lower range for HPO
+            'high': 1200, # Fixed lower range for HPO
+            'step': 20   # Maybe increase step slightly for faster HPO search within range
         },
         'max_depth': {
             'type': 'int',
-            'low': 10,
-            'high': 20,
+            'low': 8,    # Slightly lower minimum allowed
+            'high': 25,  # Allow potentially deeper trees
             'step': 1
         },
         'min_samples_split': {
             'type': 'int',
-            'low': 40,
-            'high': 70,
-            'step': 1
+            'low': 30,   # Allow splitting slightly easier
+            'high': 80,  # Allow slightly more constrained splitting too
+            'step': 2    # Can increase step slightly if range is wider
         },
         'min_samples_leaf': {
             'type': 'int',
-            'low': 10,
-            'high': 40,
-            'step': 1
+            'low': 6,    # Allow smaller leaf nodes
+            'high': 50,  # Allow slightly larger leaf nodes too
+            'step': 2    # Can increase step slightly
         },
         'max_features': {
             'type': 'float',
-            'low': 0.04,
-            'high': 1.0,
-            'step': 0.02
+            'low': 0.04, # Keep wide range, maybe even focus higher?
+            'high': 1.0, # Keep wide range, lets RF figure out importance
+            'step': 0.02 # Keep step relatively small
         },
         'class_weight': {
             'type': 'float',
-            'low': 2.0,
-            'high': 4.0,
-            'step': 0.02
+            'low': 1.6,  # Slightly widen the range
+            'high': 4.0, # Slightly widen the range
+            'step': 0.05 # Increase step slightly
         }
     }
     return hyperparameter_space
@@ -203,7 +204,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     logger.info("Starting hyperparameter optimization")
     
     if not hyperparameter_space:
-        hyperparameter_space = load_hyperparameter_space()
+        hyperparameter_space = load_hyperparameter_space_for_hpo()
     
     best_score = -float('inf')
     best_params = {}
@@ -374,7 +375,7 @@ def hypertune_random_forest(experiment_name: str):
             })
             
             # Load hyperparameter space
-            hyperparameter_space = load_hyperparameter_space()
+            hyperparameter_space = load_hyperparameter_space_for_hpo()
             
             # Run hyperparameter optimization
             logger.info("Starting hyperparameter optimization")
@@ -517,22 +518,21 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         tuple: (best_model, best_metrics)
     """
     try:
-        logger.warning("Hyperparameter tuning failed. Using default parameters.")
+        logger.warning("Training model with precision target.")
         params = base_params.copy()
         params.update({
-            'n_estimators': 180,
-            'max_depth': 18,
-            'min_samples_split': 61,
-            'min_samples_leaf': 19,
-            'max_features': 0.64,
+            'n_estimators': 720,
+            'max_depth': 15, 
+            'min_samples_split': 48,
+            'min_samples_leaf': 28,
+            'max_features': 1.0,
+            'class_weight': 2.0,
             'bootstrap': True,
-            'class_weight': 3.52,
             'criterion': 'entropy',
             'random_state': 19,
-            'n_jobs': 4,
+            'n_jobs': 8,
             'verbose': 0
         })
-        
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
         model, metrics = train_model(
@@ -541,12 +541,9 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
             X_eval, y_eval,
             params
         )
-        
         # Log to MLflow
         log_to_mlflow(model, metrics, params, experiment_name)
-        
         return model, metrics
-        
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
@@ -560,7 +557,6 @@ def main():
         
         # Import data at runtime to avoid global scope issues
         from models.StackedEnsemble.shared.data_loader import DataLoader
-        
         global X_train, y_train, X_test, y_test, X_eval, y_eval
         
         # Load data
@@ -585,9 +581,9 @@ def main():
         logger.info(f"Run metrics: {current_metrics}")
         
         # Train model with precision target
-        # best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
-        # logger.info(f"Best model: {best_model}")
-        # logger.info(f"Best metrics: {best_metrics}")
+        best_model, best_metrics = train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        logger.info(f"Best model: {best_model}")
+        logger.info(f"Best metrics: {best_metrics}")
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
 

@@ -48,11 +48,11 @@ experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name,
                             log_dir="./logs/ensemble_model_improved")
 from utils.create_evaluation_set import setup_mlflow_tracking, import_selected_features_ensemble
-from models.ensemble.ensemble_model_0324 import EnsembleModel
+from models.ensemble.ensemble_model_0404 import EnsembleModel
 from models.ensemble.data_utils import balance_and_clean_dataset
 
 def run_ensemble(extra_base_model_type: str = 'random_forest',
-                meta_learner_type: str = 'xgb',
+                meta_learner_type: str = 'tabnet',
                 calibrate: bool = False,
                 dynamic_weighting: bool = True,
                 target_precision: float = 0.50,
@@ -216,6 +216,9 @@ def run_ensemble(extra_base_model_type: str = 'random_forest',
                 pip_requirements=["scikit-learn==1.6.1"]
             )
             logger.info(f"Model saved with signature and registered as: {model_name}")
+            # Log the run ID for future reference
+            run_id = mlflow.active_run().info.run_id
+            logger.info(f"MLflow Run ID: {run_id}")
             return ensemble_model
             
     except Exception as e:
@@ -252,6 +255,8 @@ def log_all_model_params(ensemble_model):
         params_dict["TabNet"] = ensemble_model.get_model_params(ensemble_model.model_tabnet)
     if hasattr(ensemble_model, "model_lgb"):
         params_dict["LightGBM"] = ensemble_model.get_model_params(ensemble_model.model_lgb)
+    if hasattr(ensemble_model, "model_mlp"):
+        params_dict["MLP"] = ensemble_model.get_model_params(ensemble_model.model_mlp)
     if hasattr(ensemble_model, "model_extra"):
         params_dict["Extra"] = ensemble_model.get_model_params(ensemble_model.model_extra)
     
@@ -264,7 +269,11 @@ def log_all_model_params(ensemble_model):
         params_dict["LightGBM_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_lgb_calibrated)
     if hasattr(ensemble_model, "model_extra_calibrated") and ensemble_model.model_extra_calibrated is not None:
         params_dict["Extra_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_extra_calibrated)
-    
+    if hasattr(ensemble_model, "model_mlp_calibrated") and ensemble_model.model_mlp_calibrated is not None:
+        params_dict["MLP_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_mlp_calibrated)
+    if hasattr(ensemble_model, "model_mlp_sklearn_calibrated") and ensemble_model.model_mlp_sklearn_calibrated is not None:
+        params_dict["MLP_sklearn_calibrated"] = ensemble_model.get_model_params(ensemble_model.model_mlp_sklearn_calibrated)
+
     # Log additional settings (such as meta-learner parameters) if applicable.
     if hasattr(ensemble_model, "meta_learner") and ensemble_model.meta_learner is not None:
         params_dict["MetaLearner"] = ensemble_model.get_model_params(ensemble_model.meta_learner)

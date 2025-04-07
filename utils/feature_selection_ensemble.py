@@ -21,9 +21,12 @@ import random
 import sys
 from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
-from pytorch_tabnet.tab_model import TabNetClassifier
 import torch
-
+import torch.optim as optim
+from pytorch_tabnet.tab_model import TabNetClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.inspection import permutation_importance
 # Add project root to Python path
 try:
     project_root = Path(__file__).parent.parent
@@ -55,6 +58,10 @@ np.random.seed(SEED)
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["NUMEXPR_NUM_THREADS"] = "4"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+# PyTorch specific reproducibility settings
+torch.manual_seed(SEED)
 
 def select_features(
     X: pd.DataFrame,
@@ -215,36 +222,36 @@ def select_features_differentiated(
     fixed_features = fixed_features or []
     models = {
         "tabnet": TabNetClassifier(
-            n_d=11,
-            n_a=16,
-            n_steps=9,
-            gamma=1.8,
-            lambda_sparse=2.4889331018199245e-05,
-            momentum=0.9500000000000001,
-            mask_type='entmax',
-            device_name='cpu',
-            optimizer_fn=torch.optim.Adam,
-            optimizer_params={'lr': 0.021963953605914036},
+            n_d=20,
+            n_a=11,
+            n_steps=2,
+            gamma=1.85,
+            lambda_sparse=0.0004179320179043156,
+            momentum=0.895,
+            mask_type='sparsemax',
+            device_name='cuda',
+            optimizer_fn=optim.Adam,
+            optimizer_params={'lr': 0.013847429792123665},
             verbose=0,
             seed=19
         ),
         "xgb": XGBClassifier(
-            tree_method='hist',  # Required for CPU-only training per project rules
+            tree_method='hist',
             device='cpu',
             nthread=4,
             objective='binary:logistic',
             eval_metric=['aucpr', 'error', 'logloss'],
             verbosity=0,
-            learning_rate=0.02,
-            max_depth=9,
-            min_child_weight=390,
-            subsample=0.77,
-            colsample_bytree=0.6499999999999999,
-            reg_alpha=31.0,
-            reg_lambda=6.3500000000000005,
-            gamma=0.9400000000000001,
-            early_stopping_rounds=600,
-            scale_pos_weight=2.5,
+            learning_rate=0.08,
+            max_depth=13,
+            min_child_weight=260,
+            subsample=0.59,
+            colsample_bytree=0.6699999999999999,
+            reg_alpha=41.8,
+            reg_lambda=5.15,
+            gamma=0.5,
+            early_stopping_rounds=890,
+            scale_pos_weight=2.44,
             seed=19
         ),
         "cat": CatBoostClassifier(
@@ -272,32 +279,47 @@ def select_features_differentiated(
             n_jobs=4,
             random_state=19,
             device='cpu',
-            learning_rate=0.08,
-            num_leaves=110,
-            max_depth=9,
-            min_child_samples=290,
-            feature_fraction=0.5900000000000001,
-            bagging_fraction=0.56,
-            bagging_freq=10,
-            reg_alpha=8.100000000000001,
-            reg_lambda=5.0,
-            min_split_gain=0.24000000000000002,
-            early_stopping_rounds=650,
-            path_smooth=0.17,
-            cat_smooth=25.900000000000002,
-            max_bin=230
+            learning_rate=0.15000000000000002,
+            num_leaves=150,
+            max_depth=10,
+            min_child_samples=400,
+            feature_fraction=0.55,
+            bagging_fraction=0.68,
+            bagging_freq=13,
+            reg_alpha=0.8,
+            reg_lambda=12.0,
+            min_split_gain=0.12000000000000001,
+            path_smooth=0.28,
+            cat_smooth=20.4,
+            max_bin=620
         ),
-        "rf": RandomForestClassifier(
-            n_estimators=540,
-            max_depth=12,
-            min_samples_split=10,
-            min_samples_leaf=32,
-            max_features=0.18,
-            bootstrap=True,
-            class_weight={0: 1.0, 1: 2.2},
-            criterion='entropy',
-            random_state=19,
-            n_jobs=4
+        # "rf": RandomForestClassifier(
+        #     n_estimators=1770,
+        #     max_depth=15,
+        #     min_samples_split=55,
+        #     min_samples_leaf=36,
+        #     max_features=0.42,
+        #     bootstrap=True,
+        #     class_weight={0: 1.0, 1: 2.2},
+        #     criterion='entropy',
+        #     random_state=19,
+        #     n_jobs=4,
+        #     verbose=0
+        # ),
+        "mlp": MLPClassifier(
+            hidden_layer_sizes=(128, 64, 32),
+            alpha=0.04259050184156992,
+            batch_size=1536,
+            learning_rate_init=0.04342726319130476,
+            max_iter=70,
+            n_iter_no_change=27,
+            beta_1=0.9,
+            beta_2=0.983,
+            activation='relu',             # ReLU activation function
+            solver='adam',                 # Adam optimizer
+            early_stopping=True,           # Enable early stopping
+            random_state=19,      # For reproducibility
+            verbose=False,     
         )
     }
     
@@ -320,13 +342,24 @@ def select_features_differentiated(
             model.fit(
                 X.values, y.values,
                 eval_set=[(X_val.values, y_val.values)],
-                eval_metric=['auc', 'logloss'],
-                patience=10,
-                max_epochs=100,
-                batch_size=1024,
-                virtual_batch_size=128
+                eval_metric=['auc'],
+                patience=22,
+                max_epochs=115, 
+                batch_size=1057,
+                virtual_batch_size=2663,
+                drop_last=False
             )
             imp = np.array(model.feature_importances_)
+        elif name == "mlp":
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            X_val_scaled = scaler.transform(X_val)
+            model.fit(X_scaled, y)
+            # Calculate permutation importance on the validation set
+            result = permutation_importance(
+                model, X_val_scaled, y_val, n_repeats=10, random_state=19, n_jobs=4
+            )
+            imp = result.importances_mean # Use permutation importance
         else:
             imp = np.zeros(X.shape[1])
         # Create a DataFrame mapping features to their importance
@@ -361,6 +394,7 @@ def select_features_differentiated(
         "lgbm": selected["lgbm"],
         "rf": selected["rf"],
         "tabnet": selected["tabnet"],
+        "mlp": selected["mlp"],
         "union": union_features
     }
 

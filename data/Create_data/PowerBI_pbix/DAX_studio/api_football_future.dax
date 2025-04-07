@@ -5,16 +5,16 @@ SELECTCOLUMNS(
         SUMMARIZECOLUMNS(
             future_matches[home_encoded],
             future_matches[away_encoded], 
-            future_matches[Datum],
+            future_matches[Datum], 
             future_matches[Home],
             future_matches[Away],  
             future_matches[venue_encoded],  
             future_matches[venue_capacity],  
-            future_matches[venue_grass],   
-            future_matches[venue_name],    
+            future_matches[venue_grass],    
+            future_matches[venue_name],     
             future_matches[league_name],    
-            future_matches[league_encoded],
-            future_matches[referee], 
+            future_matches[league_encoded],  
+            future_matches[referee],  
             future_matches[referee_encoded], 
             future_matches[Last_home_match],  
             future_matches[Last_away_match],  
@@ -37,7 +37,7 @@ SELECTCOLUMNS(
             future_matches[Away_offsides_mean],
             future_matches[Away_passes_mean],
             future_matches[Away_points_cum],
-            future_matches[away_possession_mean],
+            future_matches[away_possession_mean], 
             future_matches[away_red_cards_mean],
             future_matches[away_red_cards_rollingaverage],
             future_matches[Away_saves_mean],
@@ -96,7 +96,7 @@ SELECTCOLUMNS(
             future_matches[comparison_away_att],
             future_matches[comparison_away_def],
             future_matches[comparison_away_form], 
-            future_matches[comparison_away_goals],
+            future_matches[comparison_away_goals], 
             future_matches[comparison_away_h2h],
             future_matches[comparison_away_poisson_distribution],
             future_matches[comparison_away_total],
@@ -225,8 +225,8 @@ SELECTCOLUMNS(
     "away_win_percent",ROUNDUP(future_matches[away_win_percent], 0),
     "home_win_percent",ROUNDUP(future_matches[home_win_percent], 0),
     "goals_home_prediction",ROUNDUP(future_matches[goals_home_prediction], 0),
-    "goals_away_prediction",ROUNDUP(future_matches[goals_away_prediction], 0),
+    "goals_away_prediction",ROUNDUP(future_matches[goals_away_prediction], 0), 
     "total_goals_prediction",ROUNDUP(future_matches[total_goals_prediction], 0)
-)
+) 
 
 /* END QUERY BUILDER */

@@ -49,7 +49,7 @@ warnings.filterwarnings("ignore", message=".*imbalanced.*|.*weight.*|.*class_wei
 warnings.filterwarnings("ignore", message=".*sample_weight.*", category=UserWarning)
 
 # Global settings
-min_recall = 0.40
+min_recall = 0.20
 # You can adjust n_trials if needed
 n_trials = 20000
 
@@ -60,7 +60,7 @@ base_params = {
     'eval_metric': ['logloss', 'auc'],  # Remove function reference here
     'verbose': 0,
     'seed': 19,
-    'device_name': 'cpu'
+    'device_name': 'cuda'
 }
 
 # Set fixed seed and hash seed for determinism
@@ -77,12 +77,15 @@ os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 # PyTorch specific reproducibility settings
 torch.manual_seed(SEED)
-torch.use_deterministic_algorithms(True)  # Force deterministic algorithms
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-# Configure PyTorch threads
-torch.set_num_threads(4)
-torch.set_num_interop_threads(4)
+
+# Verify CUDA availability
+if torch.cuda.is_available():
+    logger.info(f"CUDA is available! Found {torch.cuda.device_count()} GPU(s).")
+    logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
+else:
+    logger.warning("CUDA is NOT available. TabNet will run on CPU.")
+    # Force base_params to CPU if CUDA isn't found, to avoid potential errors
+    base_params['device_name'] = 'cpu'
 
 def load_hyperparameter_space():
     """
@@ -91,54 +94,74 @@ def load_hyperparameter_space():
     hyperparameter_space = {
         'learning_rate': {
             'type': 'float',
-            'low': 1e-3,
-            'high': 1e-1,
+            'low': 1e-4,  # Lower bound decreased
+            'high': 5e-1,  # Upper bound increased
             'log': True
         },
         'n_d': {
             'type': 'int',
-            'low': 4,
-            'high': 30
+            'low': 8,     # Increased lower bound
+            'high': 64    # Increased upper bound for more complex features
         },
         'n_a': {
             'type': 'int',
-            'low': 4,
-            'high': 20
+            'low': 8,     # Increased lower bound
+            'high': 64    # Increased upper bound for attention
         },
         'n_steps': {
             'type': 'int',
-            'low': 2,
-            'high': 10
+            'low': 3,     # Increased lower bound
+            'high': 15    # Increased upper bound for deeper networks
         },
         'gamma': {
             'type': 'float',
-            'low': 0.8,
-            'high': 2.5,
+            'low': 0.5,   # Decreased lower bound
+            'high': 3.0,  # Increased upper bound
             'step': 0.05
         },
         'lambda_sparse': {
             'type': 'float',
-            'low': 1e-6,
-            'high': 1e-3,
+            'low': 1e-7,  # Lower bound decreased
+            'high': 1e-2, # Upper bound increased
             'log': True
         },
         'momentum': {
             'type': 'float',
-            'low': 0.8,
+            'low': 0.7,   # Decreased lower bound
             'high': 0.99,
             'step': 0.005
         },
         'patience': {
             'type': 'int',
-            'low': 3,
-            'high': 20
+            'low': 5,     # Increased lower bound
+            'high': 30    # Increased upper bound
         },
         'max_epochs': {
             'type': 'int',
-            'low': 40,
-            'high': 120,
-            'step': 2
-        }
+            'low': 60,    # Increased lower bound
+            'high': 200,  # Increased upper bound
+            'step': 5     # Increased step size
+        },
+        'batch_size': {   # Added batch size tuning
+            'type': 'int',
+            'low': 1024,
+            'high': 16384
+        },
+        'virtual_batch_size': {  # Added virtual batch size tuning
+            'type': 'int',
+            'low': 128,
+            'high': 4096
+        },
+        'n_independent': {
+            'type': 'int',
+            'low': 1,
+            'high': 5
+        },
+        'n_shared': {
+            'type': 'int',
+            'low': 1,
+            'high': 5
+        },
     }
     return hyperparameter_space
 
@@ -222,6 +245,10 @@ def create_model(model_params):
             params.pop('patience')
         if 'max_epochs' in params:
             params.pop('max_epochs')
+        if 'batch_size' in params:
+            params.pop('batch_size')
+        if 'virtual_batch_size' in params:
+            params.pop('virtual_batch_size')
         model = TabNetClassifier(**params)
         return model
     except Exception as e:
@@ -235,6 +262,8 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     Returns the trained model and evaluation metrics after threshold optimization.
     """
     try:
+        # Ensure batch_size and virtual_batch_size are retrieved for fit method
+        batch_size_to_use = model_params.get('batch_size', 1024) # Default to base_params if not in specific run params
         model = create_model(model_params)
         # Convert to numpy arrays if needed
         if hasattr(X_train, 'values'):
@@ -245,17 +274,20 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
             X_eval = X_eval.values if hasattr(X_eval, 'values') else X_eval
             y_eval = y_eval.values if hasattr(y_eval, 'values') else y_eval
         # Combine training and testing data similar to xgboost_model.py
-        # X_combined = np.concatenate([X_train, X_test], axis=0)
-        # y_combined = np.concatenate([y_train, y_test], axis=0)
+        X_combined = np.concatenate([X_train, X_test], axis=0)
+        y_combined = np.concatenate([y_train, y_test], axis=0)
         
         # Use the class (not an instance) in the eval_metric list
         # TabNet will instantiate it internally
         model.fit(
-            X_train, y_train,
+            X_combined, y_combined,
             eval_set=[(X_eval, y_eval)],
-            eval_metric=['auc'],  # Pass the class here
+            eval_metric=model_params.get('eval_metric', 'auc'),  # Pass the class here
             max_epochs=model_params.get('max_epochs', 50),
             patience=model_params.get('patience', 10),
+            batch_size=batch_size_to_use, # <-- Pass batch_size to fit
+            virtual_batch_size=model_params.get('virtual_batch_size', 1024),
+            weights=1,
             drop_last=False
         )
         # Optimize threshold using shared utility
@@ -392,7 +424,7 @@ def hypertune_tabnet(experiment_name: str):
             mlflow.set_tags({
                 "model_type": "tabnet",
                 "training_mode": "global",
-                "cpu_only": True
+                "gpu_enabled": True
             })
             hyperparameter_space = load_hyperparameter_space()
             logger.info("Starting hyperparameter optimization for TabNet")
@@ -495,7 +527,7 @@ def log_to_mlflow(model, metrics, params, experiment_name):
 
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
-    Train XGBoost model with focus on precision target.
+    Train TabNet model with focus on precision target.
     
     Args:
         X_train: Training features
@@ -510,21 +542,22 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
     """
     try:        
         logger.info("Training model with precision target")
-        params = base_params.copy()
+        params = base_params.copy() # Inherits 'device_name': 'cuda'
+        # Specific parameters for this training run
         params.update({
-            'learning_rate': 0.006410351277717539,
-            'n_d': 11,
-            'n_a': 20,
-            'n_steps': 10,
-            'gamma': 1.0,
-            'lambda_sparse': 0.00011864928029354735,
-            'momentum': 0.99,
-            'patience': 14,
-            'max_epochs': 82,
-            'device_name': 'cpu',
+            'learning_rate': 0.012272866712824772,
+            'n_d': 56,
+            'n_a': 12, 
+            'n_steps': 15,
+            'gamma': 1.9500000000000002,
+            'lambda_sparse': 2.594352900973954e-07,
+            'momentum': 0.725,
+            'patience': 26,
+            'max_epochs': 160,
+            'batch_size': 2408,
+            'virtual_batch_size': 2679,
             'verbose': 0
         })
-        
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
         model, metrics = train_model(
@@ -533,12 +566,9 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
             X_eval, y_eval,
             params
             )
-            
         # Log to MLflow
         log_to_mlflow(model, metrics, params, experiment_name)
-        
-        return model, metrics
-            
+        return model, metrics 
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
