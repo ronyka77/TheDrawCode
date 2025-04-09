@@ -12,24 +12,15 @@ import gc
 import os
 import pickle
 import random
-import sys
 import time
 from datetime import datetime
-from pathlib import Path
 
 import mlflow
-
-# import mlflow.keras # Remove Keras logging
 import mlflow.pytorch  # Add PyTorch logging
 import numpy as np
-
-# -----------------------
 import optuna
 import pandas as pd
 
-# import tensorflow as tf  # Remove TensorFlow
-# from tensorflow import keras # Remove Keras
-# from tensorflow.keras import layers, regularizers, callbacks # Remove Keras
 # --- PyTorch Imports ---
 import torch
 import torch.nn as nn
@@ -39,24 +30,7 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader as TorchDataLoader  # Alias DataLoader
 from torch.utils.data import TensorDataset
 
-# from sklearn.neural_network import MLPClassifier # Remove sklearn MLP
-
-# Set project root (similar to xgboost_model.py)
-try:
-    project_root = Path(__file__).parent.parent.parent.parent.parent
-    if not project_root.exists():
-        project_root = Path(
-            r"\\\\".join(str(project_root).split("\\\\"))
-        )  # Use r-string or double backslashes
-    sys.path.append(str(project_root))
-    print(f"Project root mlp model: {project_root}")
-except Exception as e:
-    print(f"Error setting project root path: {e}")
-    # Fallback to current directory if path resolution fails
-    sys.path.append(os.getcwd().parent)  # Check this path, might need adjustment
-    print(f"Current directory mlp model: {os.getcwd().parent}")  # Check this path
-
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 experiment_name = "mlp_pytorch_soccer_prediction"  # Updated name
 logger = ExperimentLogger(experiment_name=experiment_name)
@@ -135,9 +109,6 @@ class SimpleMLP(nn.Module):
 
     def forward(self, x):
         return self.network(x)
-
-
-# ---------------------------
 
 
 def load_hyperparameter_space():

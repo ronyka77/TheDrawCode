@@ -10,10 +10,8 @@ The implementation focuses on high precision while maintaining a minimum recall 
 
 import os
 import random
-import sys
 import time
 from datetime import datetime
-from pathlib import Path
 
 import mlflow
 import numpy as np
@@ -21,31 +19,16 @@ import optuna
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
 
-# Add project root to Python path
-try:
-    project_root = Path(__file__).parent.parent.parent.parent.parent
-    if not project_root.exists():
-        # Handle network path by using raw string
-        project_root = Path(r"\\".join(str(project_root).split("\\")))
-    sys.path.append(str(project_root))
-    print(f"Project root: {project_root}")
-except Exception as e:
-    print(f"Error setting project root path: {e}")
-    # Fallback to current directory if path resolution fails
-    sys.path.append(os.getcwd())
-    print(f"Current directory: {os.getcwd()}")
-
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 experiment_name = "random_forest_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
-from utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
+from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
+from src.utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
 
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
-
-# Import shared utility functions
-from models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 
 # Global settings
 min_recall = 0.40  # Minimum acceptable recall
@@ -120,10 +103,8 @@ def load_hyperparameter_space_for_hpo():
 def create_model(model_params):
     """
     Create and configure RandomForest model instance.
-
     Args:
         model_params (dict): Model parameters
-
     Returns:
         RandomForestClassifier: Configured RandomForest model
     """
@@ -145,7 +126,6 @@ def create_model(model_params):
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
     Train a RandomForest model and optimize threshold.
-
     Args:
         X_train: Training features
         y_train: Training labels
@@ -154,7 +134,6 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         X_eval: Evaluation features
         y_eval: Evaluation labels
         model_params: Model parameters
-
     Returns:
         tuple: (trained_model, metrics)
     """
@@ -431,13 +410,11 @@ def hypertune_random_forest(experiment_name: str):
 def log_to_mlflow(model, metrics, params, experiment_name):
     """
     Log trained model, metrics, and parameters to MLflow.
-
     Args:
         model: Trained RandomForest model
         metrics: Model evaluation metrics
         params: Model parameters
         experiment_name: Experiment name
-
     Returns:
         str: Run ID
     """
@@ -490,7 +467,6 @@ def log_to_mlflow(model, metrics, params, experiment_name):
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
     Train RandomForest model with focus on precision target.
-
     Args:
         X_train: Training features
         y_train: Training labels
@@ -498,7 +474,6 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         y_test: Testing labels
         X_eval: Evaluation features
         y_eval: Evaluation labels
-
     Returns:
         tuple: (best_model, best_metrics)
     """
@@ -537,10 +512,7 @@ def main():
     """
     try:
         logger.info("Starting RandomForest model training")
-
         # Import data at runtime to avoid global scope issues
-        from models.StackedEnsemble.shared.data_loader import DataLoader
-
         global X_train, y_train, X_test, y_test, X_eval, y_eval
 
         # Load data

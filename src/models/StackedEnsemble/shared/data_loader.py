@@ -1,13 +1,14 @@
 """Data loading utilities for the stacked ensemble."""
 import numpy as np
 import pandas as pd
-from src.utils.logger import ExperimentLogger
 
 from src.utils.create_evaluation_set import (
     create_ensemble_evaluation_set,
     import_selected_features_ensemble,
-    import_training_data_ensemble
+    import_training_data_ensemble,
 )
+from src.utils.logger import ExperimentLogger
+
 
 class DataLoader:
     """Handles data loading and preprocessing for the ensemble models."""

@@ -296,14 +296,11 @@ def setup_mlflow_tracking(experiment_name: str) -> str:
 @retry_on_error(max_retries=3, delay=2.0)
 def sync_mlflow() -> None:
     """Synchronize MLflow data with shared storage.
-
     This function performs a two-way sync of MLflow data:
     1. Backs up local MLflow data to shared storage
     2. Syncs any updates from shared storage back to local
-
     This ensures consistency across different development environments
     and provides backup of experiment tracking data.
-
     Raises:
         ConnectionError: If shared storage is not accessible
         PermissionError: If lacking write permissions
@@ -1257,12 +1254,10 @@ def import_training_data_ensemble():
 def save_data_to_excel(df, output_path, type):
     """
     Save DataFrame to Excel using a memory-efficient approach.
-
     Args:
         df: DataFrame to save
         output_path: Path to save the Excel file
         type: Type of data being saved (for logging purposes)
-
     Returns:
         The original DataFrame
     """

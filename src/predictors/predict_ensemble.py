@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Suppress pandas chained assignment warnings
 pd.options.mode.chained_assignment = None  # default='warn'
 
-from utils.create_evaluation_set import (
+from src.utils.create_evaluation_set import (
     create_prediction_set_ensemble,
     get_real_api_scores_from_excel,
     setup_mlflow_tracking,
@@ -380,7 +380,6 @@ def main():
         "538f96a0c783429f9f2e6967cc4693a2",
         "1aec65aae580476b813fe97fee26e9e0",
         "355e5d963cf644debba80148a3fcd430",
-        "94b35c3a239f493880d6f35e4fde7035",
         "8872f92118a24521800d05c96d5e6f16",
         "ffacc3add86741a3a91f6115aae22b26",
         "c3c7d0788ef14f8da4ad02d709e2bca9",
@@ -404,7 +403,6 @@ def main():
 
     # Keep configuration to only allow predictions near specific thresholds
     keep_config = {
-        "ee17cebf244e473ba8e661bcdd442d50": {"keep_thresholds": [0.29, 0.31, 0.36]},
         "97207cdaab54477fa267d8cd29ce35e9": {"keep_thresholds": [0.31, 0.32, 0.34, 0.37]},
         "8d80522037ae4a9790b72129c06851a4": {"keep_thresholds": [0.47, 0.48]},
         "d3c066618b4d425fbb2ffff99a478238": {"keep_thresholds": [0.66, 0.68, 0.71, 0.72, 0.73]},

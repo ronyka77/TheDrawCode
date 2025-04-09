@@ -13,7 +13,7 @@ from mlflow.tracking import MlflowClient
 
 # Add project root to Python path
 try:
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).parent.parent.parent
     if not project_root.exists():
         # Handle network path by using raw string
         project_root = Path(r"\\".join(str(project_root).split("\\")))
