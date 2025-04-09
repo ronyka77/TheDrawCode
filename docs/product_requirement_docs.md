@@ -52,7 +52,7 @@ Betting applications and soccer analytical platforms require accurate prediction
 - **Operating System:** Windows 11
 - **Python Version:** 3.9+
 - **Key Dependencies:** LightGBM, XGBoost, scikit-learn, Optuna, MLflow, Pandas, NumPy
-- **Environment Management:** Use a Python virtual environment with dependencies installed using `pip install -r requirements.txt`.
+- **Environment Management:** Use a Python virtual environment managed by `uv`. Install dependencies from `pyproject.toml` using `make install` or `uv sync` / `uv pip install -e ".[dev]"`.
 
 ## 9. Future Enhancements
 - **Model Extensions:** Incorporate additional base models and explore deeper neural network architectures.

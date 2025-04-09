@@ -63,8 +63,8 @@ graph LR
 ## 4. Development Plan (Phased Approach)
 
 - **Phase 0: Setup & Backend Foundation**
-    - **[ ] Task 0.1:** Set up project structure (`/frontend`, `/backend`).
-    - **[ ] Task 0.2:** Initialize FastAPI backend: Basic app, `requirements.txt` (FastAPI, Uvicorn, etc.).
+    - **[ ] Task 0.1:** Set up project structure (`/frontend`, `/backend` - note: backend code might now live under `src/backend`).
+    - **[ ] Task 0.2:** Initialize FastAPI backend: Basic app, manage dependencies with `uv` and `pyproject.toml`.
     - **[ ] Task 0.3:** Define Pydantic models for configuration, training requests, results, predictions.
     - **[ ] Task 0.4:** Implement basic API endpoints (GET/PUT config, placeholder POST for training/predict).
     - **[ ] Task 0.5:** Set up basic WebSocket endpoint in FastAPI.

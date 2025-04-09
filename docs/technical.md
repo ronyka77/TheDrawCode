@@ -5,7 +5,9 @@ The Soccer Prediction Project is designed to predict soccer match draws and goal
 
 ## Development Environment
 - **Operating System:** Windows 11
-- **Python Version:** 3.9+
+- **Python Version:** >=3.9.19
+- **Package Manager:** uv
+- **Build Backend:** hatchling with uv-dynamic-versioning
 - **Hardware:** CPU-only (explicitly configured with tree_method='hist' for XGBoost and device='cpu' for all training tasks)
 - **Environment Variables:**
   - `PYTHONHASHSEED=19` (for reproducibility)
@@ -13,56 +15,60 @@ The Soccer Prediction Project is designed to predict soccer match draws and goal
   - `TF_ENABLE_ONEDNN_OPTS=0` (to disable oneDNN optimizations and ensure numerical consistency)
 
 ## Project Structure
-The project is organized into clearly defined modules:
+The project utilizes a standard `src` layout and includes the following key directories:
 
-- **/models:**
-  - Contains implementations of base machine learning models including those in `/models/StackedEnsemble` and `/models/ensemble`.
-  - Current implementation in `ensemble_model_0324.py` integrates XGBoost, TabNet, and LightGBM as primary models with RandomForest as the default extra model.
-  - Includes specialized modules for:
-    - Dynamic weighting (`weights.py`)
-    - Threshold optimization (`thresholds.py`)
-    - MLflow integration and model loading
+- **/src:** Contains the core Python package code.
+  - **/models:** Implementations of base ML models (`/models/StackedEnsemble`) and the ensemble logic (`/models/ensemble`).
+  - **/utils:** Utility functions for logging, MLflow, feature engineering, etc.
+  - **/predictors:** Prediction service logic.
+  - **/backend:** FastAPI backend code (if applicable).
+- **/docs:** Project documentation files (Markdown format).
+- **/devtools:** Helper scripts for development workflows (e.g., `lint.py`).
+- **/data:** Data files (raw, processed, prediction).
+- **/logs:** Application and experiment logs.
+- **/tests:** (Optional) Unit and integration tests.
+- **pyproject.toml:** Defines project metadata, dependencies, and tool configurations (build system, ruff, pytest, etc.).
+- **Makefile:** Provides shortcuts for common development tasks (install, lint, test, clean, build).
+- **mkdocs.yml:** Configuration file for the MkDocs documentation site.
 
-- **/utils:**
-  - Provides utility functions for logging (`logger.py`), MLflow integration (`mlflow_utils.py`), and feature engineering (`advanced_goal_features.py`).
-  - Supports data ingestion, preprocessing, and error monitoring.
+## Core Technologies and Dependencies
 
-- **/predictors:**
-  - Contains the prediction service (`predict_ensemble.py`) which deploys the final ensemble model for real-time predictions.
-
-## Key Technologies and Dependencies
-
-- **Machine Learning Libraries:** 
-  - XGBoost: Used with CPU-only settings (tree_method='hist', device='cpu')
-  - LightGBM: Configured with binary objective and optimal hyperparameters
-  - TabNet: Implemented via pytorch_tabnet.tab_model.TabNetClassifier 
-  - scikit-learn: For metrics, preprocessing, and model compatibility
-
-- **Experiment Tracking:** 
-  - MLflow for tracking experiments, logging parameters, metrics, and model registration
-  - Models are registered with timestamp-based naming (ensemble_YYYYMMDD_HHMM)
-
-- **Data Processing:** 
-  - Pandas and NumPy for data manipulation and vectorized operations
-  - Feature selection and validation for each base model
-
-- **Utilities:** 
-  - Joblib for model serialization
-  - Custom logging via `ExperimentLogger` in `/utils/logger.py`
-  - Precision-focused weighting and threshold optimization
+- **Package Management:**
+  - `uv`: Used for dependency management, installation, and virtual environments.
+- **Build System:**
+  - `hatchling`: Modern build backend used for creating distributable packages.
+  - `uv-dynamic-versioning`: Determines package version dynamically from Git tags.
+- **Linting & Formatting:**
+  - `ruff`: Fast linter and formatter used for maintaining code quality.
+  - `basedpyright`: (Optional, configured in pyproject.toml) Type checker.
+- **Testing Framework:**
+  - `pytest`: Used for running automated tests.
+- **Documentation:**
+  - `mkdocs`: Static site generator for project documentation.
+  - `mkdocs-material`: (Optional, configured in dev dependencies) Theme for MkDocs.
+- **Machine Learning Libraries:**
+  - XGBoost, LightGBM, TabNet, scikit-learn (configured as previously).
+- **Experiment Tracking:**
+  - MLflow (configured as previously).
+- **Data Processing:**
+  - Pandas and NumPy.
+- **Utilities:**
+  - Joblib, Custom logging (`ExperimentLogger`).
 
 ## Configuration and Environment Management
 
-- **Virtual Environment:** Use a Python virtual environment; install dependencies using `pip install -r requirements.txt`.
-- **Reproducibility:** Fixed seeds and controlled environment variables ensure consistency:
-  ```python
-  SEED = 19
-  os.environ["PYTHONHASHSEED"] = str(SEED)
-  random.seed(SEED)
-  np.random.seed(SEED)
-  torch.manual_seed(SEED)
-  torch.use_deterministic_algorithms(True)
-  ```
+- **Virtual Environment:** Managed using `uv`. Create/activate using standard `uv venv` commands.
+- **Installation:** Install dependencies using the `Makefile` command `make install` (which runs `uv sync --all-extras --dev`) or directly with `uv sync` / `uv pip install -e ".[dev]"`.
+- **Reproducibility:** Fixed seeds and controlled environment variables ensure consistency (settings remain the same).
+
+## Development Workflow
+
+Common tasks are automated via the `Makefile`:
+- `make install`: Set up the environment and install dependencies.
+- `make lint`: Run `ruff` checks and formatting (via `devtools/lint.py`).
+- `make test`: Run automated tests using `pytest` (via `uv run pytest`).
+- `make clean`: Remove build artifacts and cache directories.
+- `make build`: Build the package distribution files.
 
 ## MLflow Integration
 
@@ -85,7 +91,7 @@ The project is organized into clearly defined modules:
 ## Testing and Reproducibility
 
 - **Reproducible Results:** Fixed seeds and deterministic operations are enforced to maintain consistency across runs.
-- **Testing:** Unit tests and integration tests are set up for critical components. Execute tests via `python -m pytest python_tests/` to ensure that all functionality performs as expected.
+- **Testing:** Execute tests using `make test` or `uv run pytest`.
 
 ## Future Enhancements and Optimizations
 
@@ -95,10 +101,11 @@ The project is organized into clearly defined modules:
 
 ## Model Execution
 
-To run the ensemble model:
+To run the ensemble model (note the path change due to `src` layout):
 
-```python
-python -m models.ensemble.run_ensemble --extra_model random_forest --meta_learner_type lgb --target_precision 0.5 --required_recall 0.25
+```bash
+# Ensure you are in the project root directory (TheDrawCode)
+python -m src.models.ensemble.run_ensemble --extra_model random_forest --meta_learner_type lgb --target_precision 0.5 --required_recall 0.25
 ```
 
 This documentation serves as a comprehensive guide to the technical implementation of the Soccer Prediction Project.

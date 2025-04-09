@@ -8,10 +8,10 @@ This document provides a detailed overview of the ensemble model used in the Soc
 
 The ensemble model is primarily implemented in the following files:
 
-- `models/ensemble/ensemble_model_0324.py`: Contains the core `EnsembleModel` class, which defines the ensemble architecture, base model configuration, and meta-feature generation.
-- `models/ensemble/run_ensemble.py`: Orchestrates the end-to-end process of data loading, model training, evaluation, and MLflow integration for model tracking and registration.
-- `models/ensemble/weights.py`: Implements dynamic weighting algorithms with precision-focused calculations.
-- `models/ensemble/thresholds.py`: Provides optimized threshold tuning functions to balance precision and recall.
+- `src/models/ensemble/ensemble_model.py`: Contains the core `EnsembleModel` class, which defines the ensemble architecture, base model configuration, and meta-feature generation. (Note: filename might differ, e.g., `ensemble_model_0404.py`)
+- `src/models/ensemble/run_ensemble.py`: Orchestrates the end-to-end process of data loading, model training, evaluation, and MLflow integration for model tracking and registration.
+- `src/models/ensemble/weights.py`: Implements dynamic weighting algorithms with precision-focused calculations.
+- `src/models/ensemble/thresholds.py`: Provides optimized threshold tuning functions to balance precision and recall.
 
 ## Base Models
 
