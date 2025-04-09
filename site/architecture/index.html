@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        <meta name="author" content="Richard Szita">
+        
+        <link rel="shortcut icon" href="../img/favicon.ico">
+        <title>Soccer Prediction Project Architecture - TheDrawCode</title>
+        <link href="../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../css/brands.min.css" rel="stylesheet">
+        <link href="../css/solid.min.css" rel="stylesheet">
+        <link href="../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="..">TheDrawCode</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../index.md" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/product_requirement_docs.md" class="nav-link">Project Requirements</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/architecture.md" class="nav-link">Architecture</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/technical.md" class="nav-link">Technical Details</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/plan_ui.md" class="nav-link">UI Planning</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/ensemble_model_documentation.md" class="nav-link">Ensemble Model</a>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/ronyka77/TheDrawCode/edit/main/docs/architecture.md" class="nav-link">Edit on ronyka77/TheDrawCode
+                                    </a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#soccer-prediction-project-architecture" class="nav-link">Soccer Prediction Project Architecture</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#architecture-diagram" class="nav-link">Architecture Diagram</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#system-components" class="nav-link">System Components</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#data-flow-process-overview" class="nav-link">Data Flow &amp; Process Overview</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#future-enhancements" class="nav-link">Future Enhancements</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="soccer-prediction-project-architecture">Soccer Prediction Project Architecture</h1>
+<p>This document outlines the system architecture for the Soccer Prediction Project. The project aims to accurately predict soccer match draws and goal patterns using an ensemble of machine learning models, optimized for high precision. The system is designed for CPU-only environments and leverages MLflow for experiment tracking and hyperparameter optimization.</p>
+<h2 id="architecture-diagram">Architecture Diagram</h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>graph TD;
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    A[Data Ingestion &amp; Preprocessing] --&gt; B[Feature Engineering];
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    B --&gt; C[Base Model Training];
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    C --&gt; D[Hyperparameter Tuning &amp; Optimization];
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    D --&gt; E[Ensemble Learning];
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    E --&gt; F[Threshold Optimization];
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    F --&gt; G[Prediction Service];
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    subgraph Utilities
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>      H[MLflow Tracking &amp; Logging]
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>      I[Dynamic Sampling &amp; Feature Selection]
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>      J[Precision-Focused Weighting]
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    end
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    B --&gt; I;
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    D --&gt; H;
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    G --&gt; H;
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    E --&gt; J;
+</span></code></pre></div>
+<h2 id="system-components">System Components</h2>
+<ul>
+<li>
+<p><strong>Data Ingestion &amp; Preprocessing:</strong><br />
+  Data is loaded, cleaned, and validated using utilities in the <code>/utils</code> folder. This stage prepares the dataset for training by ensuring quality and proper formatting.</p>
+</li>
+<li>
+<p><strong>Feature Engineering:</strong><br />
+  Custom feature engineering is implemented in  <code>/utils/advanced_goal_features.py</code> to extract soccer-specific insights.</p>
+</li>
+<li>
+<p><strong>Base Model Training:</strong><br />
+  Base models, including <strong>XGBoost</strong>, <strong>TabNet</strong>, and <strong>LightGBM</strong>, are implemented in the <code>/models/StackedEnsemble</code> and <code>/models/ensemble</code> directories. The ensemble pipeline trains these as core models. <strong>TabNet</strong> is integrated via <code>pytorch_tabnet.tab_model.TabNetClassifier</code> with parameters tuned for high precision (learning_rate=0.02196, n_d=11, n_a=16, n_steps=9, gamma=1.8, lambda_sparse=2.48893e-05, momentum=0.95, mask_type='entmax').</p>
+</li>
+<li>
+<p><strong>Extra Model Options:</strong><br />
+  Additional models such as <strong>CatBoost</strong>, <strong>RandomForest</strong>, <strong>SVM</strong>, and <strong>MLP</strong> are available as extra model options. Random Forest is currently being used as the default extra model option.</p>
+</li>
+<li>
+<p><strong>Hyperparameter Tuning &amp; Optimization:</strong><br />
+  Hyperparameter tuning is performed using Optuna with persistent storage (e.g., SQLite via <code>optuna_lightgbm.db</code>).</p>
+</li>
+<li>
+<p><strong>Ensemble Learning:</strong><br />
+  The ensemble model integrates multiple base models using dynamic weighting based on model performance. The system implements precision-focused weighting through the <code>compute_precision_focused_weights_optimized</code> function, which prioritizes models with higher precision while maintaining minimum recall thresholds.</p>
+</li>
+<li>
+<p><strong>Threshold Optimization:</strong><br />
+  Post-training threshold tuning is performed through <code>tune_threshold_for_precision_optimized</code>, which balances precision and recall with configurable targets (default target precision of 50% and minimum recall of 25%). The system supports both individual model thresholding and global ensemble thresholding.</p>
+</li>
+<li>
+<p><strong>Prediction Service:</strong><br />
+  The final ensemble model is deployed via the prediction service found in <code>/predictors/predict_ensemble.py</code>, which serves prediction requests in real-time. The model is registered in MLflow with timestamp-based naming following the format <code>ensemble_YYYYMMDD_HHMM</code>.</p>
+</li>
+<li>
+<p><strong>Utilities:</strong><br />
+  MLflow is used for experiment tracking, model registration, and logging, with additional utilities for dynamic feature selection, error monitoring, and precision filtering.</p>
+</li>
+</ul>
+<h2 id="data-flow-process-overview">Data Flow &amp; Process Overview</h2>
+<ol>
+<li>The system ingests raw soccer match data.</li>
+<li>Features are engineered and selected based on domain knowledge.</li>
+<li>Multiple base models are trained and tuned.</li>
+<li>An ensemble method combines the predictions from these models using precision-focused dynamic weighting.</li>
+<li>Optimization of decision thresholds is carried out to meet target precision (≥50%) and recall (≥25%).</li>
+<li>Predictions are served via a dedicated prediction service with MLflow model registry integration.</li>
+<li>Detailed logs and metrics are tracked using MLflow for reproducibility and analysis.</li>
+</ol>
+<h2 id="future-enhancements">Future Enhancements</h2>
+<ul>
+<li>Integration of additional base models and deeper neural network architectures.</li>
+<li>Extended support for GPU-based training in future releases.</li>
+<li>Enhanced data validation and anomaly detection in the preprocessing stage.</li>
+</ul>
+<p>By following this architecture, the Soccer Prediction Project ensures high-precision predictions with robust error handling and experiment tracking, making it a valuable tool for soccer analytics and betting applications.</p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+                <p>Copyright &copy; 2025 Richard Szita</p>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../js/base.js"></script>
+        <script src="../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

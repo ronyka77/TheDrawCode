@@ -119,3 +119,7 @@ AI_instuctions.md
 data/api_training_final_0325.xlsx
 optuna_lightgbm.db-journal
 data/Create_data/api-football/venues.xlsx
+src/TheDrawCode.egg-info/
+discretizer.pkl
+scaler_sklearn.pkl
+scaler_robust.pkl

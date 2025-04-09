@@ -9,4 +9,4 @@ __all__ = [
     "TrainingResults",
     "PredictionInput",
     "PredictionOutput",
-] 
+]

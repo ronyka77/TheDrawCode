@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        <meta name="author" content="Richard Szita">
+        
+        <link rel="shortcut icon" href="../img/favicon.ico">
+        <title>Soccer Prediction Project Technical Documentation - TheDrawCode</title>
+        <link href="../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../css/brands.min.css" rel="stylesheet">
+        <link href="../css/solid.min.css" rel="stylesheet">
+        <link href="../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="..">TheDrawCode</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../index.md" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/product_requirement_docs.md" class="nav-link">Project Requirements</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/architecture.md" class="nav-link">Architecture</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/technical.md" class="nav-link">Technical Details</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/plan_ui.md" class="nav-link">UI Planning</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/ensemble_model_documentation.md" class="nav-link">Ensemble Model</a>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/ronyka77/TheDrawCode/edit/main/docs/technical.md" class="nav-link">Edit on ronyka77/TheDrawCode
+                                    </a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#soccer-prediction-project-technical-documentation" class="nav-link">Soccer Prediction Project Technical Documentation</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#overview" class="nav-link">Overview</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#development-environment" class="nav-link">Development Environment</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#project-structure" class="nav-link">Project Structure</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#key-technologies-and-dependencies" class="nav-link">Key Technologies and Dependencies</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#configuration-and-environment-management" class="nav-link">Configuration and Environment Management</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#mlflow-integration" class="nav-link">MLflow Integration</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#precision-focused-weighting-and-threshold-optimization" class="nav-link">Precision-Focused Weighting and Threshold Optimization</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#testing-and-reproducibility" class="nav-link">Testing and Reproducibility</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#future-enhancements-and-optimizations" class="nav-link">Future Enhancements and Optimizations</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#model-execution" class="nav-link">Model Execution</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="soccer-prediction-project-technical-documentation">Soccer Prediction Project Technical Documentation</h1>
+<h2 id="overview">Overview</h2>
+<p>The Soccer Prediction Project is designed to predict soccer match draws and goal patterns using an ensemble of machine learning models. The system is optimized for CPU-only environments, ensuring high-precision model predictions with robust experiment tracking via MLflow.</p>
+<h2 id="development-environment">Development Environment</h2>
+<ul>
+<li><strong>Operating System:</strong> Windows 11</li>
+<li><strong>Python Version:</strong> 3.9+</li>
+<li><strong>Hardware:</strong> CPU-only (explicitly configured with tree_method='hist' for XGBoost and device='cpu' for all training tasks)</li>
+<li><strong>Environment Variables:</strong></li>
+<li><code>PYTHONHASHSEED=19</code> (for reproducibility)</li>
+<li><code>OMP_NUM_THREADS=4</code>, <code>MKL_NUM_THREADS=4</code>, <code>OPENBLAS_NUM_THREADS=4</code> (for parallel computations)</li>
+<li><code>TF_ENABLE_ONEDNN_OPTS=0</code> (to disable oneDNN optimizations and ensure numerical consistency)</li>
+</ul>
+<h2 id="project-structure">Project Structure</h2>
+<p>The project is organized into clearly defined modules:</p>
+<ul>
+<li><strong>/models:</strong></li>
+<li>Contains implementations of base machine learning models including those in <code>/models/StackedEnsemble</code> and <code>/models/ensemble</code>.</li>
+<li>Current implementation in <code>ensemble_model_0324.py</code> integrates XGBoost, TabNet, and LightGBM as primary models with RandomForest as the default extra model.</li>
+<li>
+<p>Includes specialized modules for:</p>
+<ul>
+<li>Dynamic weighting (<code>weights.py</code>)</li>
+<li>Threshold optimization (<code>thresholds.py</code>)</li>
+<li>MLflow integration and model loading</li>
+</ul>
+</li>
+<li>
+<p><strong>/utils:</strong></p>
+</li>
+<li>Provides utility functions for logging (<code>logger.py</code>), MLflow integration (<code>mlflow_utils.py</code>), and feature engineering (<code>advanced_goal_features.py</code>).</li>
+<li>
+<p>Supports data ingestion, preprocessing, and error monitoring.</p>
+</li>
+<li>
+<p><strong>/predictors:</strong></p>
+</li>
+<li>Contains the prediction service (<code>predict_ensemble.py</code>) which deploys the final ensemble model for real-time predictions.</li>
+</ul>
+<h2 id="key-technologies-and-dependencies">Key Technologies and Dependencies</h2>
+<ul>
+<li><strong>Machine Learning Libraries:</strong> </li>
+<li>XGBoost: Used with CPU-only settings (tree_method='hist', device='cpu')</li>
+<li>LightGBM: Configured with binary objective and optimal hyperparameters</li>
+<li>TabNet: Implemented via pytorch_tabnet.tab_model.TabNetClassifier </li>
+<li>
+<p>scikit-learn: For metrics, preprocessing, and model compatibility</p>
+</li>
+<li>
+<p><strong>Experiment Tracking:</strong> </p>
+</li>
+<li>MLflow for tracking experiments, logging parameters, metrics, and model registration</li>
+<li>
+<p>Models are registered with timestamp-based naming (ensemble_YYYYMMDD_HHMM)</p>
+</li>
+<li>
+<p><strong>Data Processing:</strong> </p>
+</li>
+<li>Pandas and NumPy for data manipulation and vectorized operations</li>
+<li>
+<p>Feature selection and validation for each base model</p>
+</li>
+<li>
+<p><strong>Utilities:</strong> </p>
+</li>
+<li>Joblib for model serialization</li>
+<li>Custom logging via <code>ExperimentLogger</code> in <code>/utils/logger.py</code></li>
+<li>Precision-focused weighting and threshold optimization</li>
+</ul>
+<h2 id="configuration-and-environment-management">Configuration and Environment Management</h2>
+<ul>
+<li><strong>Virtual Environment:</strong> Use a Python virtual environment; install dependencies using <code>pip install -r requirements.txt</code>.</li>
+<li><strong>Reproducibility:</strong> Fixed seeds and controlled environment variables ensure consistency:
+  <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">SEED</span> <span class="o">=</span> <span class="mi">19</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;PYTHONHASHSEED&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">SEED</span><span class="p">)</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">SEED</span><span class="p">)</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">SEED</span><span class="p">)</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">torch</span><span class="o">.</span><span class="n">manual_seed</span><span class="p">(</span><span class="n">SEED</span><span class="p">)</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">torch</span><span class="o">.</span><span class="n">use_deterministic_algorithms</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+</span></code></pre></div></li>
+</ul>
+<h2 id="mlflow-integration">MLflow Integration</h2>
+<ul>
+<li>Experiments are tracked with MLflow, with models registered using timestamp-based registry names.</li>
+<li>Parameters, metrics, and artifacts (including feature importance and analysis reports) are logged for reproducibility.</li>
+<li>Base models are loaded from MLflow with specific run IDs:
+  <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="bp">self</span><span class="o">.</span><span class="n">xgb_run_id</span> <span class="o">=</span> <span class="s1">&#39;30402608b8dc4c899d675e5b56c48c01&#39;</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="bp">self</span><span class="o">.</span><span class="n">lgb_run_id</span> <span class="o">=</span> <span class="s1">&#39;8312e6c4f0184ed9afb56f87c10f45a0&#39;</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="bp">self</span><span class="o">.</span><span class="n">tabnet_run_id</span> <span class="o">=</span> <span class="s1">&#39;46e86bfb663e4548a1a91360f9827de7&#39;</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="bp">self</span><span class="o">.</span><span class="n">rf_run_id</span> <span class="o">=</span> <span class="s1">&#39;cbfda1f197654fd2bdcb610a73cf8fad&#39;</span>
+</span></code></pre></div></li>
+</ul>
+<h2 id="precision-focused-weighting-and-threshold-optimization">Precision-Focused Weighting and Threshold Optimization</h2>
+<ul>
+<li><strong>Dynamic Weighting:</strong> The system calculates weights for each base model based on validation performance, focusing on precision.</li>
+<li><strong>Threshold Optimization:</strong> Thresholds are tuned to achieve a target precision (≥50%) while maintaining minimum recall requirements (≥25%).</li>
+<li><strong>Vectorized Operations:</strong> Performance-optimized functions use vectorized operations for efficiency.</li>
+</ul>
+<h2 id="testing-and-reproducibility">Testing and Reproducibility</h2>
+<ul>
+<li><strong>Reproducible Results:</strong> Fixed seeds and deterministic operations are enforced to maintain consistency across runs.</li>
+<li><strong>Testing:</strong> Unit tests and integration tests are set up for critical components. Execute tests via <code>python -m pytest python_tests/</code> to ensure that all functionality performs as expected.</li>
+</ul>
+<h2 id="future-enhancements-and-optimizations">Future Enhancements and Optimizations</h2>
+<ul>
+<li><strong>Model Extensions:</strong> Integration of additional base models and exploration of deeper neural network architectures.</li>
+<li><strong>GPU Support:</strong> While currently optimized for CPU, future updates may incorporate GPU-based training.</li>
+<li><strong>Data Validation:</strong> Continued improvements to data ingestion and anomaly detection mechanisms in the preprocessing pipeline.</li>
+</ul>
+<h2 id="model-execution">Model Execution</h2>
+<p>To run the ensemble model:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">models</span><span class="o">.</span><span class="n">ensemble</span><span class="o">.</span><span class="n">run_ensemble</span> <span class="o">--</span><span class="n">extra_model</span> <span class="n">random_forest</span> <span class="o">--</span><span class="n">meta_learner_type</span> <span class="n">lgb</span> <span class="o">--</span><span class="n">target_precision</span> <span class="mf">0.5</span> <span class="o">--</span><span class="n">required_recall</span> <span class="mf">0.25</span>
+</span></code></pre></div>
+<p>This documentation serves as a comprehensive guide to the technical implementation of the Soccer Prediction Project.</p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+                <p>Copyright &copy; 2025 Richard Szita</p>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../js/base.js"></script>
+        <script src="../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

@@ -1,14 +1,15 @@
-import pandas as pd
-import numpy as np
 import os
-from sklearn.model_selection import train_test_split
-import mlflow
 import sys
-from typing import Dict, Any, List, Tuple, Optional
-from pathlib import Path
-from pymongo import MongoClient
 import time
 from functools import wraps
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+from pymongo import MongoClient
+from sklearn.model_selection import train_test_split
+
 
 # Error codes for standardized logging
 class DataProcessingError:
@@ -16,20 +17,21 @@ class DataProcessingError:
     FILE_NOT_FOUND = "E001"
     FILE_PERMISSION_ERROR = "E002"
     FILE_CORRUPTED = "E003"
-    
+
     # Data validation
     MISSING_REQUIRED_COLUMNS = "E101"
     INVALID_DATA_TYPE = "E102"
     NUMERIC_CONVERSION_FAILED = "E103"
-    
+
     # Data processing
     EMPTY_DATASET = "E201"
     INSUFFICIENT_SAMPLES = "E202"
     FEATURE_CREATION_FAILED = "E203"
-    
+
     # External services
     MONGODB_CONNECTION_ERROR = "E301"
     MLFLOW_ERROR = "E302"
+
 
 # Retry decorator for file operations
 def retry_on_error(max_retries: int = 3, delay: float = 1.0):
@@ -46,11 +48,15 @@ def retry_on_error(max_retries: int = 3, delay: float = 1.0):
                         time.sleep(delay * (attempt + 1))
                     continue
             raise last_error
+
         return wrapper
+
     return decorator
+
 
 # Initialize logger
 from utils.logger import ExperimentLogger
+
 logger = ExperimentLogger()
 
 # Add project root to Python path
@@ -62,21 +68,25 @@ try:
     sys.path.append(str(project_root))
     logger.info(f"Project root create_evaluation_set: {project_root}")
 except Exception as e:
-    logger.error(f"Error setting project root path: {str(e)}", error_code=DataProcessingError.FILE_PERMISSION_ERROR)
+    logger.error(
+        f"Error setting project root path: {str(e)}",
+        error_code=DataProcessingError.FILE_PERMISSION_ERROR,
+    )
     # Fallback to current directory if path resolution fails
     sys.path.append(os.getcwd().parent)
     logger.info(f"Fallback to current directory: {os.getcwd().parent}")
 
 from utils.advanced_goal_features import AdvancedGoalFeatureEngineer
-from utils.mlflow_utils import MLFlowConfig, MLFlowManager
+from utils.mlflow_utils import MLFlowManager
 
 
 def convert_numeric_columns(
     data: pd.DataFrame,
-    columns: Optional[List[str]] = None,
+    columns: Optional[list[str]] = None,
     drop_errors: bool = True,
     fill_value: float = 0.0,
-    verbose: bool = True) -> pd.DataFrame:
+    verbose: bool = True,
+) -> pd.DataFrame:
     """Convert specified columns to numeric type with comprehensive error handling.
 
     This function handles various string-to-numeric conversions including:
@@ -109,15 +119,15 @@ def convert_numeric_columns(
     """
     # Create a copy of the input DataFrame
     df = data.copy()
-    
+
     # If no columns specified, use all columns
     if columns is None:
         columns = df.columns.tolist()
-    
+
     # Track problematic columns
     failed_columns = []
     columns_to_drop = []
-    
+
     # Process each column
     for col in columns:
         try:
@@ -125,11 +135,9 @@ def convert_numeric_columns(
                 # First check if the column has any potential numeric values
                 original_series = df[col].astype(str)
                 has_potential_numbers = original_series.str.contains(
-                    r'[0-9]|inf|-inf',
-                    case=False,
-                    regex=True
+                    r"[0-9]|inf|-inf", case=False, regex=True
                 ).any()
-                
+
                 if not has_potential_numbers:
                     if verbose:
                         print(f"Column {col} contains no numeric values")
@@ -137,27 +145,41 @@ def convert_numeric_columns(
                     if drop_errors:
                         columns_to_drop.append(col)
                     continue
-                
+
                 # Replace commas with dots (only if comma is used as decimal separator)
-                df[col] = df[col].astype(str).apply(
-                    lambda x: x.replace(',', '.') if x.count(',') == 1 and x.count('.') == 0 else x
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .apply(
+                        lambda x: x.replace(",", ".")
+                        if x.count(",") == 1 and x.count(".") == 0
+                        else x
+                    )
                 )
-                
+
                 # Convert to string first to handle all cases
                 series = (
                     df[col]
                     .apply(lambda x: str(x) if pd.notnull(x) else str(fill_value))
                     .str.strip()  # Remove leading/trailing whitespace
                     .str.strip("'\"")  # Remove quotes
-                    .str.replace('[^0-9.eE-]', '', regex=True)  # Keep only numeric chars
-                    .apply(lambda x: str(fill_value) if x in ['', 'e', 'e-', 'e+'] else x)  # Handle empty and bare 'e'
-                    .apply(lambda x: '1' + x if x.lower().startswith(('e', 'e-', 'e+')) else x)  # Fix sci notation
-                    .apply(lambda x: x.replace('-', 'e-', 1) if '-' in x and 'e' not in x.lower() else x)  # Handle negatives
+                    .str.replace("[^0-9.eE-]", "", regex=True)  # Keep only numeric chars
+                    .apply(
+                        lambda x: str(fill_value) if x in ["", "e", "e-", "e+"] else x
+                    )  # Handle empty and bare 'e'
+                    .apply(
+                        lambda x: "1" + x if x.lower().startswith(("e", "e-", "e+")) else x
+                    )  # Fix sci notation
+                    .apply(
+                        lambda x: x.replace("-", "e-", 1)
+                        if "-" in x and "e" not in x.lower()
+                        else x
+                    )  # Handle negatives
                 )
-                
+
                 # Try converting to numeric
-                numeric_series = pd.to_numeric(series, errors='coerce')
-                
+                numeric_series = pd.to_numeric(series, errors="coerce")
+
                 # Check if conversion was successful
                 if numeric_series.isna().all():
                     if verbose:
@@ -166,32 +188,32 @@ def convert_numeric_columns(
                     if drop_errors:
                         columns_to_drop.append(col)
                     continue
-                
+
                 # Apply the conversion
                 df[col] = numeric_series.replace([np.inf, -np.inf], fill_value).fillna(fill_value)
-                
+
                 if verbose and df[col].isna().any():
                     print(f"Warning: Column {col} contains NaN values after conversion")
-                    
+
         except Exception as e:
             if verbose:
                 print(f"Error converting column {col}: {str(e)}")
             failed_columns.append(col)
             if drop_errors:
                 columns_to_drop.append(col)
-    
+
     # Drop failed columns at the end
     if drop_errors and columns_to_drop:
-        df = df.drop(columns=columns_to_drop, errors='ignore')
+        df = df.drop(columns=columns_to_drop, errors="ignore")
         if verbose:
             print(f"Dropped columns: {columns_to_drop}")
-    
+
     if verbose and failed_columns:
-        print(f"\nConversion summary:")
+        print("\nConversion summary:")
         print(f"Failed columns: {failed_columns}")
         print(f"Successfully converted: {len(columns) - len(failed_columns)} columns")
         print(f"Failed conversions: {len(failed_columns)} columns")
-    
+
     return df
 
 
@@ -216,30 +238,26 @@ def setup_mlflow_tracking(experiment_name: str) -> str:
         Exception: For other MLflow-related errors
     """
     logger.info(f"Setting up MLflow tracking for experiment: {experiment_name}")
-    
+
     try:
         mlflow_manager = MLFlowManager()
         mlflow_manager.setup_experiment(experiment_name)
         logger.info(f"MLflow tracking configured successfully at: {mlflow_manager.mlruns_dir}")
         return mlflow_manager.mlruns_dir
-        
+
     except ConnectionError as e:
         logger.error(
-            f"MLflow connection error: {str(e)}",
-            error_code=DataProcessingError.MLFLOW_ERROR
+            f"MLflow connection error: {str(e)}", error_code=DataProcessingError.MLFLOW_ERROR
         )
         raise
     except ValueError as e:
         logger.error(
             f"Invalid experiment configuration: {str(e)}",
-            error_code=DataProcessingError.MLFLOW_ERROR
+            error_code=DataProcessingError.MLFLOW_ERROR,
         )
         raise
     except Exception as e:
-        logger.error(
-            f"MLflow setup error: {str(e)}",
-            error_code=DataProcessingError.MLFLOW_ERROR
-        )
+        logger.error(f"MLflow setup error: {str(e)}", error_code=DataProcessingError.MLFLOW_ERROR)
         raise
 
 
@@ -260,38 +278,36 @@ def sync_mlflow() -> None:
         Exception: For other sync-related errors
     """
     logger.info("Starting MLflow data synchronization")
-    
+
     try:
         mlflow_manager = MLFlowManager()
-        
+
         # Backup to shared storage
         logger.info("Backing up MLflow data to shared storage")
         mlflow_manager.backup_to_shared()
-        
+
         # Sync from shared storage
         logger.info("Syncing from shared storage")
         mlflow_manager.sync_with_shared()
-        
+
         logger.info("MLflow synchronization completed successfully")
-        
+
     except ConnectionError as e:
         logger.error(
             f"Shared storage connection error: {str(e)}",
-            error_code=DataProcessingError.MLFLOW_ERROR
+            error_code=DataProcessingError.MLFLOW_ERROR,
         )
         raise
     except PermissionError as e:
         logger.error(
             f"Permission denied accessing shared storage: {str(e)}",
-            error_code=DataProcessingError.FILE_PERMISSION_ERROR
+            error_code=DataProcessingError.FILE_PERMISSION_ERROR,
         )
         raise
     except Exception as e:
-        logger.error(
-            f"MLflow sync error: {str(e)}",
-            error_code=DataProcessingError.MLFLOW_ERROR
-        )
+        logger.error(f"MLflow sync error: {str(e)}", error_code=DataProcessingError.MLFLOW_ERROR)
         raise
+
 
 # GET TRAINING DATA FOR DRAWS
 def create_evaluation_sets():
@@ -311,38 +327,36 @@ def create_evaluation_sets():
     # Load data from the Excel file
     data = pd.read_excel(file_path)
     # Filter data where 'score' is not NA
-    data = data.dropna(subset=['score'])
-    selected_columns = get_selected_columns()
-    data['is_draw'] = data['is_draw'].astype(int)
+    data = data.dropna(subset=["score"])
+    selected_columns = get_selected_columns_draws()
+    data["is_draw"] = data["is_draw"].astype(int)
     # Ensure 'date_encoded' column exists
-    if 'date_encoded' not in data.columns:
+    if "date_encoded" not in data.columns:
         # Define the reference date
-        reference_date = pd.Timestamp('2020-08-11')
+        reference_date = pd.Timestamp("2020-08-11")
 
         # Calculate 'date_encoded' as days since the reference date
-        data['date_encoded'] = (
-            pd.to_datetime(
-                data['Datum']) -
-            reference_date).dt.days
+        data["date_encoded"] = (pd.to_datetime(data["Datum"]) - reference_date).dt.days
     # Separate features and target
     X = data[selected_columns]
     y = data[target_column]
     # Start of Selection
     # Replace comma with dot for ALL numeric-like columns
     for col in X.columns:
-        if X[col].dtype == 'object':
+        if X[col].dtype == "object":
             try:
                 X.loc[:, col] = (
-                    X[col].astype(str)
+                    X[col]
+                    .astype(str)
                     .str.strip()  # Remove leading/trailing whitespace
                     .str.strip("'\"")  # Remove quotes
-                    .str.replace(' ', '')  # Remove any spaces
-                    .str.replace(',', '.')  # Replace comma with dot
+                    .str.replace(" ", "")  # Remove any spaces
+                    .str.replace(",", ".")  # Replace comma with dot
                     .astype(float)  # Convert to float
                 )
             except (AttributeError, ValueError) as e:
                 print(f"Could not convert column {col}: {str(e)}")
-                data = data.drop(columns=[col], errors='ignore')
+                data = data.drop(columns=[col], errors="ignore")
                 continue
 
     return X, y
@@ -354,10 +368,10 @@ def import_training_data_draws():
     data = pd.read_excel(data_path)
 
     # Create target variable
-    data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+    data["is_draw"] = (data["match_outcome"] == 2).astype(int)
 
     # Get selected columns
-    selected_columns = get_selected_columns()
+    selected_columns = get_selected_columns_draws()
 
     # Replace inf and nan values
     data = data.replace([np.inf, -np.inf], 0)
@@ -368,13 +382,16 @@ def import_training_data_draws():
         if not np.issubdtype(data[col].dtype, np.number):
             try:
                 # Convert string numbers with either dots or commas
-                data[col] = (data[col].astype(str)
-                             .str.strip()
-                             .str.strip("'\"")
-                             .str.replace(' ', '')
-                             .str.replace(',', '.')
-                             .replace('', '0')  # Replace empty strings with 0
-                             .astype(float))
+                data[col] = (
+                    data[col]
+                    .astype(str)
+                    .str.strip()
+                    .str.strip("'\"")
+                    .str.replace(" ", "")
+                    .str.replace(",", ".")
+                    .replace("", "0")  # Replace empty strings with 0
+                    .astype(float)
+                )
             except (ValueError, AttributeError) as e:
                 print(f"Could not convert column {col}: {str(e)}")
                 if col in selected_columns:
@@ -383,29 +400,24 @@ def import_training_data_draws():
 
     # Verify all selected columns are numeric
     for col in selected_columns:
-        if data[col].dtype == 'object':
-            print(
-                f"Warning: Column {col} is still object type after conversion")
+        if data[col].dtype == "object":
+            print(f"Warning: Column {col} is still object type after conversion")
             selected_columns.remove(col)
 
     # Split into train and test sets
     train_data, test_data = train_test_split(
-        data,
-        test_size=0.2,
-        random_state=42,
-        stratify=data['is_draw']
+        data, test_size=0.2, random_state=42, stratify=data["is_draw"]
     )
 
     # Select features and target
     X_train = train_data[selected_columns]
-    y_train = train_data['is_draw']
+    y_train = train_data["is_draw"]
     X_test = test_data[selected_columns]
-    y_test = test_data['is_draw']
+    y_test = test_data["is_draw"]
 
     # Final verification of data types
-    assert all(X_train.dtypes !=
-               'object'), "Training data contains object columns"
-    assert all(X_test.dtypes != 'object'), "Test data contains object columns"
+    assert all(X_train.dtypes != "object"), "Training data contains object columns"
+    assert all(X_test.dtypes != "object"), "Test data contains object columns"
 
     return X_train, y_train, X_test, y_test
 
@@ -457,12 +469,12 @@ def update_prediction_data():
 
         # Merge only new columns from updated_data with eval_data
         new_columns = [
-            col for col in eval_data.columns if col not in updated_data.columns and col != 'running_id']
+            col
+            for col in eval_data.columns
+            if col not in updated_data.columns and col != "running_id"
+        ]
         merged_data = pd.merge(
-            updated_data,
-            eval_data[['running_id'] + new_columns],
-            on='running_id',
-            how='left'
+            updated_data, eval_data[["running_id"] + new_columns], on="running_id", how="left"
         )
         print(f"merged_data shape: {merged_data.shape}")
         merged_data.to_excel(eval_path, index=False)
@@ -520,8 +532,7 @@ def update_api_prediction_data():
         # exists in prediction_data
         merged_data = merge_and_append(updated_data, data_eval)
         # Drop duplicates based on fixture_id column
-        merged_data = merged_data.drop_duplicates(
-            subset=['fixture_id'], keep='first')
+        merged_data = merged_data.drop_duplicates(subset=["fixture_id"], keep="first")
         # Save updated data back to Excel
         merged_data.to_excel(data_path_new, index=False)
 
@@ -544,17 +555,11 @@ def merge_and_append(updated_data, data_eval):
         pd.DataFrame: The merged and updated DataFrame.
     """
     # Identify common and new columns
-    common_columns = [
-        col for col in updated_data.columns if col in data_eval.columns]
-    new_columns = [
-        col for col in updated_data.columns if col not in data_eval.columns]
+    common_columns = [col for col in updated_data.columns if col in data_eval.columns]
+    new_columns = [col for col in updated_data.columns if col not in data_eval.columns]
 
     # Append rows for common columns
-    merged_data = pd.concat(
-        [data_eval, updated_data[common_columns]],
-        axis=0,
-        ignore_index=True
-    )
+    merged_data = pd.concat([data_eval, updated_data[common_columns]], axis=0, ignore_index=True)
 
     # Add new columns
     for col in new_columns:
@@ -564,65 +569,63 @@ def merge_and_append(updated_data, data_eval):
     print(f"Updated prediction data shape after merge: {merged_data.shape}")
     return merged_data
 
+
 # CREATE EVALUATION SETS
 
 
 def get_selected_columns_draws():
     selected_columns = [
         # Very High Impact (>0.01)
-        'league_home_draw_rate',          # 0.1009
-        'home_draw_rate',                 # 0.0173
-        'home_poisson_xG',                # 0.0158
-        'possession_balance',             # 0.0127
-        'home_corners_rollingaverage',    # 0.0125
-        'form_weighted_xg_diff',          # 0.0123
-        'home_goal_difference_rollingaverage',  # 0.0112
-        'referee_encoded',                # 0.0110
-
+        "league_home_draw_rate",  # 0.1009
+        "home_draw_rate",  # 0.0173
+        "home_poisson_xG",  # 0.0158
+        "possession_balance",  # 0.0127
+        "home_corners_rollingaverage",  # 0.0125
+        "form_weighted_xg_diff",  # 0.0123
+        "home_goal_difference_rollingaverage",  # 0.0112
+        "referee_encoded",  # 0.0110
         # High Impact (0.008-0.01)
-        'Home_offsides_mean',             # 0.0098
-        'position_volatility',            # 0.0095
-        'league_draw_rate_composite',     # 0.0093
-        'draw_xg_indicator',              # 0.0092
-        'Away_fouls_mean',                # 0.0092
-        'date_encoded',                   # 0.0089
-        'away_encoded',                   # 0.0088
-
+        "Home_offsides_mean",  # 0.0098
+        "position_volatility",  # 0.0095
+        "league_draw_rate_composite",  # 0.0093
+        "draw_xg_indicator",  # 0.0092
+        "Away_fouls_mean",  # 0.0092
+        "date_encoded",  # 0.0089
+        "away_encoded",  # 0.0088
         # Medium-High Impact (0.007-0.008)
-        'away_saves_rollingaverage',      # 0.0086
-        'home_corners_mean',              # 0.0086
-        'away_corners_rollingaverage',    # 0.0085
-        'mid_season_factor',              # 0.0083
-        'home_shots_on_target_accuracy_rollingaverage',  # 0.0083
-        'seasonal_draw_pattern',          # 0.0082
-        'home_shot_on_target_rollingaverage',  # 0.0080
-        'xg_momentum_similarity',         # 0.0079
-        'home_style_compatibility',       # 0.0078
-        'away_possession_mean',           # 0.0077
-        'home_offensive_sustainability',  # 0.0077
-        'Home_passes_mean',               # 0.0075
-        'Home_possession_mean',           # 0.0075
-
+        "away_saves_rollingaverage",  # 0.0086
+        "home_corners_mean",  # 0.0086
+        "away_corners_rollingaverage",  # 0.0085
+        "mid_season_factor",  # 0.0083
+        "home_shots_on_target_accuracy_rollingaverage",  # 0.0083
+        "seasonal_draw_pattern",  # 0.0082
+        "home_shot_on_target_rollingaverage",  # 0.0080
+        "xg_momentum_similarity",  # 0.0079
+        "home_style_compatibility",  # 0.0078
+        "away_possession_mean",  # 0.0077
+        "home_offensive_sustainability",  # 0.0077
+        "Home_passes_mean",  # 0.0075
+        "Home_possession_mean",  # 0.0075
         # Medium Impact (0.006-0.007)
-        'Away_offsides_mean',             # 0.0074
-        'away_crowd_resistance',          # 0.0074
-        'league_away_draw_rate',          # 0.0073
-        'away_goal_difference_rollingaverage',  # 0.0072
-        'away_interceptions_mean',        # 0.0071
-        'Home_saves_mean',                # 0.0070
-        'away_referee_impact',            # 0.0069
-        'Away_saves_mean',                # 0.0069
-        'combined_draw_rate',             # 0.0069
-        'home_defensive_organization',    # 0.0069
-        'attack_xg_equilibrium',          # 0.0068
-        'away_team_elo',                  # 0.0068
-        'home_xg_momentum',               # 0.0068
-        'home_interceptions_mean',        # 0.0068
-        'home_team_elo',                  # 0.0067
-        'referee_foul_rate',              # 0.0067
-        'xg_form_equilibrium',            # 0.0066
-        'home_saves_rollingaverage',      # 0.0061
-        'Home_fouls_mean'                 # 0.0061
+        "Away_offsides_mean",  # 0.0074
+        "away_crowd_resistance",  # 0.0074
+        "league_away_draw_rate",  # 0.0073
+        "away_goal_difference_rollingaverage",  # 0.0072
+        "away_interceptions_mean",  # 0.0071
+        "Home_saves_mean",  # 0.0070
+        "away_referee_impact",  # 0.0069
+        "Away_saves_mean",  # 0.0069
+        "combined_draw_rate",  # 0.0069
+        "home_defensive_organization",  # 0.0069
+        "attack_xg_equilibrium",  # 0.0068
+        "away_team_elo",  # 0.0068
+        "home_xg_momentum",  # 0.0068
+        "home_interceptions_mean",  # 0.0068
+        "home_team_elo",  # 0.0067
+        "referee_foul_rate",  # 0.0067
+        "xg_form_equilibrium",  # 0.0066
+        "home_saves_rollingaverage",  # 0.0061
+        "Home_fouls_mean",  # 0.0061
     ]
 
     return selected_columns
@@ -634,7 +637,7 @@ def import_training_data_draws_new():
     data = pd.read_excel(data_path)
 
     # Create target variable
-    data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+    data["is_draw"] = (data["match_outcome"] == 2).astype(int)
 
     # Get selected columns
     selected_columns = get_selected_columns_draws()
@@ -644,46 +647,47 @@ def import_training_data_draws_new():
     data = data.fillna(0)
 
     for col in data.columns:
-        data[col] = pd.to_numeric(data[col], errors='coerce')
+        data[col] = pd.to_numeric(data[col], errors="coerce")
 
     # Define integer columns that should remain as int64
     int_columns = [
-        'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
-        'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
+        "h2h_draws",
+        "home_h2h_wins",
+        "h2h_matches",
+        "Away_points_cum",
+        "Home_points_cum",
+        "Home_team_matches",
+        "Home_draws",
+        "venue_encoded",
     ]
 
     # Convert integer columns back to int64
     for col in int_columns:
         if col in data.columns:
-            data[col] = data[col].astype('int64')
+            data[col] = data[col].astype("int64")
 
     # Verify all selected columns are numeric
     for col in selected_columns:
-        if data[col].dtype == 'object':
-            print(
-                f"Training data: Column {col} is still object type after conversion")
+        if data[col].dtype == "object":
+            print(f"Training data: Column {col} is still object type after conversion")
             selected_columns.remove(col)
 
     # Split into train and test sets
     train_data, test_data = train_test_split(
-        data,
-        test_size=0.2,
-        random_state=42,
-        stratify=data['is_draw']
+        data, test_size=0.2, random_state=42, stratify=data["is_draw"]
     )
 
     # Select features and target
     X_train = train_data[selected_columns]
-    y_train = train_data['is_draw']
+    y_train = train_data["is_draw"]
     X_test = test_data[selected_columns]
-    y_test = test_data['is_draw']
+    y_test = test_data["is_draw"]
 
     # Add verification of dtypes
     print("\nVerifying final dtypes:")
-    non_numeric_cols = X_train.select_dtypes(include=['object']).columns
+    non_numeric_cols = X_train.select_dtypes(include=["object"]).columns
     if len(non_numeric_cols) > 0:
-        print(
-            f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
+        print(f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
 
     print("\nInteger columns dtypes:")
     for col in int_columns:
@@ -693,7 +697,7 @@ def import_training_data_draws_new():
     return X_train, y_train, X_test, y_test
 
 
-def create_evaluation_sets_draws() -> Tuple[pd.DataFrame, pd.Series]:
+def create_evaluation_sets_draws() -> tuple[pd.DataFrame, pd.Series]:
     """Load data from an Excel file and create evaluation sets for training.
 
     This function loads match data from the predictions_eval.xlsx file and creates
@@ -717,19 +721,16 @@ def create_evaluation_sets_draws() -> Tuple[pd.DataFrame, pd.Series]:
     # Load data from the Excel file
     data = pd.read_excel(file_path)
     # Filter data where 'score' is not NA
-    data = data.dropna(subset=['score'])
+    data = data.dropna(subset=["score"])
     selected_columns = get_selected_columns_draws()
-    data['is_draw'] = data['is_draw'].astype(int)
+    data["is_draw"] = data["is_draw"].astype(int)
     # Ensure 'date_encoded' column exists
-    if 'date_encoded' not in data.columns:
+    if "date_encoded" not in data.columns:
         # Define the reference date
-        reference_date = pd.Timestamp('2020-08-11')
+        reference_date = pd.Timestamp("2020-08-11")
 
         # Calculate 'date_encoded' as days since the reference date
-        data['date_encoded'] = (
-            pd.to_datetime(
-                data['Datum']) -
-            reference_date).dt.days
+        data["date_encoded"] = (pd.to_datetime(data["Datum"]) - reference_date).dt.days
 
     # Separate features and target (make sure you are working on a copy if
     # needed)
@@ -739,23 +740,26 @@ def create_evaluation_sets_draws() -> Tuple[pd.DataFrame, pd.Series]:
     # Convert all numeric-like columns to numeric types, handling errors by
     # coercing
     for col in X.columns:
-        X[col] = pd.to_numeric(X[col], errors='coerce')
+        X[col] = pd.to_numeric(X[col], errors="coerce")
 
-   # Convert all numeric-like columns (excluding problematic_cols that have
-   # already been handled)
+    # Convert all numeric-like columns (excluding problematic_cols that have
+    # already been handled)
     for col in data.columns:
         try:
             # Convert string numbers with either dots or commas
-            data[col] = (data[col].astype(str)
-                         .str.strip()
-                         .str.strip("'\"")
-                         .str.replace(' ', '')
-                         .str.replace(',', '.')
-                         .replace('', '0')  # Replace empty strings with 0
-                         .astype(float))
+            data[col] = (
+                data[col]
+                .astype(str)
+                .str.strip()
+                .str.strip("'\"")
+                .str.replace(" ", "")
+                .str.replace(",", ".")
+                .replace("", "0")  # Replace empty strings with 0
+                .astype(float)
+            )
         except (ValueError, AttributeError) as e:
             print(f"Evaluation data: Could not convert column {col}: {str(e)}")
-            data = data.drop(columns=[col], errors='ignore')
+            data = data.drop(columns=[col], errors="ignore")
             continue
 
     # Separate features and target
@@ -763,7 +767,7 @@ def create_evaluation_sets_draws() -> Tuple[pd.DataFrame, pd.Series]:
     y = y
 
     # Add this before returning
-    non_numeric_cols = X.select_dtypes(include=['object']).columns
+    non_numeric_cols = X.select_dtypes(include=["object"]).columns
     if len(non_numeric_cols) > 0:
         print(f"Warning: Found object columns: {list(non_numeric_cols)}")
 
@@ -771,7 +775,7 @@ def create_evaluation_sets_draws() -> Tuple[pd.DataFrame, pd.Series]:
 
 
 #  FOR API
-def get_selected_api_columns_draws() -> List[str]:
+def get_selected_api_columns_draws() -> list[str]:
     """Get selected feature columns for API-based draw prediction model.
 
     This function returns a curated list of feature columns that have been
@@ -871,13 +875,13 @@ def get_selected_api_columns_draws() -> List[str]:
         "venue_encoded",
         "draw_probability_score",
         "home_saves_rollingaverage",
-        "league_season_stage_draw_rate"
+        "league_season_stage_draw_rate",
     ]
     return selected_columns
 
 
 @retry_on_error(max_retries=3, delay=1.0)
-def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+def import_training_data_draws_api() -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
     """Import training data for API-based draw predictions.
 
     This function loads and preprocesses training data specifically for the API-based
@@ -898,18 +902,18 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
     """
     data_path = "data/api_training_final.xlsx"
     logger.info(f"Loading training data from: {data_path}")
-    
+
     try:
         # Load data with retry mechanism
         data = pd.read_excel(data_path)
         if data.empty:
             logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
-            
+
         logger.info(f"Successfully loaded data with shape: {data.shape}")
 
         # Create target variable
-        data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+        data["is_draw"] = (data["match_outcome"] == 2).astype(int)
         logger.info(f"Created target variable. Draw rate: {data['is_draw'].mean():.2%}")
 
         # Get selected columns
@@ -918,7 +922,7 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
         if missing_columns:
             logger.error(
                 f"Missing required columns: {missing_columns}",
-                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS,
             )
             raise ValueError(f"Missing required columns: {missing_columns}")
 
@@ -933,57 +937,60 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
             columns=data.columns.tolist(),
             drop_errors=False,
             fill_value=0.0,
-            verbose=True
+            verbose=True,
         )
 
         # Define and convert integer columns
         int_columns = [
-            'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
-            'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
+            "h2h_draws",
+            "home_h2h_wins",
+            "h2h_matches",
+            "Away_points_cum",
+            "Home_points_cum",
+            "Home_team_matches",
+            "Home_draws",
+            "venue_encoded",
         ]
-        
+
         # Convert integer columns
         for col in int_columns:
             if col in data.columns:
                 try:
-                    data[col] = data[col].astype('int64')
+                    data[col] = data[col].astype("int64")
                 except Exception as e:
                     logger.warning(
                         f"Failed to convert {col} to integer: {str(e)}",
-                        error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
+                        error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED,
                     )
 
         # Verify numeric conversion
         object_columns = []
         for col in selected_columns:
-            if data[col].dtype == 'object':
+            if data[col].dtype == "object":
                 object_columns.append(col)
                 logger.warning(
                     f"Column {col} remains as object type after conversion",
-                    error_code=DataProcessingError.INVALID_DATA_TYPE
+                    error_code=DataProcessingError.INVALID_DATA_TYPE,
                 )
-        
+
         if object_columns:
             logger.error(
                 f"Found {len(object_columns)} non-numeric columns: {object_columns}",
-                error_code=DataProcessingError.INVALID_DATA_TYPE
+                error_code=DataProcessingError.INVALID_DATA_TYPE,
             )
             raise ValueError(f"Non-numeric columns found: {object_columns}")
 
         # Split into train and test sets
         logger.info("Splitting data into train and test sets")
         train_data, test_data = train_test_split(
-            data,
-            test_size=0.2,
-            random_state=42,
-            stratify=data['is_draw']
+            data, test_size=0.2, random_state=42, stratify=data["is_draw"]
         )
 
         # Select features and target
         X_train = train_data[selected_columns]
-        y_train = train_data['is_draw']
+        y_train = train_data["is_draw"]
         X_test = test_data[selected_columns]
-        y_test = test_data['is_draw']
+        y_test = test_data["is_draw"]
 
         # Final validation
         logger.info(f"Training set shape: {X_train.shape}")
@@ -993,22 +1000,18 @@ def import_training_data_draws_api() -> Tuple[pd.DataFrame, pd.Series, pd.DataFr
 
         return X_train, y_train, X_test, y_test
 
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         logger.error(
-            f"Data file not found: {data_path}",
-            error_code=DataProcessingError.FILE_NOT_FOUND
+            f"Data file not found: {data_path}", error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
-    except pd.errors.EmptyDataError as e:
-        logger.error(
-            f"Empty data file: {data_path}",
-            error_code=DataProcessingError.EMPTY_DATASET
-        )
+    except pd.errors.EmptyDataError:
+        logger.error(f"Empty data file: {data_path}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
     except Exception as e:
         logger.error(
             f"Error processing training data: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
+            error_code=DataProcessingError.FILE_CORRUPTED,
         )
         raise
 
@@ -1019,63 +1022,62 @@ def import_feature_select_draws_api():
     data = pd.read_excel(data_path)
 
     # Create target variable
-    data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+    data["is_draw"] = (data["match_outcome"] == 2).astype(int)
 
     # Replace inf and nan values
     data = data.replace([np.inf, -np.inf], 0)
     data = data.fillna(0)
 
     for col in data.columns:
-        data[col] = pd.to_numeric(data[col], errors='coerce')
+        data[col] = pd.to_numeric(data[col], errors="coerce")
 
     # Convert all numeric-like columns (excluding problematic_cols that have
     # already been handled)
     data = convert_numeric_columns(
-        data=data,
-        columns=data.columns.tolist(),
-        drop_errors=False,
-        fill_value=0.0,
-        verbose=True
+        data=data, columns=data.columns.tolist(), drop_errors=False, fill_value=0.0, verbose=True
     )
 
     # Define integer columns that should remain as int64
     int_columns = [
-        'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
-        'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
+        "h2h_draws",
+        "home_h2h_wins",
+        "h2h_matches",
+        "Away_points_cum",
+        "Home_points_cum",
+        "Home_team_matches",
+        "Home_draws",
+        "venue_encoded",
     ]
 
     # Convert integer columns back to int64
     for col in int_columns:
         if col in data.columns:
-            data[col] = data[col].astype('int64')
+            data[col] = data[col].astype("int64")
 
     # Split into train and test sets
     train_data, test_data = train_test_split(
-        data,
-        test_size=0.2,
-        random_state=42,
-        stratify=data['is_draw']
+        data, test_size=0.2, random_state=42, stratify=data["is_draw"]
     )
 
     # Select features and target
     columns_to_drop = [
-        'is_draw',
-        'match_outcome',
-        'home_goals',
-        'away_goals',
-        'total_goals',
-        'score']
-    X_train = train_data.drop(columns=columns_to_drop, errors='ignore')
-    y_train = train_data['is_draw']
-    X_test = test_data.drop(columns=columns_to_drop, errors='ignore')
-    y_test = test_data['is_draw']
+        "is_draw",
+        "match_outcome",
+        "home_goals",
+        "away_goals",
+        "total_goals",
+        "score",
+    ]
+    X_train = train_data.drop(columns=columns_to_drop, errors="ignore")
+    y_train = train_data["is_draw"]
+    X_test = test_data.drop(columns=columns_to_drop, errors="ignore")
+    y_test = test_data["is_draw"]
 
     # Add verification of dtypes
     print("\nVerifying final dtypes:")
-    non_numeric_cols = X_train.select_dtypes(include=['object']).columns
+    non_numeric_cols = X_train.select_dtypes(include=["object"]).columns
     if len(non_numeric_cols) > 0:
-        print(
-            f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
+        print(f"Warning: Found object columns in X_train: {list(non_numeric_cols)}")
 
     print("\nInteger columns dtypes:")
     for col in int_columns:
@@ -1105,18 +1107,18 @@ def create_evaluation_sets_draws_api():
     """
     file_path = "data/prediction/api_prediction_eval.xlsx"
     logger.info(f"Loading evaluation data from: {file_path}")
-    
+
     try:
         # Load data from the Excel file
         data = pd.read_excel(file_path)
         if data.empty:
             logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
-            
+
         logger.info(f"Successfully loaded data with shape: {data.shape}")
 
         # Filter data where match_outcome is not NA
-        data = data.dropna(subset=['match_outcome'])
+        data = data.dropna(subset=["match_outcome"])
         logger.info(f"Data shape after filtering NA match outcomes: {data.shape}")
 
         # Replace inf and nan values
@@ -1129,81 +1131,83 @@ def create_evaluation_sets_draws_api():
         if missing_columns:
             logger.error(
                 f"Missing required columns: {missing_columns}",
-                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS,
             )
             raise ValueError(f"Missing required columns: {missing_columns}")
 
         # Process match outcome and create target variable
         try:
-            data['match_outcome'] = data['match_outcome'].astype(int)
-            data['is_draw'] = (data['match_outcome'] == 2).astype(int)
+            data["match_outcome"] = data["match_outcome"].astype(int)
+            data["is_draw"] = (data["match_outcome"] == 2).astype(int)
             logger.info(f"Created target variable. Draw rate: {data['is_draw'].mean():.2%}")
         except Exception as e:
             logger.error(
                 f"Failed to process match outcome: {str(e)}",
-                error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
+                error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED,
             )
-            raise ValueError("Invalid match outcome values")
+            raise ValueError("Invalid match outcome values") from e
 
         # Ensure date_encoded exists
-        if 'date_encoded' not in data.columns:
+        if "date_encoded" not in data.columns:
             try:
-                reference_date = pd.Timestamp('2020-08-11')
-                data['date_encoded'] = (pd.to_datetime(data['Date']) - reference_date).dt.days
+                reference_date = pd.Timestamp("2020-08-11")
+                data["date_encoded"] = (pd.to_datetime(data["Date"]) - reference_date).dt.days
                 logger.info("Added date_encoded column")
             except Exception as e:
                 logger.error(
                     f"Failed to create date_encoded: {str(e)}",
-                    error_code=DataProcessingError.FEATURE_CREATION_FAILED
+                    error_code=DataProcessingError.FEATURE_CREATION_FAILED,
                 )
-                raise ValueError("Could not create date_encoded column")
+                raise ValueError("Could not create date_encoded column") from e
 
         # Convert integer columns
         int_columns = [
-            'h2h_draws', 'home_h2h_wins', 'h2h_matches', 'Away_points_cum',
-            'Home_points_cum', 'Home_team_matches', 'Home_draws', 'venue_encoded'
+            "h2h_draws",
+            "home_h2h_wins",
+            "h2h_matches",
+            "Away_points_cum",
+            "Home_points_cum",
+            "Home_team_matches",
+            "Home_draws",
+            "venue_encoded",
         ]
         for col in int_columns:
             if col in data.columns:
                 try:
-                    data[col] = data[col].astype('int64')
+                    data[col] = data[col].astype("int64")
                 except Exception as e:
                     logger.warning(
                         f"Failed to convert {col} to integer: {str(e)}",
-                        error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
+                        error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED,
                     )
 
         # Convert numeric columns
         logger.info("Starting numeric conversion")
         data = convert_numeric_columns(
-            data=data,
-            columns=selected_columns,
-            drop_errors=False,
-            fill_value=0.0,
-            verbose=True
+            data=data, columns=selected_columns, drop_errors=False, fill_value=0.0, verbose=True
         )
         logger.info(f"Data shape after numeric conversion: {data.shape}")
 
         # Verify numeric conversion
         object_columns = []
         for col in selected_columns:
-            if data[col].dtype == 'object':
+            if data[col].dtype == "object":
                 object_columns.append(col)
                 logger.warning(
                     f"Column {col} remains as object type after conversion",
-                    error_code=DataProcessingError.INVALID_DATA_TYPE
+                    error_code=DataProcessingError.INVALID_DATA_TYPE,
                 )
-        
+
         if object_columns:
             logger.error(
                 f"Found {len(object_columns)} non-numeric columns: {object_columns}",
-                error_code=DataProcessingError.INVALID_DATA_TYPE
+                error_code=DataProcessingError.INVALID_DATA_TYPE,
             )
             raise ValueError(f"Non-numeric columns found: {object_columns}")
 
         # Create final feature set and target
         X = data[selected_columns]
-        y = data['is_draw']
+        y = data["is_draw"]
 
         # Final validation
         logger.info(f"Final feature set shape: {X.shape}")
@@ -1211,22 +1215,18 @@ def create_evaluation_sets_draws_api():
 
         return X, y
 
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         logger.error(
-            f"Data file not found: {file_path}",
-            error_code=DataProcessingError.FILE_NOT_FOUND
+            f"Data file not found: {file_path}", error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
-    except pd.errors.EmptyDataError as e:
-        logger.error(
-            f"Empty data file: {file_path}",
-            error_code=DataProcessingError.EMPTY_DATASET
-        )
+    except pd.errors.EmptyDataError:
+        logger.error(f"Empty data file: {file_path}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
     except Exception as e:
         logger.error(
             f"Error processing evaluation data: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
+            error_code=DataProcessingError.FILE_CORRUPTED,
         )
         raise
 
@@ -1251,14 +1251,14 @@ def create_prediction_set_api() -> pd.DataFrame:
     """
     file_path = "data/prediction/api_prediction_data_new.xlsx"
     logger.info(f"Loading prediction data from: {file_path}")
-    
+
     try:
         # Load data from the Excel file
         data = pd.read_excel(file_path)
         if data.empty:
             logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
-            
+
         logger.info(f"Successfully loaded data with shape: {data.shape}")
 
         # Get selected columns
@@ -1267,22 +1267,22 @@ def create_prediction_set_api() -> pd.DataFrame:
         if missing_columns:
             logger.error(
                 f"Missing required columns: {missing_columns}",
-                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS,
             )
             raise ValueError(f"Missing required columns: {missing_columns}")
 
         # Ensure date_encoded exists
-        if 'date_encoded' not in data.columns:
+        if "date_encoded" not in data.columns:
             try:
-                reference_date = pd.Timestamp('2020-08-11')
-                data['date_encoded'] = (pd.to_datetime(data['Datum']) - reference_date).dt.days
+                reference_date = pd.Timestamp("2020-08-11")
+                data["date_encoded"] = (pd.to_datetime(data["Datum"]) - reference_date).dt.days
                 logger.info("Added date_encoded column")
             except Exception as e:
                 logger.error(
                     f"Failed to create date_encoded: {str(e)}",
-                    error_code=DataProcessingError.FEATURE_CREATION_FAILED
+                    error_code=DataProcessingError.FEATURE_CREATION_FAILED,
                 )
-                raise ValueError("Could not create date_encoded column")
+                raise ValueError("Could not create date_encoded column") from e
 
         # Convert numeric columns
         logger.info("Starting numeric conversion")
@@ -1291,7 +1291,7 @@ def create_prediction_set_api() -> pd.DataFrame:
             columns=None,  # Convert all columns
             drop_errors=True,
             fill_value=0.0,
-            verbose=True
+            verbose=True,
         )
         logger.info(f"Data shape after numeric conversion: {data.shape}")
 
@@ -1301,17 +1301,17 @@ def create_prediction_set_api() -> pd.DataFrame:
         # Verify numeric conversion
         object_columns = []
         for col in selected_columns:
-            if X[col].dtype == 'object':
+            if X[col].dtype == "object":
                 object_columns.append(col)
                 logger.warning(
                     f"Column {col} remains as object type after conversion",
-                    error_code=DataProcessingError.INVALID_DATA_TYPE
+                    error_code=DataProcessingError.INVALID_DATA_TYPE,
                 )
-        
+
         if object_columns:
             logger.error(
                 f"Found {len(object_columns)} non-numeric columns: {object_columns}",
-                error_code=DataProcessingError.INVALID_DATA_TYPE
+                error_code=DataProcessingError.INVALID_DATA_TYPE,
             )
             raise ValueError(f"Non-numeric columns found: {object_columns}")
 
@@ -1321,38 +1321,34 @@ def create_prediction_set_api() -> pd.DataFrame:
 
         return X
 
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         logger.error(
-            f"Data file not found: {file_path}",
-            error_code=DataProcessingError.FILE_NOT_FOUND
+            f"Data file not found: {file_path}", error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
-    except pd.errors.EmptyDataError as e:
-        logger.error(
-            f"Empty data file: {file_path}",
-            error_code=DataProcessingError.EMPTY_DATASET
-        )
+    except pd.errors.EmptyDataError:
+        logger.error(f"Empty data file: {file_path}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
     except Exception as e:
         logger.error(
             f"Error processing prediction data: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
+            error_code=DataProcessingError.FILE_CORRUPTED,
         )
         raise
 
 
 # OTHER FUNCTIONS
 @retry_on_error(max_retries=3, delay=1.0)
-def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
+def get_real_api_scores_from_excel(fixture_ids: list[str]) -> pd.DataFrame:
     """Get real match scores from an Excel file.
-    
+
     This function retrieves actual match results from the API prediction evaluation
     Excel file for a given list of fixture IDs. It handles data validation and
     type conversion for match outcomes.
-    
+
     Args:
         fixture_ids (List[str]): List of fixture IDs to retrieve.
-        
+
     Returns:
         pd.DataFrame: DataFrame containing match results with columns:
             - fixture_id: Unique identifier for the match
@@ -1362,7 +1358,7 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
             - league: League name
             - match_outcome: Match result code (2 for draw)
             - is_draw: Boolean indicating if match was a draw (1 or 0)
-            
+
     Raises:
         FileNotFoundError: If the data file cannot be found
         ValueError: If data validation fails
@@ -1370,95 +1366,93 @@ def get_real_api_scores_from_excel(fixture_ids: List[str]) -> pd.DataFrame:
     """
     file_path = Path("./data/prediction/api_prediction_eval.xlsx")
     logger.info(f"Loading match results from: {file_path}")
-    
+
     try:
         # Load Excel file
         df = pd.read_excel(file_path)
         if df.empty:
             logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
-            
+
         logger.info(f"Successfully loaded data with shape: {df.shape}")
 
         # Filter rows where match_outcome is not NA
-        df = df.dropna(subset=['match_outcome'])
+        df = df.dropna(subset=["match_outcome"])
         logger.info(f"Data shape after filtering NA match outcomes: {df.shape}")
 
         # Convert fixture_id column and input IDs to integer type
         try:
-            df['fixture_id'] = df['fixture_id'].astype(int)
+            df["fixture_id"] = df["fixture_id"].astype(int)
             fixture_ids = [int(fixture_id) for fixture_id in fixture_ids]
         except ValueError as e:
             logger.error(
                 f"Invalid fixture ID format: {str(e)}",
-                error_code=DataProcessingError.INVALID_DATA_TYPE
+                error_code=DataProcessingError.INVALID_DATA_TYPE,
             )
-            raise ValueError("Invalid fixture ID format")
+            raise ValueError("Invalid fixture ID format") from e
 
         # Filter matches by fixture_ids
-        filtered_df = df[df['fixture_id'].isin(fixture_ids)]
+        filtered_df = df[df["fixture_id"].isin(fixture_ids)]
         if filtered_df.empty:
             logger.warning(
-                f"No matches found for provided fixture IDs",
-                error_code=DataProcessingError.EMPTY_DATASET
+                "No matches found for provided fixture IDs",
+                error_code=DataProcessingError.EMPTY_DATASET,
             )
             return pd.DataFrame()
 
         try:
             # Create new column for is_draw based on match_outcome
-            filtered_df['is_draw'] = (filtered_df['match_outcome'] == 2).astype(int)
-            
+            filtered_df["is_draw"] = (filtered_df["match_outcome"] == 2).astype(int)
+
             # Select and rename relevant columns
-            results_df = filtered_df[[
-                'fixture_id', 'Home', 'Away', 'Date', 'league_name', 'match_outcome', 'is_draw'
-            ]].rename(columns={
-                'Home': 'home_team',
-                'Away': 'away_team',
-                'Date': 'date',
-                'league_name': 'league'
-            })
-            
+            results_df = filtered_df[
+                ["fixture_id", "Home", "Away", "Date", "league_name", "match_outcome", "is_draw"]
+            ].rename(
+                columns={
+                    "Home": "home_team",
+                    "Away": "away_team",
+                    "Date": "date",
+                    "league_name": "league",
+                }
+            )
+
             logger.info(f"Successfully retrieved {len(results_df)} matches")
             return results_df
-            
+
         except KeyError as e:
             logger.error(
                 f"Missing required columns: {str(e)}",
-                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS,
             )
-            raise ValueError(f"Missing required columns: {str(e)}")
-            
+            raise ValueError(f"Missing required columns: {str(e)}") from e
+
     except FileNotFoundError:
         logger.error(
-            f"Data file not found: {file_path}",
-            error_code=DataProcessingError.FILE_NOT_FOUND
+            f"Data file not found: {file_path}", error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except pd.errors.EmptyDataError:
-        logger.error(
-            f"Empty data file: {file_path}",
-            error_code=DataProcessingError.EMPTY_DATASET
-        )
+        logger.error(f"Empty data file: {file_path}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
     except Exception as e:
         logger.error(
             f"Error processing match results: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
+            error_code=DataProcessingError.FILE_CORRUPTED,
         )
         raise
 
 
 @retry_on_error(max_retries=3, delay=1.0)
-def get_real_scores_from_excel(running_ids: List[str]) -> Dict[str, Dict]:
+def get_real_scores_from_excel(running_ids: list[str]) -> dict[str, dict]:
     """Get real match scores from an Excel file.
-    
+
     This function retrieves actual match results from the predictions evaluation Excel file
     for a given list of running IDs. It returns a dictionary containing match details
     including teams, date, league, score, and draw status.
-    
+
     Args:
         running_ids (List[str]): List of running IDs to retrieve match results for.
-        
+
     Returns:
         Dict[str, Dict]: Dictionary with running_id as key and match details as value.
             Each match details dictionary contains:
@@ -1468,7 +1462,7 @@ def get_real_scores_from_excel(running_ids: List[str]) -> Dict[str, Dict]:
             - league (str): League name
             - score (str): Match score
             - is_draw (bool): Whether the match was a draw
-            
+
     Raises:
         FileNotFoundError: If the data file cannot be found
         ValueError: If data validation fails
@@ -1476,89 +1470,92 @@ def get_real_scores_from_excel(running_ids: List[str]) -> Dict[str, Dict]:
     """
     file_path = Path("./data/prediction/predictions_eval.xlsx")
     logger.info(f"Loading match results from: {file_path}")
-    
+
     try:
         # Load Excel file
         df = pd.read_excel(file_path)
         if df.empty:
             logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
-            
+
         logger.info(f"Successfully loaded data with shape: {df.shape}")
-        
+
         # Verify required columns exist
-        required_columns = ['running_id', 'home_team', 'away_team', 'date', 'league_y', 'score', 'is_draw']
+        required_columns = [
+            "running_id",
+            "home_team",
+            "away_team",
+            "date",
+            "league_y",
+            "score",
+            "is_draw",
+        ]
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             logger.error(
                 f"Missing required columns: {missing_columns}",
-                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS,
             )
             raise ValueError(f"Missing required columns: {missing_columns}")
-        
+
         # Filter matches by running_ids
-        filtered_df = df[df['running_id'].isin(running_ids)]
+        filtered_df = df[df["running_id"].isin(running_ids)]
         if filtered_df.empty:
             logger.warning(
-                f"No matches found for provided running IDs",
-                error_code=DataProcessingError.EMPTY_DATASET
+                "No matches found for provided running IDs",
+                error_code=DataProcessingError.EMPTY_DATASET,
             )
             return {}
-            
+
         logger.info(f"Found {len(filtered_df)} matches")
-        
+
         # Convert to dictionary with running_id as key
         results = {}
         for _, match in filtered_df.iterrows():
             try:
-                running_id = match['running_id']
+                running_id = match["running_id"]
                 results[running_id] = {
-                    'home_team': match['home_team'],
-                    'away_team': match['away_team'],
-                    'date': match['date'],
-                    'league': match['league_y'],
-                    'score': match['score'],
-                    'is_draw': bool(match['is_draw']),
+                    "home_team": match["home_team"],
+                    "away_team": match["away_team"],
+                    "date": match["date"],
+                    "league": match["league_y"],
+                    "score": match["score"],
+                    "is_draw": bool(match["is_draw"]),
                 }
             except KeyError as e:
                 logger.warning(
                     f"Error processing match {running_id}: {str(e)}",
-                    error_code=DataProcessingError.INVALID_DATA_TYPE
+                    error_code=DataProcessingError.INVALID_DATA_TYPE,
                 )
                 continue
-        
+
         if not results:
             logger.warning(
-                "No valid matches found in dataset",
-                error_code=DataProcessingError.EMPTY_DATASET
+                "No valid matches found in dataset", error_code=DataProcessingError.EMPTY_DATASET
             )
         else:
             logger.info(f"Successfully processed {len(results)} matches")
-        
+
         return results
-    
+
     except FileNotFoundError:
         logger.error(
-            f"Data file not found: {file_path}",
-            error_code=DataProcessingError.FILE_NOT_FOUND
+            f"Data file not found: {file_path}", error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except pd.errors.EmptyDataError:
-        logger.error(
-            f"Empty data file: {file_path}",
-            error_code=DataProcessingError.EMPTY_DATASET
-        )
+        logger.error(f"Empty data file: {file_path}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
     except Exception as e:
         logger.error(
             f"Error processing match results: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
+            error_code=DataProcessingError.FILE_CORRUPTED,
         )
         raise
 
 
 @retry_on_error(max_retries=3, delay=2.0)
-def get_real_scores_from_mongodb(running_ids: List[str]) -> Dict[str, Dict]:
+def get_real_scores_from_mongodb(running_ids: list[str]) -> dict[str, dict]:
     """Get real match scores from MongoDB.
 
     This function retrieves actual match results from the MongoDB database
@@ -1584,63 +1581,53 @@ def get_real_scores_from_mongodb(running_ids: List[str]) -> Dict[str, Dict]:
         Exception: For other processing errors
     """
     logger.info(f"Retrieving scores for {len(running_ids)} matches from MongoDB")
-    
+
     try:
         # Connect to MongoDB
-        client = MongoClient('mongodb://localhost:27017/')
-        db = client['football_data']
-        collection = db['aggregated_data']
+        client = MongoClient("mongodb://localhost:27017/")
+        db = client["football_data"]
+        collection = db["aggregated_data"]
         logger.info("Successfully connected to MongoDB")
 
         # Query matches by running_ids
         matches = collection.find(
             {"running_id": {"$in": running_ids}},
-            {
-                "running_id": 1,
-                "Home": 1,
-                "Away": 1,
-                "Score": 1,
-                "league": 1,
-                "Date": 1,
-                "_id": 0
-            }
+            {"running_id": 1, "Home": 1, "Away": 1, "Score": 1, "league": 1, "Date": 1, "_id": 0},
         )
 
         # Convert to dictionary with running_id as key
         results = {}
         for match in matches:
-            running_id = match['running_id']
+            running_id = match["running_id"]
             try:
-                if isinstance(match['Score'], str):
-                    home_score, away_score = map(
-                        int, match['Score'].replace('–', '-').split('-'))
+                if isinstance(match["Score"], str):
+                    home_score, away_score = map(int, match["Score"].replace("–", "-").split("-"))
                 else:
                     logger.warning(
                         f"Invalid score format for match {running_id}",
-                        error_code=DataProcessingError.INVALID_DATA_TYPE
+                        error_code=DataProcessingError.INVALID_DATA_TYPE,
                     )
                     continue
 
                 is_draw = home_score == away_score
                 results[running_id] = {
-                    'home_team': match['Home'],
-                    'away_team': match['Away'],
-                    'date': match['Date'],
-                    'league': match['league'],
-                    'score': match['Score'],
-                    'is_draw': is_draw,
+                    "home_team": match["Home"],
+                    "away_team": match["Away"],
+                    "date": match["Date"],
+                    "league": match["league"],
+                    "score": match["Score"],
+                    "is_draw": is_draw,
                 }
             except (ValueError, KeyError) as e:
                 logger.warning(
                     f"Error processing match {running_id}: {str(e)}",
-                    error_code=DataProcessingError.INVALID_DATA_TYPE
+                    error_code=DataProcessingError.INVALID_DATA_TYPE,
                 )
                 continue
 
         if not results:
             logger.warning(
-                "No valid matches found in MongoDB",
-                error_code=DataProcessingError.EMPTY_DATASET
+                "No valid matches found in MongoDB", error_code=DataProcessingError.EMPTY_DATASET
             )
         else:
             logger.info(f"Successfully retrieved {len(results)} matches")
@@ -1650,23 +1637,25 @@ def get_real_scores_from_mongodb(running_ids: List[str]) -> Dict[str, Dict]:
     except ConnectionError as e:
         logger.error(
             f"MongoDB connection error: {str(e)}",
-            error_code=DataProcessingError.MONGODB_CONNECTION_ERROR
+            error_code=DataProcessingError.MONGODB_CONNECTION_ERROR,
         )
         raise
     except Exception as e:
         logger.error(
             f"Error retrieving scores from MongoDB: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
+            error_code=DataProcessingError.FILE_CORRUPTED,
         )
         raise
     finally:
-        if 'client' in locals():
+        if "client" in locals():
             client.close()
             logger.info("MongoDB connection closed")
 
 
 @retry_on_error(max_retries=3, delay=1.0)
-def import_training_data_goals(goal_type: str) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+def import_training_data_goals(
+    goal_type: str,
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
     """Import training data for goal prediction models.
 
     This function loads and preprocesses training data for goal prediction models.
@@ -1692,13 +1681,13 @@ def import_training_data_goals(goal_type: str) -> Tuple[pd.DataFrame, pd.Series,
     """
     data_path = "data/training_data.xlsx"
     logger.info(f"Loading training data for {goal_type} prediction from: {data_path}")
-    
+
     # Validate goal_type
-    valid_goal_types = ['home_goals', 'away_goals', 'total_goals']
+    valid_goal_types = ["home_goals", "away_goals", "total_goals"]
     if goal_type not in valid_goal_types:
         logger.error(
             f"Invalid goal_type: {goal_type}. Must be one of {valid_goal_types}",
-            error_code=DataProcessingError.INVALID_DATA_TYPE
+            error_code=DataProcessingError.INVALID_DATA_TYPE,
         )
         raise ValueError(f"Invalid goal_type: {goal_type}")
 
@@ -1708,7 +1697,7 @@ def import_training_data_goals(goal_type: str) -> Tuple[pd.DataFrame, pd.Series,
         if data.empty:
             logger.error("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
             raise ValueError("Dataset is empty")
-            
+
         logger.info(f"Successfully loaded data with shape: {data.shape}")
 
         # Convert goal_type column to integer
@@ -1717,18 +1706,18 @@ def import_training_data_goals(goal_type: str) -> Tuple[pd.DataFrame, pd.Series,
         except Exception as e:
             logger.error(
                 f"Failed to convert {goal_type} to integer: {str(e)}",
-                error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED
+                error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED,
             )
-            raise ValueError(f"Invalid {goal_type} values")
+            raise ValueError(f"Invalid {goal_type} values") from e
 
         # Define columns to drop
         columns_to_drop = [
-            'match_outcome',
-            'home_goals',
-            'away_goals',
-            'total_goals',
-            'score',
-            'is_draw'
+            "match_outcome",
+            "home_goals",
+            "away_goals",
+            "total_goals",
+            "score",
+            "is_draw",
         ]
 
         # Convert numeric columns
@@ -1738,7 +1727,7 @@ def import_training_data_goals(goal_type: str) -> Tuple[pd.DataFrame, pd.Series,
             columns=None,  # Convert all columns
             drop_errors=True,
             fill_value=0.0,
-            verbose=True
+            verbose=True,
         )
         logger.info(f"Data shape after numeric conversion: {data.shape}")
 
@@ -1748,25 +1737,20 @@ def import_training_data_goals(goal_type: str) -> Tuple[pd.DataFrame, pd.Series,
 
         # Split into train and test sets using 80/20 split
         logger.info("Splitting data into train and test sets")
-        train_data, test_data = train_test_split(
-            data,
-            test_size=0.2,
-            random_state=42,
-            shuffle=True
-        )
+        train_data, test_data = train_test_split(data, test_size=0.2, random_state=42, shuffle=True)
 
         # Prepare features and targets
-        X_train = train_data.drop(columns=columns_to_drop, errors='ignore')
+        X_train = train_data.drop(columns=columns_to_drop, errors="ignore")
         y_train = train_data[goal_type]
-        X_test = test_data.drop(columns=columns_to_drop, errors='ignore')
+        X_test = test_data.drop(columns=columns_to_drop, errors="ignore")
         y_test = test_data[goal_type]
 
         # Verify numeric conversion
-        object_columns = X_train.select_dtypes(include=['object']).columns
+        object_columns = X_train.select_dtypes(include=["object"]).columns
         if not object_columns.empty:
             logger.error(
                 f"Found {len(object_columns)} non-numeric columns: {list(object_columns)}",
-                error_code=DataProcessingError.INVALID_DATA_TYPE
+                error_code=DataProcessingError.INVALID_DATA_TYPE,
             )
             raise ValueError(f"Non-numeric columns found: {list(object_columns)}")
 
@@ -1780,26 +1764,21 @@ def import_training_data_goals(goal_type: str) -> Tuple[pd.DataFrame, pd.Series,
 
     except FileNotFoundError:
         logger.error(
-            f"Data file not found: {data_path}",
-            error_code=DataProcessingError.FILE_NOT_FOUND
+            f"Data file not found: {data_path}", error_code=DataProcessingError.FILE_NOT_FOUND
         )
         raise
     except pd.errors.EmptyDataError:
-        logger.error(
-            f"Empty data file: {data_path}",
-            error_code=DataProcessingError.EMPTY_DATASET
-        )
+        logger.error(f"Empty data file: {data_path}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
     except Exception as e:
         logger.error(
             f"Error processing training data: {str(e)}",
-            error_code=DataProcessingError.FILE_CORRUPTED
+            error_code=DataProcessingError.FILE_CORRUPTED,
         )
         raise
 
 
 if __name__ == "__main__":
-
     # update_api_training_data_for_draws()
     # print("Training data updated successfully")
     # update_api_prediction_eval_data()
@@ -1810,6 +1789,5 @@ if __name__ == "__main__":
     # print(fixtures)
     # df = get_real_api_scores_from_excel()
     # print(df.shape)
-
 
     # sync_mlflow()

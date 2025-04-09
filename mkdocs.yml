@@ -1,0 +1,43 @@
+site_name: TheDrawCode
+site_description: Documentation for TheDrawCode project.
+site_author: Richard Szita
+
+# Repository
+repo_url: https://github.com/ronyka77/TheDrawCode # CHANGE THIS to your actual repo URL
+repo_name: ronyka77/TheDrawCode # CHANGE THIS
+edit_uri: "edit/main/docs/" # Optional: Example link to edit pages on main branch in docs folder
+
+# Copyright
+copyright: Copyright &copy; 2025 Richard Szita
+
+# Configuration
+theme:
+  name: mkdocs
+  language: en
+  # custom_dir: overrides/ # Optional: For theme customizations
+  favicon: assets/favicon.png # Optional: Add a favicon
+  logo: assets/logo.png # Optional: Add a logo
+
+# Extensions
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+
+# Page tree
+nav:
+  - Home: product_requirement_docs.md
+  - Architecture: architecture.md
+  - Technical Details: technical.md
+  - UI Planning: plan_ui.md
+  - Ensemble Model: ensemble_model_documentation.md

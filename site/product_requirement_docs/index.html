@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        <meta name="author" content="Richard Szita">
+        
+        <link rel="shortcut icon" href="../img/favicon.ico">
+        <title>Soccer Prediction Project - Product Requirement Document - TheDrawCode</title>
+        <link href="../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../css/brands.min.css" rel="stylesheet">
+        <link href="../css/solid.min.css" rel="stylesheet">
+        <link href="../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="..">TheDrawCode</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../index.md" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/product_requirement_docs.md" class="nav-link">Project Requirements</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/architecture.md" class="nav-link">Architecture</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/technical.md" class="nav-link">Technical Details</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/plan_ui.md" class="nav-link">UI Planning</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../docs/ensemble_model_documentation.md" class="nav-link">Ensemble Model</a>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a href="https://github.com/ronyka77/TheDrawCode/edit/main/docs/product_requirement_docs.md" class="nav-link">Edit on ronyka77/TheDrawCode
+                                    </a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#soccer-prediction-project-product-requirement-document" class="nav-link">Soccer Prediction Project - Product Requirement Document</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#1-introduction" class="nav-link">1. Introduction</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#2-problem-statement" class="nav-link">2. Problem Statement</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#3-objectives" class="nav-link">3. Objectives</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#4-key-features" class="nav-link">4. Key Features</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#5-target-audience" class="nav-link">5. Target Audience</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#6-success-metrics" class="nav-link">6. Success Metrics</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#7-constraints" class="nav-link">7. Constraints</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#8-environment-and-dependencies" class="nav-link">8. Environment and Dependencies</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#9-future-enhancements" class="nav-link">9. Future Enhancements</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#10-conclusion" class="nav-link">10. Conclusion</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="soccer-prediction-project-product-requirement-document">Soccer Prediction Project - Product Requirement Document</h1>
+<h2 id="1-introduction">1. Introduction</h2>
+<p>The Soccer Prediction Project aims to deliver a high-precision, robust, and reproducible system for predicting soccer match draws and goal patterns. Designed primarily for betting applications and soccer analytics, the project integrates an ensemble of machine learning models to improve prediction accuracy while ensuring consistency through rigorous experiment tracking.</p>
+<h2 id="2-problem-statement">2. Problem Statement</h2>
+<p>Betting applications and soccer analytical platforms require accurate predictions for match outcomes, especially draws and goal patterns. Traditional prediction models often lack robustness and the necessary precision to support decisions in high-stakes betting scenarios. This project addresses these challenges by combining multiple machine learning models, advanced feature engineering, and dynamic threshold optimization.</p>
+<h2 id="3-objectives">3. Objectives</h2>
+<ul>
+<li><strong>High-Precision Predictions:</strong> Achieve target precision (&gt;= 0.50) while maintaining a minimum recall threshold, ensuring reliable forecasts for betting and analytics.</li>
+<li><strong>Ensemble Robustness:</strong> Combine diverse machine learning models (e.g., LightGBM, XGBoost) to enhance overall prediction performance.</li>
+<li><strong>Reproducibility:</strong> Maintain consistent results using fixed seeds and extensive MLflow tracking.</li>
+<li><strong>Modular and Scalable Architecture:</strong> Ensure a clear separation between data ingestion, feature engineering, model training, hyperparameter tuning, and prediction services.</li>
+</ul>
+<h2 id="4-key-features">4. Key Features</h2>
+<ul>
+<li><strong>Ensemble Model Architecture:</strong></li>
+<li>Leverages multiple state-of-the-art models, including LightGBM, XGBoost, CatBoost, and RandomForest, to enhance prediction performance.</li>
+<li>Employs ensemble techniques such as dynamic weighting, probability calibration, and threshold tuning to combine model outputs, aiming for a target precision of ≥50%.</li>
+<li>
+<p>Integrates base models from <code>/models/StackedEnsemble</code> and <code>/models/ensemble</code>.</p>
+</li>
+<li>
+<p><strong>Dynamic Feature Engineering:</strong></p>
+</li>
+<li>
+<p>Custom feature extraction tailored to soccer match data utilizing utilities in <code>/utils</code> (e.g., <code>feature_selection.py</code>, <code>advanced_goal_features.py</code>).</p>
+</li>
+<li>
+<p><strong>Hyperparameter Tuning &amp; Optimization:</strong></p>
+</li>
+<li>
+<p>Leverages Optuna with persistent storage (SQLite) to identify optimal model parameters.</p>
+</li>
+<li>
+<p><strong>Prediction Service:</strong></p>
+</li>
+<li>
+<p>Implements real-time prediction via <code>/predictors/predict_ensemble.py</code>.</p>
+</li>
+<li>
+<p><strong>Experiment Tracking:</strong></p>
+</li>
+<li>Comprehensive tracking with MLflow for model parameters, metrics, and artifact registration.</li>
+</ul>
+<h2 id="5-target-audience">5. Target Audience</h2>
+<ul>
+<li><strong>Betting Companies:</strong> To support data-driven betting strategies with accurate predictions.</li>
+<li><strong>Soccer Analytics Firms:</strong> Providing insights on match outcomes and performance metrics.</li>
+<li><strong>Data Scientists and ML Engineers:</strong> Interested in advanced ensemble methods and reproducible research.</li>
+</ul>
+<h2 id="6-success-metrics">6. Success Metrics</h2>
+<ul>
+<li><strong>Precision &amp; Recall:</strong> Meeting or exceeding target precision (&gt;= 0.50) and maintaining adequate recall (&gt;= 0.25).</li>
+<li><strong>Reproducibility:</strong> Consistent model performance, verified via MLflow tracking.</li>
+<li><strong>User Adoption:</strong> Positive feedback from beta deployments and real-world applications in betting platforms.</li>
+</ul>
+<h2 id="7-constraints">7. Constraints</h2>
+<ul>
+<li>The system is optimized for CPU-only environments; GPU-based techniques are not currently supported.</li>
+<li>Data quality is critical; the input data must be clean and contain all required features for accurate predictions.</li>
+</ul>
+<h2 id="8-environment-and-dependencies">8. Environment and Dependencies</h2>
+<ul>
+<li><strong>Operating System:</strong> Windows 11</li>
+<li><strong>Python Version:</strong> 3.9+</li>
+<li><strong>Key Dependencies:</strong> LightGBM, XGBoost, scikit-learn, Optuna, MLflow, Pandas, NumPy</li>
+<li><strong>Environment Management:</strong> Use a Python virtual environment with dependencies installed using <code>pip install -r requirements.txt</code>.</li>
+</ul>
+<h2 id="9-future-enhancements">9. Future Enhancements</h2>
+<ul>
+<li><strong>Model Extensions:</strong> Incorporate additional base models and explore deeper neural network architectures.</li>
+<li><strong>GPU Support:</strong> In future releases, extend support to GPU-based training for scalability.</li>
+<li><strong>Enhanced Data Validation:</strong> Implement robust anomaly detection mechanisms in the data preprocessing pipeline.</li>
+</ul>
+<h2 id="10-conclusion">10. Conclusion</h2>
+<p>The Soccer Prediction Project is poised to deliver a state-of-the-art solution for soccer match prediction. By leveraging an ensemble of machine learning models, advanced feature engineering, and rigorous experiment tracking, the system aims to provide high-precision predictions that are critical for effective soccer analytics and betting decision-making. ಠ_ಠ</p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+                <p>Copyright &copy; 2025 Richard Szita</p>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../js/base.js"></script>
+        <script src="../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

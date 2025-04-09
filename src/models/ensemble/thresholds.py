@@ -1,0 +1,350 @@
+"""
+Threshold Optimization
+
+Functions for optimizing classification thresholds.
+"""
+
+from typing import Any
+
+import mlflow
+import numpy as np
+import pandas as pd
+from sklearn.metrics import f1_score, precision_score, recall_score
+
+from utils.logger import ExperimentLogger
+
+
+def tune_threshold(
+    probs: np.ndarray,
+    targets: pd.Series,
+    grid_start: float = 0.0,
+    grid_stop: float = 1.0,
+    grid_step: float = 0.01,
+    target_precision: float = 0.50,
+    min_recall: float = 0.40,
+    logger: ExperimentLogger = None,
+) -> tuple[float, dict]:
+    """
+    Tune the global threshold by scanning a grid.
+
+    Args:
+        probs: Predicted probabilities
+        targets: True binary labels
+        grid_start: Start of threshold grid
+        grid_stop: End of threshold grid
+        grid_step: Step size for threshold grid
+        target_precision: Target precision to achieve
+        min_recall: Minimum recall required
+        logger: Logger instance
+
+    Returns:
+        Tuple of (optimal_threshold, metrics_at_threshold)
+    """
+    if logger is None:
+        logger = ExperimentLogger(
+            experiment_name="ensemble_model_thresholds", log_dir="./logs/ensemble_model_thresholds"
+        )
+
+    logger.info(f"Tuning threshold with target precision {target_precision:.2f}...")
+
+    # Track metrics for each threshold
+    thresholds = []
+    metrics = []
+
+    # Initialize best threshold and metrics
+    best_threshold = 0.5
+    best_metrics = None
+    best_score = -1  # Score to maximize
+
+    # Scan threshold grid and compute metrics
+    for threshold in np.arange(grid_start, grid_stop, grid_step):
+        preds = (probs >= threshold).astype(int)
+
+        # Calculate metrics
+        prec = precision_score(targets, preds, zero_division=0)
+        rec = recall_score(targets, preds, zero_division=0)
+        f1 = f1_score(targets, preds, zero_division=0)
+
+        # Calculate weighted score that prioritizes precision
+        score = prec
+
+        # Store metrics for this threshold
+        threshold_metrics = {
+            "threshold": threshold,
+            "precision": prec,
+            "recall": rec,
+            "f1": f1,
+            "score": score,
+        }
+
+        thresholds.append(threshold)
+        metrics.append(threshold_metrics)
+
+        # Update best threshold if criteria are met
+        # Criteria: Score is better, and either precision meets target or it's better than before
+        if score > best_score and rec >= min_recall:
+            best_threshold = threshold
+            best_metrics = threshold_metrics
+            best_score = score
+
+    # If no threshold met the criteria, choose threshold closest to target precision
+    if best_metrics is None:
+        precision_diffs = [abs(m["precision"] - target_precision) for m in metrics]
+        best_idx = np.argmin(precision_diffs)
+        best_threshold = thresholds[best_idx]
+        best_metrics = metrics[best_idx]
+
+    # Log results
+    logger.info(f"Selected threshold: {best_threshold:.4f}")
+    logger.info("Metrics at selected threshold:")
+    logger.info(f"  Precision: {best_metrics['precision']:.4f}")
+    logger.info(f"  Recall: {best_metrics['recall']:.4f}")
+    logger.info(f"  F1 Score: {best_metrics['f1']:.4f}")
+
+    # Log to MLflow
+    mlflow.log_metrics(
+        {
+            "tuned_threshold": best_threshold,
+            "tuned_precision": best_metrics["precision"],
+            "tuned_recall": best_metrics["recall"],
+            "tuned_f1": best_metrics["f1"],
+        }
+    )
+
+    return best_threshold, best_metrics
+
+
+def tune_individual_threshold(
+    probs: np.ndarray,
+    targets: pd.Series,
+    grid_start: float = 0.3,
+    grid_stop: float = 0.7,
+    grid_step: float = 0.01,
+    min_recall: float = 0.25,
+) -> float:
+    """
+    Tune threshold for a single model's probabilities.
+
+    Args:
+        probs: Predicted probabilities from a single model
+        targets: True binary labels
+        grid_start: Start of threshold grid
+        grid_stop: End of threshold grid
+        grid_step: Step size for threshold grid
+        min_recall: Minimum recall required
+
+    Returns:
+        Optimal threshold for the model
+    """
+    best_f1 = 0
+    best_threshold = 0.5
+
+    # Scan threshold grid
+    for threshold in np.arange(grid_start, grid_stop, grid_step):
+        preds = (probs >= threshold).astype(int)
+
+        # Calculate metrics
+        precision = precision_score(targets, preds, zero_division=0)
+        recall = recall_score(targets, preds, zero_division=0)
+
+        # Skip thresholds with recall below minimum
+        if recall < min_recall:
+            continue
+
+        # Calculate F1 score
+        if precision + recall > 0:
+            2 * precision * recall / (precision + recall)
+        else:
+            pass
+
+        # Update best threshold
+        if precision > best_f1:
+            best_f1 = precision
+            best_threshold = threshold
+
+    return best_threshold
+
+
+def tune_threshold_for_precision(
+    y_prob: np.ndarray,
+    y_true: pd.Series,
+    target_precision: float = 0.50,
+    required_recall: float = 0.25,
+    min_threshold: float = 0.1,
+    max_threshold: float = 0.9,
+    step: float = 0.01,
+    logger: ExperimentLogger = None,
+) -> dict[str, Any]:
+    """
+    Tune the threshold to achieve a target precision with a minimum recall requirement.
+
+    Args:
+        y_prob: Predicted probabilities
+        y_true: True binary labels
+        target_precision: Target precision to achieve
+        required_recall: Minimum required recall
+        min_threshold: Minimum threshold to consider
+        max_threshold: Maximum threshold to consider
+        step: Step size for threshold grid
+        logger: Logger instance
+
+    Returns:
+        Tuple of (optimal_threshold, metrics_at_threshold)
+    """
+    if logger is None:
+        logger = ExperimentLogger(
+            experiment_name="ensemble_model_thresholds", log_dir="./logs/ensemble_model_thresholds"
+        )
+
+    logger.info(
+        f"Tuning threshold for precision {target_precision:.2f} with minimum recall {required_recall:.2f}..."
+    )
+
+    # Track metrics for each threshold
+    thresholds = np.arange(min_threshold, max_threshold + step, step)
+    precisions = []
+    recalls = []
+    f1_scores = []
+
+    # Scan threshold grid
+    for threshold in thresholds:
+        y_pred = (y_prob >= threshold).astype(int)
+
+        # Get metrics at this threshold
+        try:
+            prec = precision_score(y_true, y_pred, zero_division=0)
+            rec = recall_score(y_true, y_pred, zero_division=0)
+            f1 = f1_score(y_true, y_pred, zero_division=0)
+        except Exception as e:
+            logger.warning(f"Error calculating metrics at threshold {threshold}: {str(e)}")
+            prec, rec, f1 = 0, 0, 0
+
+        precisions.append(prec)
+        recalls.append(rec)
+        f1_scores.append(f1)
+
+    # Find eligible thresholds that meet minimum recall requirement
+    eligible_indices = [i for i, r in enumerate(recalls) if r >= required_recall]
+
+    if not eligible_indices:
+        logger.warning(
+            f"No thresholds meet minimum recall of {required_recall:.2f}. Relaxing constraint."
+        )
+        # Fallback: choose threshold with best F1 score
+        best_idx = np.argmax(f1_scores)
+        optimal_threshold = thresholds[best_idx]
+        logger.info(
+            f"Relaxed threshold selected: {optimal_threshold:.4f} (precision={precisions[best_idx]:.4f}, recall={recalls[best_idx]:.4f})"
+        )
+    else:
+        # Filter thresholds that meet recall requirement
+        eligible_thresholds = [thresholds[i] for i in eligible_indices]
+        eligible_precisions = [precisions[i] for i in eligible_indices]
+        eligible_recalls = [recalls[i] for i in eligible_indices]
+        eligible_f1s = [f1_scores[i] for i in eligible_indices]
+
+        # Find threshold closest to target precision
+        precision_diffs = [abs(p - target_precision) for p in eligible_precisions]
+        best_idx = np.argmin(precision_diffs)
+        optimal_threshold = eligible_thresholds[best_idx]
+        optimal_precision = eligible_precisions[best_idx]
+        optimal_recall = eligible_recalls[best_idx]
+        optimal_f1 = eligible_f1s[best_idx]
+        logger.info(f"Optimal threshold selected: {optimal_threshold:.4f}")
+        logger.info("Metrics at optimal threshold:")
+        logger.info(f"  Precision: {optimal_precision:.4f}")
+        logger.info(f"  Recall: {optimal_recall:.4f}")
+        logger.info(f"  F1 Score: {optimal_f1:.4f}")
+        metrics = {
+            "precision": optimal_precision if optimal_precision is not None else 0,
+            "recall": optimal_recall if optimal_recall is not None else 0,
+            "f1": optimal_f1 if optimal_f1 is not None else 0,
+        }
+    # Log to MLflow
+    mlflow.log_metrics(
+        {
+            "precision_tuned_threshold": optimal_threshold,
+            "precision_at_threshold": precisions[thresholds.tolist().index(optimal_threshold)],
+            "recall_at_threshold": recalls[thresholds.tolist().index(optimal_threshold)],
+        }
+    )
+
+    return optimal_threshold, metrics
+
+
+def tune_threshold_for_precision_optimized(
+    y_prob: np.ndarray,
+    y_true: pd.Series,
+    target_precision: float = 0.50,
+    required_recall: float = 0.25,
+    min_threshold: float = 0.1,
+    max_threshold: float = 0.9,
+    step: float = 0.01,
+    logger: ExperimentLogger = None,
+):
+    """
+    A simplified version of threshold optimization that uses numpy operations
+    instead of looping through each threshold individually.
+    """
+    if logger is None:
+        logger = ExperimentLogger(
+            experiment_name="ensemble_model_thresholds", log_dir="./logs/ensemble_model_thresholds"
+        )
+    # Generate threshold array
+    thresholds = np.arange(min_threshold, max_threshold + step, step)
+
+    # Calculate metrics for all thresholds at once using vectorized operations
+    metrics_by_threshold = []
+    for threshold in thresholds:
+        y_pred = (y_prob >= threshold).astype(int)
+        # Calculate confusion matrix components
+        tp = np.sum((y_true == 1) & (y_pred == 1))
+        fp = np.sum((y_true == 0) & (y_pred == 1))
+        fn = np.sum((y_true == 1) & (y_pred == 0))
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2 * precision * recall / (precision + recall)
+        metrics_by_threshold.append(
+            {"threshold": threshold, "precision": precision, "recall": recall, "f1": f1}
+        )
+
+    # Convert to DataFrame for easier filtering and analysis
+    metrics_df = pd.DataFrame(metrics_by_threshold)
+
+    # Filter thresholds that meet minimum recall
+    valid_thresholds = metrics_df[metrics_df["recall"] >= required_recall]
+
+    if len(valid_thresholds) > 0:
+        # Find threshold with best precision among those with sufficient recall
+        best_threshold_idx = valid_thresholds["precision"].idxmax()
+        best_metrics = valid_thresholds.loc[best_threshold_idx].to_dict()
+    else:
+        # Fallback: find threshold with best F1 score
+        logger.warning(
+            f"No thresholds meet minimum recall of {required_recall}. Selecting best F1 score."
+        )
+        best_threshold_idx = metrics_df["f1"].idxmax()
+        best_metrics = metrics_df.loc[best_threshold_idx].to_dict()
+
+    logger.info(f"Selected threshold: {best_metrics['threshold']:.4f}")
+    logger.info(
+        f"Metrics at selected threshold: Precision={best_metrics['precision']:.4f}, "
+        f"Recall={best_metrics['recall']:.4f}, F1={best_metrics['f1']:.4f}"
+    )
+
+    # Log to MLflow
+    mlflow.log_metrics(
+        {
+            "precision_tuned_threshold": best_metrics["threshold"],
+            "precision_at_threshold": best_metrics["precision"],
+            "recall_at_threshold": best_metrics["recall"],
+        }
+    )
+
+    return best_metrics["threshold"], {
+        "threshold": best_metrics["threshold"],
+        "precision": best_metrics["precision"],
+        "recall": best_metrics["recall"],
+        "f1": best_metrics["f1"],
+    }
