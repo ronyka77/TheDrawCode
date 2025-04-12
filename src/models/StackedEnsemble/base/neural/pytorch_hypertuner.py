@@ -637,7 +637,7 @@ def log_to_mlflow_pytorch(
             logger.info(f"Logged metrics: {metrics}")
 
             # Log the scaler
-            scaler_path = "scaler_pytorch.pkl"
+            scaler_path = "src/models/scalers/scaler_pytorch.pkl"
             with open(scaler_path, "wb") as f:
                 pickle.dump(scaler, f)
             mlflow.log_artifact(scaler_path, artifact_path="scaler")
@@ -932,7 +932,7 @@ def main():
         logger.info(f"Target mean - Train: {y_train.mean():.3f}, Val: {y_val.mean():.3f}, Test: {y_test.mean():.3f}")
 
         # Fit the scaler ONLY on training data
-        scaler_path = "scaler_pytorch.pkl"
+        scaler_path = "src/models/scalers/scaler_pytorch.pkl"
         if os.path.exists(scaler_path):
             logger.info(f"Loading existing scaler from {scaler_path}")
             with open(scaler_path, 'rb') as f:
