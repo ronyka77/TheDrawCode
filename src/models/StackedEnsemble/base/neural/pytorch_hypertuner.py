@@ -341,13 +341,6 @@ def train_pytorch_model(
             
             logger.debug(f"Epoch {epoch+1}/{epochs} - Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
 
-            # Optuna Pruning (based on validation loss)
-            # if trial:
-            #     trial.report(avg_val_loss, epoch)
-            #     if trial.should_prune():
-            #         logger.info(f"Trial {trial.number} pruned at epoch {epoch+1}.")
-            #         raise optuna.TrialPruned()
-
             # Early Stopping
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
@@ -573,7 +566,7 @@ def optimize_hyperparameters(
 
     # Run the optimization
     try:
-        study.optimize(objective_func, n_trials=n_trials, callbacks=[log_callback], show_progress_bar=True)
+        study.optimize(objective_func, n_trials=n_trials, callbacks=[log_callback], show_progress_bar=True, n_jobs=8)
     except KeyboardInterrupt:
         logger.warning("Optimization stopped manually via KeyboardInterrupt.")
     
