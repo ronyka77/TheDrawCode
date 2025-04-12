@@ -7,7 +7,7 @@ import pymc as pm
 from optuna.samplers import TPESampler
 from sklearn.metrics import accuracy_score, f1_score, log_loss, precision_score, recall_score
 
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 logger = ExperimentLogger(experiment_name="soccer_prediction", log_dir="logs/soccer_prediction")
 

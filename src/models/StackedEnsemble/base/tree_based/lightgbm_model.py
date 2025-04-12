@@ -502,20 +502,20 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "learning_rate": 0.15000000000000002,
-                "num_leaves": 85,
-                "max_depth": 7,
-                "min_child_samples": 400,
-                "feature_fraction": 0.65,
-                "bagging_fraction": 0.6900000000000001,
-                "bagging_freq": 11,
-                "reg_alpha": 14.5,
+                "learning_rate": 0.14500000000000002,
+                "num_leaves": 95,
+                "max_depth": 8,
+                "min_child_samples": 200,
+                "feature_fraction": 0.6900000000000001,
+                "bagging_fraction": 0.6000000000000001,
+                "bagging_freq": 12,
+                "reg_alpha": 6.7,
                 "reg_lambda": 11.9,
-                "min_split_gain": 0.24000000000000002,
-                "early_stopping_rounds": 860,
-                "path_smooth": 0.085,
-                "cat_smooth": 10.0,
-                "max_bin": 440,
+                "min_split_gain": 0.16,
+                "early_stopping_rounds": 400,
+                "path_smooth": 0.525,
+                "cat_smooth": 5.4,
+                "max_bin": 670,
             }
         )
 
@@ -563,10 +563,10 @@ def main():
         # Hyperparameter optimization - run 3 times and select best
         logger.info("Starting hyperparameter optimization")
 
-        logger.info("Starting hyperparameter optimization run")
-        current_params, current_metrics = hypertune_lightgbm(experiment_name)
-        logger.info(f"Run completed with parameters: {current_params}")
-        logger.info(f"Run metrics: {current_metrics}")
+        # logger.info("Starting hyperparameter optimization run")
+        # current_params, current_metrics = hypertune_lightgbm(experiment_name)
+        # logger.info(f"Run completed with parameters: {current_params}")
+        # logger.info(f"Run metrics: {current_metrics}")
 
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(

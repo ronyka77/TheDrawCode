@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, precision_score, recall_score
 
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 
 def tune_threshold(

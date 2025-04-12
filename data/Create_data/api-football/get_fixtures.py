@@ -550,7 +550,6 @@ class ApiFootball:
     def get_teams_missing_venues(self) -> list[int]:
         """
         Retrieves team IDs from fixtures collection that don't have corresponding venue data.
-
         Returns:
             List of team IDs that need venue information
         """
@@ -813,6 +812,67 @@ class ApiFootball:
         except Exception as e:
             self.logger.error(f"Error updating venues: {e}")
 
+    def delete_old_unscored_fixtures(self) -> None:
+        """
+        Deletes fixtures from MongoDB that are older than 7 days and have no score.
+        """
+        try:
+            # Calculate cutoff date (7 days ago)
+            cutoff_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            
+            # Delete fixtures that match criteria
+            # First count the number of fixtures that match criteria
+            count = self.fixtures_collection.count_documents({
+                "date": {"$lt": cutoff_date},
+                "score.fulltime.home": None
+            })
+            self.logger.info(f"Found {count} old unscored fixtures to delete")
+            
+            # Then delete them
+            result = self.fixtures_collection.delete_many({
+                "date": {"$lt": cutoff_date}, 
+                "score.fulltime.home": None
+            })
+
+            self.logger.info(f"Deleted {result.deleted_count} old unscored fixtures")
+            print(f"Deleted {result.deleted_count} old unscored fixtures")
+
+        except Exception as e:
+            self.logger.error(f"Error deleting old unscored fixtures: {e}")
+
+    def process_and_save_venues(self) -> None:
+        """
+        Retrieves venue data from MongoDB, processes it, and saves to Excel.
+        - Normalizes nested venue data structure
+        - Converts capacity to numeric values
+        - Standardizes string columns
+        - Saves processed data to Excel file
+        """
+        try:
+            # Get all venue data from MongoDB collection
+            venues_data = list(self.venues_collection.find({}))
+            
+            # Normalize venue data by flattening nested structure
+            venues_df = pd.json_normalize(venues_data, sep="_", max_level=2)
+            
+            # Convert capacity to numeric and handle missing values
+            if "venue_capacity" in venues_df.columns:
+                venues_df["venue_capacity"] = pd.to_numeric(venues_df["venue_capacity"], errors="coerce")
+            
+            # Standardize string columns
+            string_cols = ["venue_name", "venue_address", "venue_city", "venue_surface"]
+            for col in string_cols:
+                if col in venues_df.columns:
+                    venues_df[col] = venues_df[col].str.strip().str.lower()
+            
+            # Save to Excel
+            output_path = os.path.join(self.project_root, "data", "create_data", "data_files", "base", "api_venues.xlsx")
+            venues_df.to_excel(output_path, index=False)
+            
+            self.logger.info(f"Venues data saved to {output_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error processing and saving venues data: {e}")
 
 def main():
     api_key = os.getenv("API_FOOTBALL_API_KEY")
@@ -823,34 +883,19 @@ def main():
     logger = ExperimentLogger("get_fixtures")
     api_football = ApiFootball(api_key, logger)
 
-    api_football.get_fixtures_for_leagues()
+    # api_football.get_fixtures_for_leagues()
 
-    api_football.get_statistics_for_fixtures()
+    # api_football.get_statistics_for_fixtures()
 
-    api_football.delete_fixtures_not_in_leagues()
+    # api_football.delete_fixtures_not_in_leagues()
 
-    api_football.get_teams_for_leagues()
+    api_football.delete_old_unscored_fixtures()
 
-    api_football.update_venues()
-    # Get all venue data from MongoDB collection
-    venues_data = list(api_football.venues_collection.find({}))
-    # Normalize venue data by flattening nested structure
-    venues_df = pd.json_normalize(venues_data, sep="_", max_level=2)
-    # Convert capacity to numeric and handle missing values
-    if "venue_capacity" in venues_df.columns:
-        venues_df["venue_capacity"] = pd.to_numeric(venues_df["venue_capacity"], errors="coerce")
-    # Standardize string columns
-    string_cols = ["venue_name", "venue_address", "venue_city", "venue_surface"]
-    for col in string_cols:
-        if col in venues_df.columns:
-            venues_df[col] = venues_df[col].str.strip().str.lower()
-    venues_df.to_excel(
-        os.path.join(project_root, "data", "create_data", "data_files", "base", "api_venues.xlsx"),
-        index=False,
-    )
-    logger.info(
-        f"Venues data saved to {os.path.join(project_root, 'data', 'create_data', 'data_files', 'base', 'api_venues.xlsx')}"
-    )
+    # api_football.get_teams_for_leagues()
+
+    # api_football.update_venues()
+
+    # api_football.process_and_save_venues()
 
 
 if __name__ == "__main__":

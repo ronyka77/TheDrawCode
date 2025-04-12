@@ -20,8 +20,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold
 
-from models.ensemble.thresholds import tune_threshold_for_precision_optimized
-from utils.logger import ExperimentLogger
+from src.models.ensemble.thresholds import tune_threshold_for_precision_optimized
+from src.utils.logger import ExperimentLogger
 
 logger = ExperimentLogger(experiment_name="ensemble_model_evaluation")
 

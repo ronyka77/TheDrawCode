@@ -9,7 +9,6 @@ This module provides:
 
 import os
 import shutil
-import sys
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -18,21 +17,12 @@ import mlflow
 from mlflow.models.signature import ModelSignature
 from mlflow.tracking import MlflowClient
 
-# Add project root to path
-try:
-    project_root = Path(__file__).parent.parent
-    sys.path.append(str(project_root))
-except Exception as e:
-    print(f"Error setting project root path: {e}")
-    sys.path.append(os.getcwd())
-
 # Local imports
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 # Initialize logger
 logger = ExperimentLogger(experiment_name="mlflow_integration", log_dir="logs/mlflow_integration")
-
-
+project_root = Path(__file__).parent.parent
 class MLflowIntegration:
     """MLflow integration for experiment tracking and model management."""
 
@@ -49,11 +39,9 @@ class MLflowIntegration:
         self, experiment_name: str, artifact_location: Optional[str] = None
     ) -> str:
         """Set up MLflow experiment.
-
         Args:
             experiment_name: Name of the experiment
             artifact_location: Optional custom artifact location
-
         Returns:
             Experiment ID
         """
@@ -80,7 +68,6 @@ class MLflowIntegration:
                     f"Using existing experiment: {experiment_name}",
                     extra={"experiment_id": experiment_id},
                 )
-
             return experiment_id
 
         except Exception as e:
@@ -101,7 +88,6 @@ class MLflowIntegration:
             experiment_id: Optional experiment ID
             nested: Whether this is a nested run
             tags: Optional tags for the run
-
         Returns:
             MLflow ActiveRun context
         """
@@ -115,7 +101,6 @@ class MLflowIntegration:
                 f"Started MLflow run: {run_name or 'unnamed'}",
                 extra={"run_id": run.info.run_id, "experiment_id": run.info.experiment_id},
             )
-
             return run
 
         except Exception as e:
@@ -124,7 +109,6 @@ class MLflowIntegration:
 
     def log_params(self, params: dict[str, Any], run_id: Optional[str] = None) -> None:
         """Log parameters to MLflow.
-
         Args:
             params: Dictionary of parameters to log
             run_id: Optional run ID (uses active run if not specified)
@@ -135,9 +119,7 @@ class MLflowIntegration:
                     mlflow.log_params(params)
             else:
                 mlflow.log_params(params)
-
             logger.info("Logged parameters to MLflow", extra={"params": params})
-
         except Exception as e:
             logger.error(f"Error logging parameters: {str(e)}")
             raise
@@ -158,9 +140,7 @@ class MLflowIntegration:
                     mlflow.log_metrics(metrics, step=step)
             else:
                 mlflow.log_metrics(metrics, step=step)
-
             logger.info("Logged metrics to MLflow", extra={"metrics": metrics, "step": step})
-
         except Exception as e:
             logger.error(f"Error logging metrics: {str(e)}")
             raise
@@ -175,7 +155,6 @@ class MLflowIntegration:
         **kwargs,
     ) -> None:
         """Log a model to MLflow.
-
         Args:
             model: Model object to log
             artifact_path: Path for model artifact
@@ -224,7 +203,6 @@ class MLflowIntegration:
         run_id: Optional[str] = None,
     ) -> None:
         """Log an artifact to MLflow.
-
         Args:
             local_path: Path to artifact file
             artifact_path: Optional path within artifact directory

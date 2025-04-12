@@ -11,20 +11,28 @@ from src.utils.logger import ExperimentLogger
 
 
 def compute_precision_focused_weights_optimized(
-    p_xgb, p_tabnet, p_lgb, p_extra, p_mlp, y_true, target_precision, required_recalls, logger=None
+    p_xgb, p_tabnet, p_lgb, p_extra, p_mlp, p_pytorch,
+    y_true, target_precision, required_recalls, logger=None
 ):
     """
-    Compute weights with strong focus on precision, including MLP model
+    Compute weights with strong focus on precision, including MLP and PyTorch models.
+    Now handles 6 base models.
     """
     if logger is None:
-        logger = ExperimentLogger(experiment_name="ensemble_weights_0404")
+        logger = ExperimentLogger(experiment_name="ensemble_weights_0410")
 
-    logger.info("Computing precision-focused weights...")
+    logger.info("Computing precision-focused weights for 6 models...")
+    
+    # Ensure required_recalls has 6 elements
+    if len(required_recalls) != 6:
+        raise ValueError(f"Expected required_recalls list to have 6 elements, got {len(required_recalls)}")
+        
     xgb_recall = required_recalls[0]
     lgb_recall = required_recalls[1]
     tabnet_recall = required_recalls[2]
     extra_recall = required_recalls[3]
     mlp_recall = required_recalls[4]
+    pytorch_recall = required_recalls[5]
 
     # Find precision-optimal thresholds
     logger.info("Tuning thresholds for XGBoost...")
@@ -47,6 +55,10 @@ def compute_precision_focused_weights_optimized(
     mlp_threshold, mlp_metrics = tune_threshold_for_precision_optimized(
         p_mlp, y_true, target_precision, mlp_recall
     )
+    logger.info("Tuning thresholds for PyTorch Model...")
+    pytorch_threshold, pytorch_metrics = tune_threshold_for_precision_optimized(
+        p_pytorch, y_true, target_precision, pytorch_recall
+    )
 
     # Calculate weight based on precision^2 (to emphasize precision differences)
     xgb_weight = xgb_metrics["precision"] ** 2
@@ -54,23 +66,37 @@ def compute_precision_focused_weights_optimized(
     lgb_weight = lgb_metrics["precision"] ** 2
     extra_weight = extra_metrics["precision"] ** 2
     mlp_weight = mlp_metrics["precision"] ** 2
+    pytorch_weight = pytorch_metrics["precision"] ** 2
 
-    # Ensure minimum contribution from each model (5%)
-    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight + mlp_weight
-    xgb_weight = max(0.05, xgb_weight / total_weight)
-    tabnet_weight = max(0.05, tabnet_weight / total_weight)
-    lgb_weight = max(0.05, lgb_weight / total_weight)
-    extra_weight = max(0.05, extra_weight / total_weight)
-    mlp_weight = max(0.05, mlp_weight / total_weight)
+    # Ensure minimum contribution from each model (e.g., 5% -> 1/num_models? Let's keep 5% for now)
+    min_contrib = 0.05 
+    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight + mlp_weight + pytorch_weight
+    if total_weight <= 0: # Avoid division by zero if all precisions are 0
+        logger.warning("All base model precisions are zero. Assigning equal weights.")
+        num_models = 6
+        weights = {m: 1.0/num_models for m in ["xgb", "tabnet", "lgb", "extra", "mlp", "pytorch"]}
+        thresholds = {
+            "xgb": xgb_threshold, "tabnet": tabnet_threshold, "lgb": lgb_threshold,
+            "extra": extra_threshold, "mlp": mlp_threshold, "pytorch": pytorch_threshold
+        }
+        return weights, thresholds
+
+    xgb_weight = max(min_contrib, xgb_weight / total_weight)
+    tabnet_weight = max(min_contrib, tabnet_weight / total_weight)
+    lgb_weight = max(min_contrib, lgb_weight / total_weight)
+    extra_weight = max(min_contrib, extra_weight / total_weight)
+    mlp_weight = max(min_contrib, mlp_weight / total_weight)
+    pytorch_weight = max(min_contrib, pytorch_weight / total_weight)
 
     # Renormalize
-    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight + mlp_weight
+    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight + mlp_weight + pytorch_weight
     weights = {
         "xgb": xgb_weight / total_weight,
         "tabnet": tabnet_weight / total_weight,
         "lgb": lgb_weight / total_weight,
         "extra": extra_weight / total_weight,
         "mlp": mlp_weight / total_weight,
+        "pytorch": pytorch_weight / total_weight,
     }
     thresholds = {
         "xgb": xgb_threshold,
@@ -78,6 +104,7 @@ def compute_precision_focused_weights_optimized(
         "lgb": lgb_threshold,
         "extra": extra_threshold,
         "mlp": mlp_threshold,
+        "pytorch": pytorch_threshold,
     }
 
     # Log metrics if MLflow run is active
@@ -88,11 +115,13 @@ def compute_precision_focused_weights_optimized(
             "lgb_precision": lgb_metrics["precision"],
             "extra_precision": extra_metrics["precision"],
             "mlp_precision": mlp_metrics["precision"],
+            "pytorch_precision": pytorch_metrics["precision"],
             "xgb_recall": xgb_metrics["recall"],
             "tabnet_recall": tabnet_metrics["recall"],
             "lgb_recall": lgb_metrics["recall"],
             "extra_recall": extra_metrics["recall"],
             "mlp_recall": mlp_metrics["recall"],
+            "pytorch_recall": pytorch_metrics["recall"],
         }
         mlflow.log_metrics(metrics_log)
         for model, weight in weights.items():

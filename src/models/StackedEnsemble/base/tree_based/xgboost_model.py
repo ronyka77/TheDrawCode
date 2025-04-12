@@ -397,13 +397,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
         XGBoostPruningCallback(trial, "validation_0-aucpr")
         # Train model and get metrics using DataFrames
         model, metrics = train_model(
-            X_train,
-            y_train,
-            X_test,
-            y_test,
-            X_eval,  # Pass X_eval for threshold optimization and eval_set
-            y_eval,
-            params,  # Pass combined params (including early stopping for train_model)
+            X_train, y_train, X_test, y_test, X_eval, y_eval, params
         )
 
         recall = metrics.get("recall", 0.0)
@@ -469,7 +463,7 @@ def hypertune_xgboost(X_train, y_train, X_test, y_test, X_eval, y_eval, experime
                 y_train,
                 X_test,
                 y_test,
-                X_eval,  # Pass X_eval through
+                X_eval,
                 y_eval,
                 hyperparameter_space=hyperparameter_space,
             )
@@ -620,31 +614,24 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.warning(
             "Training model with precision target - Ensure parameters are updated from HPO."
         )
-        # TODO: Dynamically load best params from HPO instead of hardcoding
         params = base_params.copy()
         params.update(
             {
-                "learning_rate": 0.075,
-                "max_depth": 9,
-                "min_child_weight": 450,
-                "colsample_bytree": 0.6599999999999999,
+                "early_stopping_rounds": 700,
+                "learning_rate": 0.05,
+                "max_depth": 8,
+                "min_child_weight": 430,
+                "colsample_bytree": 0.84,
                 "subsample": 0.71,
-                "gamma": 1.56,
-                "lambda": 2.59,
-                "alpha": 11.3,
-                "scale_pos_weight": 2.38,
-                "early_stopping_rounds": 1130,
+                "gamma": 2.14,
+                "lambda": 9.700000000000001,
+                "alpha": 25.200000000000003,
+                "scale_pos_weight": 2.36,
             }
         )
         # Train final model with specific parameters
         model, metrics = train_model(
-            X_train,
-            y_train,
-            X_test,
-            y_test,
-            X_eval,  # Pass X_eval
-            y_eval,
-            params,
+            X_train, y_train, X_test, y_test, X_eval, y_eval, params
         )
 
         # Log to MLflow using the DataFrame X_eval for signature
@@ -687,10 +674,10 @@ def main():
         current_params = None
         current_metrics = None
         # Run Hyperparameter Optimization
-        current_params, current_metrics = hypertune_xgboost(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass DataFrames
-            experiment_name
-        )
+        # current_params, current_metrics = hypertune_xgboost(
+        #     X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass DataFrames
+        #     experiment_name
+        # )
 
         if current_params and current_metrics:
             logger.info(f"HPO run completed with parameters: {current_params}")
@@ -699,12 +686,7 @@ def main():
             # For now, it uses hardcoded params, but needs X_eval, y_eval
             logger.info("Proceeding to train final model with precision target settings.")
             best_model, best_metrics = train_with_precision_target(
-                X_train,
-                y_train,
-                X_test,
-                y_test,
-                X_eval,
-                y_eval,  # Pass DataFrames
+                X_train, y_train, X_test, y_test, X_eval, y_eval
             )
 
             if best_model and best_metrics:

@@ -48,12 +48,15 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 # Local imports
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name, log_dir="./logs/ensemble_model_improved")
-from models.ensemble.ensemble_model_0404 import EnsembleModel
-from utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
+from src.models.ensemble.ensemble_model_0410 import EnsembleModel
+from src.utils.create_evaluation_set import (
+    import_selected_features_ensemble,
+    setup_mlflow_tracking,
+)
 
 
 def run_ensemble(
@@ -68,7 +71,6 @@ def run_ensemble(
 ):
     """
     Main function to run the ensemble model training and evaluation.
-
     Args:
         extra_base_model_type: Type of fourth base model ('random_forest', 'svm', or 'mlp')
         meta_learner_type: Type of meta-learner ('xgb', 'logistic', or 'mlp')
@@ -103,7 +105,7 @@ def run_ensemble(
 
             try:
                 logger.info("Loading data...")
-                from models.StackedEnsemble.shared.data_loader import DataLoader
+                from src.models.StackedEnsemble.shared.data_loader import DataLoader
 
                 X_train, y_train, X_test, y_test, X_val, y_val = DataLoader().load_data()
                 # Convert all columns to float64 to ensure consistent data types

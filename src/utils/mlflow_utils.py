@@ -25,7 +25,7 @@ except Exception as e:
     sys.path.append(os.getcwd().parent)
     print(f"Current directory mlflow_utils: {os.getcwd().parent}")
 
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 
 class MLFlowConfig:

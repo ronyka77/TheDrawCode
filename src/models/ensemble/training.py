@@ -25,15 +25,15 @@ from sklearn.metrics import f1_score
 from sklearn.neural_network import MLPClassifier
 from xgboost import XGBClassifier
 
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 logger = ExperimentLogger(
     experiment_name="ensemble_model_training", log_dir="./logs/ensemble_model_training"
 )
 
-from models.ensemble.ResNet import ResNetMetaLearner
-from models.ensemble.thresholds import tune_threshold_for_precision_optimized
-from utils.create_evaluation_set import import_selected_features_ensemble
+from src.models.ensemble.ResNet import ResNetMetaLearner
+from src.models.ensemble.thresholds import tune_threshold_for_precision_optimized
+from src.utils.create_evaluation_set import import_selected_features_ensemble
 
 # Filter scikit-learn parameter renaming warnings
 warnings.filterwarnings("ignore", message=".*force_all_finite.*", category=FutureWarning)
@@ -492,14 +492,13 @@ def hypertune_meta_learner(
     eval_meta_features: Optional[np.ndarray] = None,
     eval_meta_targets: Optional[np.ndarray] = None,
     meta_learner_type="xgb",
-    n_trials=200,
+    n_trials=100,
     timeout=900000,
     target_precision=0.5,
     min_recall=0.25,
 ):
     """
     Hypertune meta-learner using Optuna and optimize threshold for precision/recall balance.
-
     Args:
         meta_features: Meta-features for training
         meta_targets: Target values for training
@@ -510,7 +509,6 @@ def hypertune_meta_learner(
         timeout: Maximum time for optimization in seconds
         target_precision: Target precision for threshold optimization
         min_recall: Minimum required recall
-
     Returns:
         tuple: (best_meta_learner, best_threshold)
     """
@@ -541,6 +539,33 @@ def hypertune_meta_learner(
     os.environ["NUMEXPR_NUM_THREADS"] = "8"
     os.environ["VECLIB_MAXIMUM_THREADS"] = "8"
     logger.info(f"Hyperparameter tuning for meta-learner type: {meta_learner_type}")
+    best_model = None
+
+    if meta_learner_type == "tabnet":
+        # Convert to numpy arrays if pandas
+        if hasattr(meta_features, "values"):
+            # Use to_numpy() for modern pandas
+            meta_features_np = meta_features.to_numpy()
+            meta_targets_np = (
+                meta_targets.to_numpy()
+                if hasattr(meta_targets, "to_numpy")
+                else meta_targets
+            )
+            eval_features_np = (
+                eval_meta_features.to_numpy()
+                if hasattr(eval_meta_features, "to_numpy")
+                else eval_meta_features
+            )
+            eval_targets_np = (
+                eval_meta_targets.to_numpy()
+                if hasattr(eval_meta_targets, "to_numpy")
+                else eval_meta_targets
+            )
+        else:
+            meta_features_np = meta_features
+            meta_targets_np = meta_targets
+            eval_features_np = eval_meta_features
+            eval_targets_np = eval_meta_targets
 
     def objective(trial):
         # Define hyperparameters based on meta-learner type
@@ -570,6 +595,7 @@ def hypertune_meta_learner(
             }
             params.update(base_params)
             meta_learner = XGBClassifier(**params)
+            trial.set_user_attr("model", meta_learner)
         elif meta_learner_type == "tabnet":
             base_params = {
                 "optimizer_fn": optim.Adam,
@@ -598,29 +624,32 @@ def hypertune_meta_learner(
                 "max_epochs": trial.suggest_int("max_epochs", 60, 200, step=5),  # Fit param
                 "patience": trial.suggest_int("patience", 5, 30, step=1),  # Fit param
                 "batch_size": trial.suggest_int("batch_size", 1024, 16384),  # Fit param
-                "virtual_batch_size": trial.suggest_int(
-                    "virtual_batch_size", 128, 4096
-                ),  # Fit param
+                "virtual_batch_size": trial.suggest_int("virtual_batch_size", 128, 4096),  # Fit param
+                "eval_metric": params.get("eval_metric", ["logloss", "auc"]),
             }
-            params.update(fit_params)
+            # params.update(fit_params)
+            train_params = params
             # Handle optimizer params separately
             if "learning_rate" in params:
                 params["optimizer_params"] = {"lr": params["learning_rate"]}
                 # Optionally remove learning_rate from params to avoid passing it to TabNetClassifier
                 del params["learning_rate"]
-            if "eval_metric" in params:
-                params.pop("eval_metric")
-            if "patience" in params:
-                params.pop("patience")
-            if "max_epochs" in params:
-                params.pop("max_epochs")
-            if "batch_size" in params:
-                params.pop("batch_size")
-            if "virtual_batch_size" in params:
-                params.pop("virtual_batch_size")
-            meta_learner = TabNetClassifier(**params)
-            # Store fit params separately to pass to the fit method
-            params["fit_params"] = fit_params
+            if "eval_metric" in train_params:
+                train_params.pop("eval_metric")
+            if "patience" in train_params:
+                train_params.pop("patience")
+            if "max_epochs" in train_params:
+                train_params.pop("max_epochs")
+            if "batch_size" in train_params:
+                train_params.pop("batch_size")
+            if "virtual_batch_size" in train_params:
+                train_params.pop("virtual_batch_size")
+            meta_learner = TabNetClassifier(**train_params)
+            # Update trial params with both training and model params
+            params.update(fit_params)
+            for key, value in params.items():
+                trial.set_user_attr(key, value)
+            trial.set_user_attr("model", meta_learner)
         elif meta_learner_type == "lgb":
             base_params = {
                 "objective": "binary",
@@ -650,6 +679,7 @@ def hypertune_meta_learner(
             }
             params.update(base_params)
             meta_learner = LGBMClassifier(**params)
+            trial.set_user_attr("model", meta_learner)
         elif meta_learner_type == "logistic":
             base_params = {
                 "solver": "saga",  # Compatible with all penalties
@@ -665,13 +695,12 @@ def hypertune_meta_learner(
 
             if params["penalty"] == "elasticnet":
                 params["l1_ratio"] = trial.suggest_float("l1_ratio", 0.0, 1.0)
-
             params["class_weight"] = trial.suggest_categorical("class_weight", [None, "balanced"])
-
             if params["penalty"] == "elasticnet":
                 params["l1_ratio"] = trial.suggest_float("l1_ratio", 0.0, 1.0)
 
             meta_learner = LogisticRegression(**params)
+            trial.set_user_attr("model", meta_learner)
         elif meta_learner_type == "mlp":
             base_params = {"early_stopping": True, "random_state": 19}
             params = {
@@ -687,6 +716,7 @@ def hypertune_meta_learner(
             }
 
             meta_learner = MLPClassifier(**params)
+            trial.set_user_attr("model", meta_learner)
         elif meta_learner_type == "sgd":
             base_params = {"random_state": 19, "n_jobs": 4}
             params = {
@@ -712,6 +742,7 @@ def hypertune_meta_learner(
 
             params.update(base_params)
             meta_learner = SGDClassifier(**params)
+            trial.set_user_attr("model", meta_learner)
         elif meta_learner_type == "resnet":
             base_params = {
                 "tree_method": "hist"  # Enforce CPU-only training
@@ -726,6 +757,7 @@ def hypertune_meta_learner(
             }
             params.update(base_params)
             meta_learner = ResNetMetaLearner(**params)
+            trial.set_user_attr("model", meta_learner)
         else:
             raise ValueError(f"Unsupported meta-learner type: {meta_learner_type}")
 
@@ -733,43 +765,15 @@ def hypertune_meta_learner(
         try:
             if meta_learner_type == "tabnet":
                 # Special handling for TabNet's training
-                # Get fit parameters stored earlier
-                fit_params = params.pop("fit_params")
-                # Convert to numpy arrays if pandas
-                if hasattr(meta_features, "values"):
-                    # Use to_numpy() for modern pandas
-                    meta_features_np = meta_features.to_numpy()
-                    meta_targets_np = (
-                        meta_targets.to_numpy()
-                        if hasattr(meta_targets, "to_numpy")
-                        else meta_targets
-                    )
-                    eval_features_np = (
-                        eval_meta_features.to_numpy()
-                        if hasattr(eval_meta_features, "to_numpy")
-                        else eval_meta_features
-                    )
-                    eval_targets_np = (
-                        eval_meta_targets.to_numpy()
-                        if hasattr(eval_meta_targets, "to_numpy")
-                        else eval_meta_targets
-                    )
-                else:
-                    meta_features_np = meta_features
-                    meta_targets_np = meta_targets
-                    eval_features_np = eval_meta_features
-                    eval_targets_np = eval_meta_targets
-
-                # Train TabNet with early stopping on eval set
                 meta_learner.fit(
                     meta_features_np,
                     meta_targets_np,
                     eval_set=[(eval_features_np, eval_targets_np)],
-                    max_epochs=fit_params["max_epochs"],
-                    patience=fit_params["patience"],
-                    batch_size=fit_params["batch_size"],
-                    virtual_batch_size=fit_params["virtual_batch_size"],
-                    eval_metric=["auc", "logloss"],
+                    max_epochs=params["max_epochs"],
+                    patience=params["patience"],
+                    batch_size=params["batch_size"],
+                    virtual_batch_size=params["virtual_batch_size"],
+                    eval_metric=params.get("eval_metric", ["logloss", "auc"]),
                     weights=1,  # Use automatic class weighting
                     drop_last=False,
                 )
@@ -782,7 +786,6 @@ def hypertune_meta_learner(
                     target_precision,
                     min_recall,  # Use numpy targets here
                 )
-
                 if metrics["recall"] < min_recall:
                     return -1.0
                 return metrics["precision"]
@@ -817,8 +820,7 @@ def hypertune_meta_learner(
                     eval_set=[(eval_meta_features, eval_meta_targets)],
                     callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)],
                 )
-            elif (
-                hasattr(meta_learner, "early_stopping_rounds")
+            elif (hasattr(meta_learner, "early_stopping_rounds")
                 or hasattr(meta_learner, "early_stopping")
                 and meta_learner_type != "sgd"
             ):
@@ -861,17 +863,19 @@ def hypertune_meta_learner(
 
     # Total trials to conduct
     total_trials = n_trials
-    batch_size = 200
+    batch_size = 100
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
 
     # Callback function for tracking top trials
     def callback(study, trial):
-        nonlocal best_score, best_params, top_trials
+        nonlocal best_score, best_params, top_trials, best_model
         if trial.value > best_score:
             best_score = trial.value
             best_params = trial.params
+            best_model = trial.user_attrs["model"]
+            logger.info(f"Best params: {best_params}")
         # Create a record for the current trial
         current_run = (trial.value, trial.params, trial.number)
         top_trials.append(current_run)
@@ -901,9 +905,7 @@ def hypertune_meta_learner(
         study = optuna.create_study(
             study_name=study_name,
             direction="maximize",
-            sampler=random_sampler,
-            # storage=storage_url,
-            # load_if_exists=True
+            sampler=random_sampler
         )
 
         logger.info(
@@ -927,157 +929,124 @@ def hypertune_meta_learner(
     # Get best parameters from global top trials
     if global_top_trials:
         best_score, best_params, best_trial_number = global_top_trials[0]
-
-    # Define base parameters outside objective function scope
-    if meta_learner_type == "xgb":
-        base_params = {
-            "tree_method": "hist",
-            "objective": "binary:logistic",
-            "n_jobs": 4,
-            "eval_metric": ["aucpr", "error", "logloss"],
-            # 'device': 'cpu',
-            "random_state": 19,
-        }
-    elif meta_learner_type == "lgb":
-        base_params = {
-            "objective": "binary",
-            "metric": ["binary_logloss", "auc"],
-            "n_jobs": 4,
-            "random_state": 19,
-            "device": "cpu",
-            "verbose": -1,
-        }
-    elif meta_learner_type == "tabnet":
-        base_params = {"device": "cpu", "verbose": -1}
-    elif meta_learner_type == "logistic":
-        base_params = {
-            "solver": "saga",  # Compatible with all penalties
-            "random_state": 19,
-        }
-    elif meta_learner_type == "mlp":
-        base_params = {"max_iter": 1000, "early_stopping": True, "random_state": 19}
-    elif meta_learner_type == "sgd":
-        base_params = {"random_state": 19, "n_jobs": 4}
-    else:
-        raise ValueError(f"Unsupported meta-learner type: {meta_learner_type}")
-
+        logger.info(f"Best params: {best_params}")
+    # # Define base parameters outside objective function scope
+    # if meta_learner_type == "xgb":
+    #     base_params = {
+    #         "tree_method": "hist",
+    #         "objective": "binary:logistic",
+    #         "n_jobs": 4,
+    #         "eval_metric": ["aucpr", "error", "logloss"],
+    #         # 'device': 'cpu',
+    #         "random_state": 19,
+    #     }
+    # elif meta_learner_type == "lgb":
+    #     base_params = {
+    #         "objective": "binary",
+    #         "metric": ["binary_logloss", "auc"],
+    #         "n_jobs": 4,
+    #         "random_state": 19,
+    #         "device": "cpu",
+    #         "verbose": -1,
+    #     }
+    # elif meta_learner_type == "tabnet":
+    #     base_params = {
+    #             "optimizer_fn": optim.Adam,
+    #             "mask_type": "sparsemax",
+    #             "eval_metric": ["logloss", "auc"],
+    #             "verbose": 0,
+    #             "seed": 19,
+    #             "device_name": "cuda",}
+    # elif meta_learner_type == "logistic":
+    #     base_params = {
+    #         "solver": "saga",  # Compatible with all penalties
+    #         "random_state": 19,
+    #     }
+    # elif meta_learner_type == "mlp":
+    #     base_params = {"max_iter": 1000, "early_stopping": True, "random_state": 19}
+    # elif meta_learner_type == "sgd":
+    #     base_params = {"random_state": 19, "n_jobs": 4}
+    # else:
+    #     raise ValueError(f"Unsupported meta-learner type: {meta_learner_type}")
+    best_meta_learner = best_model
     # Train final meta-learner with best parameters
-    if meta_learner_type == "xgb":
-        from xgboost import XGBClassifier
+    # if meta_learner_type == "xgb":
+    #     from xgboost import XGBClassifier
 
-        best_params.update(base_params)
-        best_meta_learner = XGBClassifier(**best_params)
-    elif meta_learner_type == "lgb":
-        import lightgbm as lgb
-        from lightgbm import LGBMClassifier
+    #     best_params.update(base_params)
+    #     best_meta_learner = XGBClassifier(**best_params)
+    # elif meta_learner_type == "lgb":
+    #     import lightgbm as lgb
+    #     from lightgbm import LGBMClassifier
 
-        best_params.update(base_params)
-        best_meta_learner = LGBMClassifier(**best_params)
-    elif meta_learner_type == "tabnet":
-        from pytorch_tabnet.tab_model import TabNetClassifier
+    #     best_params.update(base_params)
+    #     best_meta_learner = LGBMClassifier(**best_params)
+    # elif meta_learner_type == "tabnet":
+    #     best_meta_learner = best_model
+    # elif meta_learner_type == "logistic":
+    #     from sklearn.linear_model import LogisticRegression
 
-        best_params.update(base_params)
-        # Handle optimizer params separately
-        if "learning_rate" in best_params:
-            best_params["optimizer_params"] = {"lr": best_params["learning_rate"]}
-            del best_params["learning_rate"]
-        fit_params = {
-            best_params["eval_metric"],
-            best_params["patience"],
-            best_params["max_epochs"],
-            best_params["batch_size"],
-            best_params["virtual_batch_size"],
-        }
-        # Remove params that should be passed to fit method
-        for param in ["eval_metric", "patience", "max_epochs", "batch_size", "virtual_batch_size"]:
-            if param in best_params:
-                best_params.pop(param)
-        best_meta_learner = TabNetClassifier(**best_params)
-    elif meta_learner_type == "logistic":
-        from sklearn.linear_model import LogisticRegression
+    #     best_params.update(base_params)
+    #     best_meta_learner = LogisticRegression(**best_params)
+    # elif meta_learner_type == "mlp":
+    #     from sklearn.neural_network import MLPClassifier
 
-        best_params.update(base_params)
-        best_meta_learner = LogisticRegression(**best_params)
-    elif meta_learner_type == "mlp":
-        from sklearn.neural_network import MLPClassifier
+    #     best_params.update(**base_params)
+    #     if "hidden_units" in best_params:
+    #         best_params["hidden_layer_sizes"] = (best_params.pop("hidden_units"),)
+    #     best_meta_learner = MLPClassifier(best_params)
+    # elif meta_learner_type == "sgd":
+    #     from sklearn.linear_model import SGDClassifier
+    #     best_params.update(**base_params)
+    #     best_meta_learner = SGDClassifier(**best_params)
 
-        best_params.update(**base_params)
-        if "hidden_units" in best_params:
-            best_params["hidden_layer_sizes"] = (best_params.pop("hidden_units"),)
-        best_meta_learner = MLPClassifier(best_params)
-    elif meta_learner_type == "sgd":
-        from sklearn.linear_model import SGDClassifier
-
-        best_params.update(**base_params)
-        best_meta_learner = SGDClassifier(**best_params)
-
-    # This log message applies to all meta-learners
-    logger.info(f"Training final model with best parameters: {best_params}")
+    
     # Train final model
-    if meta_learner_type == "lgb":
-        early_stopping_rounds = best_params.pop("early_stopping_rounds")
-        best_meta_learner.fit(
-            meta_features,
-            meta_targets,
-            eval_set=[(eval_meta_features, eval_meta_targets)],
-            callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)],
-        )
-    elif meta_learner_type == "tabnet":
-        # Convert to numpy arrays if pandas
-        if hasattr(meta_features, "values"):
-            # Use to_numpy() for modern pandas
-            meta_features_np = meta_features.to_numpy()
-            meta_targets_np = (
-                meta_targets.to_numpy() if hasattr(meta_targets, "to_numpy") else meta_targets
-            )
-            eval_features_np = (
-                eval_meta_features.to_numpy()
-                if hasattr(eval_meta_features, "to_numpy")
-                else eval_meta_features
-            )
-            eval_targets_np = (
-                eval_meta_targets.to_numpy()
-                if hasattr(eval_meta_targets, "to_numpy")
-                else eval_meta_targets
-            )
-        else:
-            meta_features_np = meta_features
-            meta_targets_np = meta_targets
-            eval_features_np = eval_meta_features
-            eval_targets_np = eval_meta_targets
-        best_meta_learner.fit(
-            meta_features_np,
-            meta_targets_np,
-            eval_set=[(eval_features_np, eval_targets_np)],
-            max_epochs=fit_params["max_epochs"],
-            patience=fit_params["patience"],
-            batch_size=fit_params["batch_size"],
-            virtual_batch_size=fit_params["virtual_batch_size"],
-            eval_metric=fit_params["eval_metric"],
-        )
-    elif (
-        hasattr(best_meta_learner, "early_stopping_rounds")
-        or hasattr(best_meta_learner, "early_stopping")
-        and meta_learner_type != "sgd"
-    ):
-        best_meta_learner.fit(
-            meta_features,
-            meta_targets,
-            eval_set=[(eval_meta_features, eval_meta_targets)],
-            verbose=False,
-        )
-    else:
-        best_meta_learner.fit(meta_features, meta_targets)
+    # if meta_learner_type == "lgb":
+    #     early_stopping_rounds = best_params.pop("early_stopping_rounds")
+    #     best_meta_learner.fit(
+    #         meta_features,
+    #         meta_targets,
+    #         eval_set=[(eval_meta_features, eval_meta_targets)],
+    #         callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)],
+    #     )
+    # elif meta_learner_type == "tabnet":
+    #     # best_params.update(base_params)
+    #     # fit_params = {
+    #     #     "eval_metric": best_params["eval_metric"],
+    #     #     "patience": best_params["patience"],
+    #     #     "max_epochs": best_params["max_epochs"],
+    #     #     "batch_size": best_params["batch_size"],
+    #     #     "virtual_batch_size": best_params["virtual_batch_size"],
+    #     # }
+    #     # # Convert to numpy arrays if pandas
+    #     # best_meta_learner.fit(
+    #     #     meta_features_np,
+    #     #     meta_targets_np,
+    #     #     eval_set=[(eval_features_np, eval_targets_np)],
+    #     #     max_epochs=fit_params["max_epochs"],
+    #     #     patience=fit_params["patience"],
+    #     #     batch_size=fit_params["batch_size"],
+    #     #     virtual_batch_size=fit_params["virtual_batch_size"],
+    #     #     eval_metric=fit_params["eval_metric"],
+    #     # )
+    #     best_meta_learner = best_model
+    # elif (
+    #     hasattr(best_meta_learner, "early_stopping_rounds")
+    #     or hasattr(best_meta_learner, "early_stopping")
+    #     and meta_learner_type != "sgd"
+    # ):
+    #     best_meta_learner.fit(
+    #         meta_features,
+    #         meta_targets,
+    #         eval_set=[(eval_meta_features, eval_meta_targets)],
+    #         verbose=False,
+    #     )
+    # else:
+    #     best_meta_learner.fit(meta_features, meta_targets)
 
     # Get predictions and find optimal threshold
     if meta_learner_type == "tabnet":
-        # Convert to numpy arrays if pandas
-        if hasattr(eval_meta_features, "values"):
-            eval_features_np = eval_meta_features.to_numpy()
-            eval_targets_np = eval_meta_targets.to_numpy()
-        else:
-            eval_features_np = eval_meta_features
-            eval_targets_np = eval_meta_targets
         y_proba = best_meta_learner.predict_proba(eval_features_np)[:, 1]
     else:
         if hasattr(best_meta_learner, "predict_proba"):

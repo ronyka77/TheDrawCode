@@ -1,7 +1,7 @@
 import optuna
 
-study_name = "random_forest_optimization"
-storage_url = "sqlite:///optuna_random_forest.db"
+study_name = "xgboost_optimization"
+storage_url = "sqlite:///optuna_xgboost.db"
 top_n = 10
 
 

@@ -12,7 +12,7 @@ import pandas as pd
 import shap
 from sklearn.metrics import confusion_matrix
 
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 
 def detect_data_leakage(

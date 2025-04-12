@@ -11,7 +11,7 @@ from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import brier_score_loss
 
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 
 def calibrate_models(

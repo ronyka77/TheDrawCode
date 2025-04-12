@@ -1,11 +1,8 @@
-# Imports
 import os
 import random
-import sys
-import time
+import traceback
 import warnings
 from datetime import datetime
-from pathlib import Path
 
 import mlflow
 import mlflow.pyfunc
@@ -19,32 +16,19 @@ from pytorch_tabnet.tab_model import TabNetClassifier
 from sklearn.base import BaseEstimator
 from sklearn.metrics import precision_score, recall_score
 from sklearn.preprocessing import QuantileTransformer
-
-# Add imports for schedulers
+from sklearn.utils.multiclass import type_of_target
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
 
-# Set project root similar to xgboost_model.py
-try:
-    project_root = Path(__file__).parent.parent.parent.parent.parent
-    if not project_root.exists():
-        project_root = Path(r"\\".join(str(project_root).split("\\")))
-    sys.path.append(str(project_root))
-    print(f"Project root: {project_root}")
-except Exception as e:
-    print(f"Error setting project root path: {e}")
-    sys.path.append(os.getcwd())
-    print(f"Current directory: {os.getcwd()}")
-
 # Logger and shared utilities
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 experiment_name = "tabnet_soccer_prediction"
 logger = ExperimentLogger(experiment_name=experiment_name)
 
 # Import shared utility functions
-from models.StackedEnsemble.shared.data_loader import DataLoader
-from models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
-from utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
+from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
+from src.utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
 
 # Filter specific TabNet weight-related warnings
 warnings.filterwarnings(
@@ -61,7 +45,7 @@ n_trials = 20000
 base_params = {
     "optimizer_fn": optim.Adam,
     "mask_type": "sparsemax",
-    "eval_metric": ["logloss", "auc"],  # Remove function reference here
+    "eval_metric": ["logloss", "auc"],  # Default metrics, custom one passed in fit
     "verbose": 0,
     "seed": 19,
     "device_name": "cuda",
@@ -91,7 +75,6 @@ else:
     # Force base_params to CPU if CUDA isn't found, to avoid potential errors
     base_params["device_name"] = "cpu"
 
-
 def load_hyperparameter_space():
     """
     Define hyperparameter space for TabNet tuning.
@@ -99,82 +82,38 @@ def load_hyperparameter_space():
     hyperparameter_space = {
         "learning_rate": {
             "type": "float",
-            "low": 1e-4,  # Lower bound decreased
-            "high": 5e-1,  # Upper bound increased
+            "low": 1e-4,
+            "high": 5e-1,
             "log": True,
         },
-        "n_d": {
-            "type": "int",
-            "low": 8,  # Increased lower bound
-            "high": 64,  # Increased upper bound for more complex features
-        },
-        "n_a": {
-            "type": "int",
-            "low": 8,  # Increased lower bound
-            "high": 64,  # Increased upper bound for attention
-        },
-        "n_steps": {
-            "type": "int",
-            "low": 3,  # Increased lower bound
-            "high": 15,  # Increased upper bound for deeper networks
-        },
-        "gamma": {
-            "type": "float",
-            "low": 0.5,  # Decreased lower bound
-            "high": 3.0,  # Increased upper bound
-            "step": 0.05,
-        },
-        "lambda_sparse": {
-            "type": "float",
-            "low": 1e-7,  # Lower bound decreased
-            "high": 1e-2,  # Upper bound increased
-            "log": True,
-        },
-        "momentum": {
-            "type": "float",
-            "low": 0.7,  # Decreased lower bound
-            "high": 0.99,
-            "step": 0.005,
-        },
-        "patience": {
-            "type": "int",
-            "low": 5,  # Increased lower bound
-            "high": 30,  # Increased upper bound
-        },
-        "max_epochs": {
-            "type": "int",
-            "low": 60,  # Increased lower bound
-            "high": 200,  # Increased upper bound
-            "step": 5,  # Increased step size
-        },
-        "batch_size": {  # Added batch size tuning
-            "type": "int",
-            "low": 1024,
-            "high": 16384,
-        },
-        "virtual_batch_size": {  # Added virtual batch size tuning
-            "type": "int",
-            "low": 128,
-            "high": 4096,
-        },
+        "n_d": {"type": "int", "low": 8, "high": 64},
+        "n_a": {"type": "int", "low": 8, "high": 64},
+        "n_steps": {"type": "int", "low": 3, "high": 15},
+        "gamma": {"type": "float", "low": 0.5, "high": 3.0, "step": 0.05},
+        "lambda_sparse": {"type": "float", "low": 1e-7, "high": 1e-2, "log": True},
+        "momentum": {"type": "float", "low": 0.7, "high": 0.99, "step": 0.005},
+        "patience": {"type": "int", "low": 5, "high": 30},
+        "max_epochs": {"type": "int", "low": 60, "high": 200, "step": 5},
+        "batch_size": {"type": "int", "low": 1024, "high": 16384},
+        "virtual_batch_size": {"type": "int", "low": 128, "high": 4096},
         "n_independent": {"type": "int", "low": 1, "high": 5},
         "n_shared": {"type": "int", "low": 1, "high": 5},
-        # New regularization parameter
         "weight_decay": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True},
-        # Scheduler type parameter
         "scheduler_type": {
             "type": "categorical",
             "choices": ["cosine", "plateau", "onecycle", "none"],
         },
-        # Scheduler specific parameters
         "scheduler_patience": {"type": "int", "low": 3, "high": 10},
         "scheduler_factor": {"type": "float", "low": 0.1, "high": 0.5},
         "scheduler_min_lr": {"type": "float", "low": 1e-6, "high": 1e-4, "log": True},
         "scheduler_t_max": {"type": "int", "low": 5, "high": 20},
         "scheduler_div_factor": {"type": "float", "low": 10.0, "high": 30.0},
+        "fit_weights": {
+            "type": "categorical",
+            "choices": [0, 1]
+        },
     }
     return hyperparameter_space
-
 
 # Create a custom metric that heavily weights precision
 class PrecisionFocusedMetric(Metric):
@@ -185,31 +124,56 @@ class PrecisionFocusedMetric(Metric):
 
     def __call__(self, y_true, y_score):
         """F-beta score with beta < 1 to favor precision over recall"""
-        pred = (y_score > 0.5).astype(int)
-        precision = precision_score(y_true, pred)
-        recall = recall_score(y_true, pred)
+
+        # Ensure y_true is a 1D array
+        # Check type of target
+        y_true_type = type_of_target(y_true)
+        if y_true_type == "multilabel-indicator":
+            # Assuming binary classification represented as one-hot
+            # Convert back to 1D: take the argmax along the class axis (axis=1)
+            y_true_flat = np.argmax(y_true, axis=1)
+        elif y_true_type == "binary":
+            y_true_flat = y_true.astype(int) # Ensure integer type
+        else:
+            # Handle unexpected types or raise an error
+            logger.warning(f"Unexpected y_true type '{y_true_type}' in PrecisionFocusedMetric. Attempting to flatten.")
+            try:
+                y_true_flat = y_true.astype(int).ravel() # General attempt to flatten
+            except Exception as e:
+                logger.error(f"Could not convert y_true to 1D array: {e}")
+                return 0.0 # Return 0 score if conversion fails
+
+        # Ensure y_score handling is robust
+        # Check if y_score has 2 columns (expected for binary probabilities)
+        if y_score.ndim == 2 and y_score.shape[1] == 2:
+            pred = (y_score[:, 1] > 0.5).astype(int) # Use probability of positive class
+        elif y_score.ndim == 1: # If y_score is already 1D predictions/scores
+            pred = (y_score > 0.5).astype(int) # Threshold directly
+        else:
+            logger.error(f"Unexpected y_score shape {y_score.shape} in PrecisionFocusedMetric.")
+            return 0.0 # Return 0 score if y_score format is wrong
+
+        # Calculate precision and recall safely
+        try:
+            # Check target types again just before sklearn call for debugging
+            # logger.debug(f"y_true_flat type: {type_of_target(y_true_flat)}, pred type: {type_of_target(pred)}")
+            precision = precision_score(y_true_flat, pred, zero_division=0)
+            recall = recall_score(y_true_flat, pred, zero_division=0)
+        except ValueError as e:
+            logger.error(f"Error calculating scores in PrecisionFocusedMetric: {e}")
+            logger.error(f"y_true_flat sample: {y_true_flat[:5]}, shape: {y_true_flat.shape}, type: {type_of_target(y_true_flat)}")
+            logger.error(f"pred sample: {pred[:5]}, shape: {pred.shape}, type: {type_of_target(pred)}")
+            return 0.0 # Return 0 score if scikit-learn metric fails
 
         # If recall below threshold, return 0
         if recall < min_recall:
-            return 0
+            return 0.0
 
         # F-beta with beta < 1 favors precision
-        return (
+        f_beta = (
             (1 + self.beta**2) * (precision * recall) / (self.beta**2 * precision + recall + 1e-8)
         )
-
-
-class FocalLoss(Metric):
-    def __init__(self, gamma=2.0):
-        self._name = "focal_loss"
-        self._maximize = False
-        self.gamma = gamma
-
-    def __call__(self, y_true, y_score):
-        """Compute focal loss for binary classification."""
-        pt = np.where(y_true == 1, y_score, 1 - y_score)
-        return -np.mean((1 - pt) ** self.gamma * np.log(pt + 1e-7))
-
+        return f_beta
 
 class TabNetSklearnWrapper(BaseEstimator):
     """
@@ -249,7 +213,6 @@ class TabNetSklearnWrapper(BaseEstimator):
             data = X
         return self.model.predict_proba(data)
 
-
 class TabNetWrapper(mlflow.pyfunc.PythonModel):
     def __init__(self, model):
         self.model = model
@@ -274,214 +237,286 @@ class TabNetWrapper(mlflow.pyfunc.PythonModel):
             data = model_input
         return self.model.predict_proba(data)
 
-
 def create_model(model_params):
     """
     Create and configure TabNet model instance based on provided parameters.
+    Uses internal TabNet loss.
     """
     try:
+        # Start with base parameters and update with model_params
         params = base_params.copy()
-        params.update(model_params)
-
-        # Configure optimizer with weight decay for L2 regularization
-        weight_decay = params.pop("weight_decay", 1e-5)
-        lr = params.pop("learning_rate", 0.01)
-
-        # Update optimizer parameters with learning rate and weight decay
-        params["optimizer_params"] = {
-            "lr": lr,
-            "weight_decay": weight_decay,  # Add L2 regularization
+        # Define valid constructor args and config keys
+        valid_constructor_args = {
+            "n_d", "n_a", "n_steps", "gamma", "lambda_sparse", "optimizer_fn",
+            "optimizer_params", "scheduler_fn", "scheduler_params", "mask_type",
+            "n_independent", "n_shared", "epsilon", "momentum", "device_name",
+            "seed", "verbose", "cat_idxs", "cat_dims", "cat_emb_dim"
         }
+        config_keys = {"learning_rate", "weight_decay", "scheduler_type",
+                        "scheduler_t_max", "scheduler_min_lr", "scheduler_patience",
+                        "scheduler_factor", "scheduler_div_factor"}
 
-        # Configure scheduler if specified
-        scheduler_type = params.pop("scheduler_type", "none")
-        scheduler_params = {}
+        # Extract constructor and config params from input model_params
+        constructor_params = {k: v for k, v in model_params.items() if k in valid_constructor_args}
+        config_params = {k: v for k, v in model_params.items() if k in config_keys}
 
+        # Update base params with constructor params
+        params.update(constructor_params)
+
+        # Configure optimizer
+        lr = config_params.get("learning_rate", 0.01)
+        weight_decay = config_params.get("weight_decay", 1e-5)
+        if "optimizer_params" not in params: 
+            params["optimizer_params"] = {}
+        params["optimizer_params"]["lr"] = lr
+        params["optimizer_params"]["weight_decay"] = weight_decay
+
+        # Configure scheduler
+        scheduler_type = config_params.get("scheduler_type", "none")
+        scheduler_params_config = {}
         if scheduler_type == "cosine":
             scheduler_fn = CosineAnnealingLR
-            scheduler_params = {
-                "T_max": params.pop("scheduler_t_max", 10),
-                "eta_min": params.pop("scheduler_min_lr", 1e-5),
+            scheduler_params_config = {
+                "T_max": config_params.get("scheduler_t_max", 10),
+                "eta_min": config_params.get("scheduler_min_lr", 1e-5),
             }
             params["scheduler_fn"] = scheduler_fn
-            params["scheduler_params"] = scheduler_params
+            params["scheduler_params"] = scheduler_params_config
         elif scheduler_type == "plateau":
             scheduler_fn = ReduceLROnPlateau
-            scheduler_params = {
-                "patience": params.pop("scheduler_patience", 5),
-                "factor": params.pop("scheduler_factor", 0.1),
-                "min_lr": params.pop("scheduler_min_lr", 1e-6),
-                "mode": "max",  # For metrics like AUC where higher is better
+            scheduler_params_config = {
+                "patience": config_params.get("scheduler_patience", 5),
+                "factor": config_params.get("scheduler_factor", 0.1),
+                "min_lr": config_params.get("scheduler_min_lr", 1e-6),
+                "mode": "max",
             }
             params["scheduler_fn"] = scheduler_fn
-            params["scheduler_params"] = scheduler_params
+            params["scheduler_params"] = scheduler_params_config
         elif scheduler_type == "onecycle":
             scheduler_fn = OneCycleLR
-            scheduler_params = {
-                "max_lr": lr,
-                "div_factor": params.pop("scheduler_div_factor", 25.0),
+            scheduler_params_config = {
+                "div_factor": config_params.get("scheduler_div_factor", 25.0),
                 "final_div_factor": 10000.0,
                 "pct_start": 0.3,
             }
-            # Will set total_steps in train_model based on epochs and batch size
             params["scheduler_fn"] = scheduler_fn
-            params["scheduler_params"] = scheduler_params
+            params["scheduler_params"] = scheduler_params_config
+        else:
+            params.pop("scheduler_fn", None)
+            params.pop("scheduler_params", None)
 
-        # Remove other scheduler params that might have been sampled but not used
-        for param in [
-            "scheduler_patience",
-            "scheduler_factor",
-            "scheduler_min_lr",
-            "scheduler_t_max",
-            "scheduler_div_factor",
-            "eval_metric",
-            "patience",
-            "max_epochs",
-            "batch_size",
-            "virtual_batch_size",
-        ]:
-            if param in params:
-                params.pop(param)
+        # Ensure only valid args are passed to constructor
+        final_params = {k:v for k,v in params.items() if k in valid_constructor_args or k in ["optimizer_params", "scheduler_fn", "scheduler_params"]}
+        if "verbose" in final_params:
+            final_params["verbose"] = int(final_params["verbose"])
 
-        model = TabNetClassifier(**params)
+        # Instantiate model (without loss_fn argument)
+        model = TabNetClassifier(**final_params)
         return model
     except Exception as e:
         logger.error(f"Error creating TabNet model: {str(e)}")
+        logger.error(f"Parameters passed to TabNetClassifier attempt: {final_params}")
+        logger.error(traceback.format_exc())
         raise
-
 
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
     Train a TabNet model with early stopping.
-    Converts input data to numpy arrays if they are pandas DataFrames.
+    Uses internal TabNet loss, controls imbalance via fit(weights=...).
     Returns the trained model and evaluation metrics after threshold optimization.
     """
     try:
-        # Ensure batch_size and virtual_batch_size are retrieved for fit method
-        batch_size_to_use = model_params.get("batch_size", 1024)
-        max_epochs = model_params.get("max_epochs", 50)
-
-        # Configure OneCycleLR scheduler if specified
-        if model_params.get("scheduler_type") == "onecycle":
-            # Calculate total steps for OneCycleLR
-            # Assuming X_train is already concatenated with X_test for training
-            total_samples = len(X_train) if hasattr(X_train, "__len__") else X_train.shape[0]
-            steps_per_epoch = total_samples // batch_size_to_use + (
-                1 if total_samples % batch_size_to_use != 0 else 0
-            )
-            total_steps = steps_per_epoch * max_epochs
-
-            if "scheduler_params" in model_params:
-                model_params["scheduler_params"]["total_steps"] = total_steps
-
+        # Create the model
         model = create_model(model_params)
 
-        # Convert to numpy arrays if needed
-        if hasattr(X_train, "values"):
-            X_train = X_train.values
-            y_train = y_train.values if hasattr(y_train, "values") else y_train
-            X_test = X_test.values if hasattr(X_test, "values") else X_test
-            y_test = y_test.values if hasattr(y_test, "values") else y_test
-            X_eval = X_eval.values if hasattr(X_eval, "values") else X_eval
-            y_eval = y_eval.values if hasattr(y_eval, "values") else y_eval
+        # Get fit parameters from model_params
+        batch_size_to_use = int(model_params.get("batch_size", 1024))
+        max_epochs = int(model_params.get("max_epochs", 50))
+        patience_to_use = int(model_params.get("patience", 10))
+        virtual_batch_size_to_use = int(model_params.get("virtual_batch_size", 128))
+        fit_weights_value = int(model_params.get("fit_weights", 1)) # Default to 1 (unbalanced) if not found
 
-        # Combine training and testing data similar to xgboost_model.py
+        # Update OneCycleLR scheduler params if needed
+        if model_params.get("scheduler_type") == "onecycle":
+            # Combine X_train and X_test for step calculation as they are used together in fit
+            total_samples = (len(X_train) if hasattr(X_train, "__len__") else X_train.shape[0]) + \
+                            (len(X_test) if hasattr(X_test, "__len__") else X_test.shape[0])
+            steps_per_epoch = total_samples // batch_size_to_use + (1 if total_samples % batch_size_to_use != 0 else 0)
+            total_steps = steps_per_epoch * max_epochs
+            if hasattr(model, 'scheduler_params') and isinstance(model.scheduler_params, dict):
+                lr = model_params.get("learning_rate", 0.01)
+                model.scheduler_params["max_lr"] = lr
+                model.scheduler_params["total_steps"] = total_steps
+                logger.info(f"Updated OneCycleLR params: max_lr={lr}, total_steps={total_steps}")
+            else:
+                logger.warning("OneCycleLR selected but model.scheduler_params not found/dict.")
+
+        # Convert data to numpy arrays
+        if isinstance(X_train, pd.DataFrame):
+            X_train = X_train.values
+        if isinstance(y_train, (pd.Series, pd.DataFrame)):
+            y_train = y_train.values
+        if isinstance(X_test, pd.DataFrame):
+            X_test = X_test.values
+        if isinstance(y_test, (pd.Series, pd.DataFrame)):
+            y_test = y_test.values
+        if isinstance(X_eval, pd.DataFrame):
+            X_eval = X_eval.values
+        if isinstance(y_eval, (pd.Series, pd.DataFrame)):
+            y_eval = y_eval.values
+
+        # Reshape y
+        if y_train.ndim == 2 and y_train.shape[1] == 1:
+            y_train = y_train.ravel()
+        if y_test.ndim == 2 and y_test.shape[1] == 1:
+            y_test = y_test.ravel()
+        if y_eval.ndim == 2 and y_eval.shape[1] == 1:
+            y_eval = y_eval.ravel()
+
+        # Combine training and testing data
         X_combined = np.concatenate([X_train, X_test], axis=0)
         y_combined = np.concatenate([y_train, y_test], axis=0)
 
-        # Use the class (not an instance) in the eval_metric list
-        # TabNet will instantiate it internally
+        # Define fit parameters dictionary, now using fit_weights_value
+        fit_params = {
+            "eval_set": [(X_eval, y_eval)],
+            "eval_metric": [PrecisionFocusedMetric],
+            "max_epochs": max_epochs,
+            "patience": patience_to_use,
+            "batch_size": batch_size_to_use,
+            "virtual_batch_size": virtual_batch_size_to_use,
+            "weights": fit_weights_value, # Pass the sampled weight value here
+            "drop_last": False,
+        }
+
+        # Fit the model
+        logger.info(f"Starting model.fit with epochs={max_epochs}, patience={patience_to_use}, batch_size={batch_size_to_use}, weights={fit_weights_value}")
         model.fit(
             X_combined,
             y_combined,
-            eval_set=[(X_eval, y_eval)],
-            eval_metric=model_params.get("eval_metric", "auc"),
-            max_epochs=max_epochs,
-            patience=model_params.get("patience", 10),
-            batch_size=batch_size_to_use,
-            virtual_batch_size=model_params.get("virtual_batch_size", 1024),
-            weights=1,
-            drop_last=False,
+            **fit_params
         )
-
-        # Log learning rate evolution if model has a scheduler
-        if hasattr(model, "scheduler") and model.scheduler is not None:
-            logger.info("Learning rate evolution:")
-            for i, lr in enumerate(model.scheduler_history):
-                if i % 10 == 0 or i == len(model.scheduler_history) - 1:
-                    logger.info(f"Epoch {i}: LR = {lr:.8f}")
 
         # Optimize threshold using shared utility
         best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
+
+        # Add fit_weights used to metrics dict for logging
+        metrics["fit_weights_used"] = fit_weights_value
+
         return model, metrics
     except Exception as e:
         logger.error(f"Error training TabNet model: {str(e)}")
+        logger.error(traceback.format_exc())
+        logger.error(f"Parameters during failed training: {model_params}")
         raise
-
 
 def optimize_hyperparameters(
     X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
 ):
-    logger.info("Starting hyperparameter optimization for TabNet")
+    logger.info("Starting hyperparameter optimization for TabNet (tuning fit_weights)")
     if not hyperparameter_space:
         hyperparameter_space = load_hyperparameter_space()
+
     best_score = -float("inf")
     best_params = {}
     global_top_trials = []
     top_trials = []
 
     def objective(trial):
+        nonlocal best_score, best_params
+        current_params = {}
         try:
-            params = base_params.copy()
-            # Iterate over hyperparameter space and suggest values
+            # --- Sample fit_weights first ---
+            current_params["fit_weights"] = trial.suggest_categorical("fit_weights", [0, 1])
+
+            # --- Sample other parameters ---
+            # Sample scheduler type needed for conditional params
+            scheduler_type = trial.suggest_categorical("scheduler_type", hyperparameter_space["scheduler_type"]["choices"])
+            current_params["scheduler_type"] = scheduler_type
+
+            # Iterate over the rest of the hyperparameter space
             for param_name, param_config in hyperparameter_space.items():
-                if param_config["type"] == "float":
-                    if "step" in param_config:
-                        params[param_name] = trial.suggest_float(
-                            param_name,
-                            param_config["low"],
-                            param_config["high"],
-                            step=param_config["step"],
-                            log=param_config.get("log", False),
-                        )
-                    else:
-                        params[param_name] = trial.suggest_float(
-                            param_name,
-                            param_config["low"],
-                            param_config["high"],
-                            log=param_config.get("log", False),
-                        )
-                elif param_config["type"] == "int":
-                    if "step" in param_config:
-                        params[param_name] = trial.suggest_int(
-                            param_name,
-                            param_config["low"],
-                            param_config["high"],
-                            step=param_config["step"],
-                        )
-                    else:
-                        params[param_name] = trial.suggest_int(
-                            param_name, param_config["low"], param_config["high"]
-                        )
-                elif param_config["type"] == "categorical":
-                    params[param_name] = trial.suggest_categorical(
-                        param_name, param_config["choices"]
-                    )
+                # Skip params already handled or handled conditionally
+                if param_name in ["fit_weights", "scheduler_type"]:
+                    continue
+
+                # Conditional suggestion for scheduler params
+                is_relevant_scheduler_param = False
+                if scheduler_type == "plateau" and param_name in ["scheduler_patience", "scheduler_factor", "scheduler_min_lr"]:
+                    is_relevant_scheduler_param = True
+                elif scheduler_type == "cosine" and param_name in ["scheduler_t_max", "scheduler_min_lr"]:
+                    is_relevant_scheduler_param = True
+                elif scheduler_type == "onecycle" and param_name == "scheduler_div_factor":
+                    is_relevant_scheduler_param = True
+                elif param_name not in ["scheduler_patience", "scheduler_factor", "scheduler_min_lr", "scheduler_t_max", "scheduler_div_factor"]:
+                    # Not a scheduler-specific param, suggest normally
+                    is_relevant_scheduler_param = True
+
+                if is_relevant_scheduler_param:
+                    # Suggest parameter
+                    if param_config["type"] == "float":
+                        if "step" in param_config:
+                            current_params[param_name] = trial.suggest_float(param_name, param_config["low"], param_config["high"], step=param_config["step"], log=param_config.get("log", False))
+                        else:
+                            current_params[param_name] = trial.suggest_float(param_name, param_config["low"], param_config["high"], log=param_config.get("log", False))
+                    elif param_config["type"] == "int":
+                        if "step" in param_config:
+                            current_params[param_name] = trial.suggest_int(param_name, param_config["low"], param_config["high"], step=param_config["step"])
+                        else:
+                            current_params[param_name] = trial.suggest_int(param_name, param_config["low"], param_config["high"])
+                    elif param_config["type"] == "categorical":
+                        # Only suggest if not scheduler_type (already handled)
+                        if param_name != "scheduler_type":
+                            choices = param_config.get("choices", [])
+                            if isinstance(choices, list) and choices:
+                                current_params[param_name] = trial.suggest_categorical(param_name, choices)
+                            else:
+                                logger.warning(f"Skipping categorical param '{param_name}' due to invalid/empty choices.")
 
             # Train model and get metrics
-            model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
+            model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, current_params)
+            # Store model reference for callback but don't try to serialize it
+            setattr(trial, 'model', model)  # noqa: B010
+            trial.set_user_attr('metrics', metrics)
+            trial.set_user_attr('params', current_params)
+            # Scoring logic
             recall = metrics.get("recall", 0.0)
             precision = metrics.get("precision", 0.0)
             score = precision if recall >= min_recall else 0.0
-            logger.info(f"  Score: {score}")
-            for metric_name, metric_value in metrics.items():
-                trial.set_user_attr(metric_name, metric_value)
-            return score
-        except Exception as e:
-            logger.error(f"Trial failed: {str(e)}")
-            return 0.0
 
-    def callback(study, trial):
+            # Log trial results
+            logger.info(f"  Trial {trial.number}: fit_weights={current_params['fit_weights']}, Score={score:.4f}, Precision={precision:.4f}, Recall={recall:.4f}")
+            for metric_name, metric_value in metrics.items():
+                # Serialize for Optuna
+                if isinstance(metric_value, (int, float, str, bool)) or metric_value is None:
+                    trial.set_user_attr(metric_name, metric_value)
+                elif isinstance(metric_value, np.generic):
+                    trial.set_user_attr(metric_name, metric_value.item())
+                else:
+                    trial.set_user_attr(metric_name, str(metric_value))
+
+            # Update best score and params FOR THIS RUN
+            if score > best_score:
+                best_score = score
+                best_params = current_params.copy()
+                logger.info(f"  >>> New best score in this run: {best_score:.4f} (Trial {trial.number})")
+
+            if score > 0.37:
+                logger.info(f"Trial {trial.number} completed with score {score:.4f}")
+                X_eval_orig_df = X_eval.copy()
+                log_to_mlflow(model, metrics, current_params, experiment_name, X_eval_orig_df)
+            return score
+        except optuna.TrialPruned:
+            logger.info(f"Trial {trial.number} pruned.")
+            raise # Re-raise to signal Optuna
+        except Exception as e:
+            logger.error(f"Trial {trial.number} failed.")
+            logger.error(f"Failed trial parameters: {current_params}")
+            logger.error(f"Error: {str(e)}")
+            logger.error(traceback.format_exc())
+            return 0.0 # Return low score for failed trials
+
+    def callback(study, trial, experiment_name, X_eval):
         nonlocal best_score, best_params, top_trials
         logger.info(f"Current best score in this batch: {best_score:.4f}")
         if trial.value > best_score:
@@ -510,6 +545,7 @@ def optimize_hyperparameters(
                 logger.info(row)
         return best_score
 
+    # --- Optuna Study Execution ---
     storage_url = "sqlite:///optuna_tabnet.db"
     study_name = "tabnet_optimization"
     total_trials = n_trials
@@ -518,162 +554,140 @@ def optimize_hyperparameters(
     if total_trials % batch_size != 0:
         num_batches += 1
 
-    for batch in range(num_batches):
-        batch_random_seed = int(time.time()) + batch
-        new_sampler = optuna.samplers.RandomSampler(seed=batch_random_seed)
-        study = optuna.create_study(
-            study_name=study_name,
-            direction="maximize",
-            storage=storage_url,
-            load_if_exists=True,
-            sampler=new_sampler,
-        )
-        logger.info(
-            f"Starting batch {batch + 1}/{num_batches} with new sampler (seed={batch_random_seed})"
-        )
-        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback])
-        for trial_record in top_trials:
-            global_top_trials.append(trial_record)
-        global_top_trials.sort(key=lambda x: x[0], reverse=True)
-        global_top_trials = global_top_trials[:10]
-    if global_top_trials:
-        best_score, best_params, best_trial_number = global_top_trials[0]
-    else:
-        best_params = {}
+    logger.info(f"Starting Optuna study '{study_name}' with {total_trials} trials.")
+    sampler = optuna.samplers.TPESampler(seed=SEED)
+    study = optuna.create_study(
+        study_name=study_name,
+        direction="maximize",
+        storage=storage_url,
+        load_if_exists=True,
+        sampler=sampler,
+    )
+    for _ in range(num_batches):
+        try:
+            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)])
+        except KeyboardInterrupt:
+            logger.warning("Optimization interrupted by user.")
+            break
 
-    best_params.update(base_params)
-    logger.info(f"Best trial value across batches: {best_score:.4f}")
-    logger.info(f"Best parameters found: {best_params}")
+    logger.info(f"Best parameters selected: {best_params}")
     return best_params
 
-
-def hypertune_tabnet(experiment_name: str):
+def hypertune_tabnet(experiment_name: str, X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
     Main hypertuning function for TabNet with MLflow tracking.
-    Returns best_params and metrics.
+    Returns best_params and metrics from the final trained model.
     """
     try:
-        with mlflow.start_run(run_name=f"tabnet_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-            mlflow.set_tags(
-                {"model_type": "tabnet", "training_mode": "global", "gpu_enabled": True}
-            )
-            hyperparameter_space = load_hyperparameter_space()
-            logger.info("Starting hyperparameter optimization for TabNet")
-            best_params = optimize_hyperparameters(
-                X_train,
-                y_train,
-                X_test,
-                y_test,
-                X_eval,
-                y_eval,
-                hyperparameter_space=hyperparameter_space,
-            )
-            logger.info("Training final TabNet model with best parameters")
-            model, metrics = train_model(
-                X_train_transformed,
-                y_train,
-                X_test_transformed,
-                y_test,
-                X_eval_transformed,
-                y_eval,
-                best_params,
-            )
-            mlflow.log_metrics(
-                {
-                    "precision": metrics.get("precision", 0.0),
-                    "recall": metrics.get("recall", 0.0),
-                    "f1": metrics.get("f1", 0.0),
-                    "auc": metrics.get("auc", 0.0),
-                    "threshold": metrics.get("threshold", 0.5),
-                }
-            )
-            logger.info("Logging best parameters to MLflow")
-            for param_name, param_value in best_params.items():
-                mlflow.log_param(param_name, param_value)
-            # Create input example from X_eval (convert to DataFrame if needed)
-            if not isinstance(X_eval, pd.DataFrame):
-                input_example = pd.DataFrame(X_eval[:5])
-            else:
-                input_example = X_eval.iloc[:5].copy()
-            signature = mlflow.models.infer_signature(input_example, model.predict(input_example))
-            # Log model using a custom pyfunc wrapper
-            mlflow.pyfunc.log_model(
-                artifact_path="model", python_model=TabNetWrapper(model), signature=signature
-            )
-            return best_params, metrics
+        hyperparameter_space = load_hyperparameter_space()
+        logger.info("Starting hyperparameter optimization for TabNet (tuning fit_weights)")
+
+        # === Run Optimization ===
+        best_params_found = optimize_hyperparameters(
+            X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass actual data
+            hyperparameter_space=hyperparameter_space
+        )
+
+        if not best_params_found:
+            logger.error("Hyperparameter optimization failed to find best parameters.")
+            return None, None
+
+        logger.info(f"Hyperparameter optimization completed. Best parameters found: {best_params_found}")
+
+        # === Train Final Model with Best Params ===
+        logger.info("Training final TabNet model with best parameters found...")
+        # Pass data correctly
+        final_model, final_metrics = train_model(
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, y_eval,
+            best_params_found
+        )
+
+        logger.info("Final model trained successfully.")
+        logger.info(f"Final Metrics: {final_metrics}")
+
+        global X_eval_orig_df # Need original DataFrame for signature
+        log_run_id = log_to_mlflow(final_model, final_metrics, best_params_found, experiment_name, X_eval_orig_df)
+        logger.info(f"Final model and metrics logged to MLflow run_id: {log_run_id}")
+
+        # Return the best parameters and the metrics from the model trained with those params
+        return best_params_found, final_metrics
+
     except Exception as e:
-        logger.error(f"Error in TabNet hypertuning: {str(e)}")
+        logger.error(f"Error in TabNet hypertuning process: {str(e)}")
+        logger.error(traceback.format_exc())
         return None, None
 
-
-def log_to_mlflow(model, metrics, params, experiment_name):
-    """
-    Log trained model, metrics, and parameters to MLflow using sklearn flavor.
-
-    Args:
-        model: Trained TabNet model
-        metrics: Model evaluation metrics
-        params: Model parameters
-        experiment_name: Experiment name
-
-    Returns:
-        str: Run ID
-    """
+def log_to_mlflow(model, metrics, params, experiment_name, X_eval_df_for_sig):
+    """Logs model, metrics, params to MLflow."""
     try:
         # Set up MLflow tracking
         mlflow.set_experiment(experiment_name)
-        logger.info(f"Logging model to MLflow: {experiment_name}")
+        with mlflow.start_run(run_name=f"tabnet_final_train_{datetime.now().strftime('%Y%m%d_%H%M')}", nested=True) as run:
+            mlflow.log_params(params)
+            mlflow.set_tags({"final_model_training": True})
+            mlflow.log_metrics(metrics)
+            active_run_id = mlflow.active_run().info.run_id
+            logger.info(f"Logging final model artifacts to MLflow run_id: {active_run_id}")
 
-        # Start a new run
-        with mlflow.start_run(run_name=f"tabnet_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
-            # Log parameters
-            for param_name, param_value in params.items():
-                mlflow.log_param(param_name, param_value)
-            logger.info(f"Logged parameters: {params}")
+            # --- Signature ---
+            input_example = None
+            signature = None
+            if isinstance(X_eval_df_for_sig, pd.DataFrame):
+                input_example = X_eval_df_for_sig.iloc[:5].copy()
+                # Ensure dtypes are float for numeric cols
+                num_cols = input_example.select_dtypes(include=np.number).columns
+                input_example[num_cols] = input_example[num_cols].astype('float64')
+                logger.info("Created input_example from DataFrame for signature.")
 
-            # Log metrics
-            for metric_name, metric_value in metrics.items():
-                mlflow.log_metric(metric_name, metric_value)
-            logger.info(f"Logged metrics: {metrics}")
+                # Wrap model for prediction
+                sklearn_wrapper = TabNetSklearnWrapper(model=model)
+                try:
+                    logger.info("Inferring model signature...")
+                    # Ensure model is fitted
+                    if not hasattr(sklearn_wrapper.model, 'network'):
+                        raise ValueError("Model inside wrapper doesn't seem fitted (no network attribute).")
+                    prediction_output = sklearn_wrapper.predict_proba(input_example)
+                    signature = mlflow.models.infer_signature(input_example, prediction_output)
+                    logger.info("Signature inferred successfully.")
+                except Exception as sig_err:
+                    logger.error(f"Failed to infer signature: {sig_err}. Logging model without signature.")
+                    logger.error(traceback.format_exc())
+                    signature = None
+            else:
+                logger.warning(f"Cannot create input example for MLflow signature from X_eval of type {type(X_eval_df_for_sig)}.)")
 
-            # Create input example for signature
-            input_example = X_eval.iloc[:5] if hasattr(X_eval, "iloc") else pd.DataFrame(X_eval[:5])
-            # Wrap the TabNet model in a scikit-learn compatible wrapper
-            sklearn_wrapper = TabNetSklearnWrapper(model=model)
-            # Create a signature for the model
-            signature = mlflow.models.infer_signature(
-                input_example, sklearn_wrapper.predict(input_example)
-            )
+            # --- Log Model ---
+            # Re-wrap model just before logging to be safe
+            sklearn_wrapper_for_log = TabNetSklearnWrapper(model=model)
+            model_reg_name = f"tabnet_final_{datetime.now().strftime('%Y%m%d_%H%M')}"
+            try:
+                logger.info(f"Logging model with mlflow.sklearn.log_model (signature={'present' if signature else 'absent'})...")
+                model_info = mlflow.sklearn.log_model(
+                    sk_model=sklearn_wrapper_for_log,
+                    artifact_path="model_sklearn",
+                    signature=signature,
+                    registered_model_name=model_reg_name,
+                    input_example=input_example if signature else None
+                )
+                logger.info(f"Final model logged to MLflow (sklearn flavor): {model_info.model_uri}")
+                logger.info(f"Registered as: {model_reg_name}")
+                logger.info(f"Run ID: {run.info.run_id}")
+                return run.info.run_id
 
-            # Log the model using sklearn flavor
-            model_info = mlflow.sklearn.log_model(
-                sk_model=sklearn_wrapper,
-                artifact_path="model",
-                signature=signature,
-                registered_model_name=f"tabnet_{datetime.now().strftime('%Y%m%d_%H%M')}",
-            )
-
-            # # For backward compatibility, also save in PyFunc format
-            # tabnet_wrapper = TabNetWrapper(model)
-            # mlflow.pyfunc.log_model(
-            #     artifact_path="model_pyfunc",
-            #     python_model=tabnet_wrapper,
-            #     signature=signature
-            # )
-
-            logger.info(f"Model logged to MLflow: {model_info.model_uri}")
-            logger.info(f"Run ID: {run.info.run_id}")
-            return run.info.run_id
-
+            except Exception as log_model_err:
+                logger.error(f"mlflow.sklearn.log_model failed: {log_model_err}")
+                logger.error(traceback.format_exc())
+            return active_run_id # Return run_id even if model logging had issues
     except Exception as e:
-        logger.error(f"Error logging to MLflow: {str(e)}")
+        logger.error(f"Error in log_to_mlflow: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
-
 
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
     Train TabNet model with focus on precision target.
-
     Args:
         X_train: Training features
         y_train: Training labels
@@ -681,7 +695,6 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         y_test: Testing labels
         X_eval: Evaluation features
         y_eval: Evaluation labels
-
     Returns:
         tuple: (best_model, best_metrics)
     """
@@ -691,97 +704,98 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         # Specific parameters for this training run with advanced scheduling
         params.update(
             {
-                "learning_rate": 0.20164682030656028,
-                "n_d": 22,
-                "n_a": 9,
-                "n_steps": 14,
-                "gamma": 0.75,
-                "lambda_sparse": 6.29086521217929e-06,
-                "momentum": 0.74,
-                "patience": 29,
-                "max_epochs": 185,
-                "batch_size": 2337,
-                "virtual_batch_size": 2334,
+                "learning_rate": 0.09474214540906088,
+                "n_d": 44,
+                "n_a": 33,
+                "n_steps": 5,
+                "gamma": 0.55,
+                "lambda_sparse": 4.048782658463083e-05,
+                "momentum": 0.9099999999999999,
+                "patience": 17,
+                "max_epochs": 115,
+                "batch_size": 2191,
+                "virtual_batch_size": 2329,
                 "verbose": 0,
-                "n_independent": 4,
+                "n_independent": 3,
                 "n_shared": 3,
-                "weight_decay": 1.663263385027431e-05,
-                "scheduler_type": "none",
-                "scheduler_patience": 4,
-                "scheduler_factor": 0.12562431278390354,
-                "scheduler_min_lr": 5.734463997966396e-06,
-                "scheduler_t_max": 14,
-                "scheduler_div_factor": 19.03707394042698,
+                "weight_decay": 1.3840159514938363e-06,
+                "scheduler_type": "cosine",
+                "scheduler_patience": 10,
+                "scheduler_factor": 0.26185413862174955,
+                "scheduler_min_lr": 4.402942895530242e-05,
+                "scheduler_t_max": 10,
+                "scheduler_div_factor": 22.13424785773977,
             }
         )
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
         # Log to MLflow
-        log_to_mlflow(model, metrics, params, experiment_name)
+        log_to_mlflow(model, metrics, params, experiment_name, X_eval)
         return model, metrics
     except Exception as e:
-        logger.error(f"Error in precision-focused training: {str(e)}")
-        return None, None
-
+        logger.error(f"Error during MLflow artifact logging: {str(e)}")
+        logger.error(traceback.format_exc())
+        return mlflow.active_run().info.run_id if mlflow.active_run() else None
 
 def main():
     """
-    Main execution function for TabNet hypertuning.
+    Main execution function for TabNet hypertuning including loss function.
     """
     try:
-        logger.info("Starting TabNet model hypertuning")
-        # Setup MLflow tracking directory
+        logger.info("Starting TabNet model hypertuning (tuning fit_weights)")
         setup_mlflow_tracking(experiment_name)
-        global \
-            X_train, \
-            y_train, \
-            X_test, \
-            y_test, \
-            X_eval, \
-            y_eval, \
-            X_train_transformed, \
-            X_test_transformed, \
-            X_eval_transformed
-        # Load data using shared DataLoader
+        global X_eval_orig_df # Used in log_to_mlflow
+
+        # Load data
         dataloader = DataLoader()
-        X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        # Select features for TabNet if needed
+        X_train_orig, y_train_orig, X_test_orig, y_test_orig, X_eval_orig_df, y_eval_orig = dataloader.load_data()
+        X_eval_orig_df = X_eval_orig_df.copy() # Store original for signature
+
+        # Select features
         features = import_selected_features_ensemble(model_type="tabnet")
-        X_train = X_train[features]
-        X_test = X_test[features]
-        X_eval = X_eval[features]
-        # Convert all columns to float64 to ensure consistent data types
+        if not features:
+            logger.warning("No features selected. Using all numeric features.")
+            features = import_selected_features_ensemble("all")
+
+        X_train = X_train_orig[features]
+        X_test = X_test_orig[features]
+        X_eval_df = X_eval_orig_df[features]
+
+        # Assign labels (ensure 1D numpy)
+        y_train = y_train_orig.values.ravel() if hasattr(y_train_orig, 'values') else np.array(y_train_orig).ravel()
+        y_test = y_test_orig.values.ravel() if hasattr(y_test_orig, 'values') else np.array(y_test_orig).ravel()
+        y_eval = y_eval_orig.values.ravel() if hasattr(y_eval_orig, 'values') else np.array(y_eval_orig).ravel()
+
+        # Convert features to float64
         X_train = X_train.astype("float64")
         X_test = X_test.astype("float64")
-        X_eval = X_eval.astype("float64")
-        logger.info(f"Training data shape: {X_train.shape}")
-        logger.info(f"Testing data shape: {X_test.shape}")
-        logger.info(f"Evaluation data shape: {X_eval.shape}")
-        logger.info(
-            f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
+        X_eval = X_eval_df.astype("float64")
+
+        logger.info(f"Data shapes: Train={X_train.shape}, Test={X_test.shape}, Eval={X_eval_df.shape}")
+        logger.info(f"Positive ratios: Train={y_train.mean():.3f}, Test={y_test.mean():.3f}, Eval={y_eval.mean():.3f}")
+
+        # Preprocessing
+        # preprocessor = QuantileTransformer(n_quantiles=4000, output_distribution="uniform", random_state=SEED, subsample=None)
+        # X_train_transformed = preprocessor.fit_transform(X_train)
+        # X_test_transformed = preprocessor.transform(X_test)
+        # X_eval_transformed = preprocessor.transform(X_eval_df) # Transform features for eval
+
+        # === Run Hypertuning ===
+        best_params_final, best_metrics_final = hypertune_tabnet(
+            experiment_name,
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, y_eval 
         )
-        logger.info(f"Current base parameters: {base_params}")
 
-        # Before training
-        preprocessor = QuantileTransformer(output_distribution="normal")
-        X_train_transformed = preprocessor.fit_transform(X_train)
-        X_test_transformed = preprocessor.transform(X_test)
-        X_eval_transformed = preprocessor.transform(X_eval)
+        train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 
-        best_params, metrics = hypertune_tabnet(experiment_name)
-        logger.info(f"Hypertuning completed with parameters: {best_params}")
-        logger.info(f"Evaluation metrics: {metrics}")
-
-        # Train model with precision target
-        best_model, best_metrics = train_with_precision_target(
-            X_train_transformed, y_train, X_test_transformed, y_test, X_eval_transformed, y_eval
-        )
-        logger.info(f"Best model: {best_model}")
-        logger.info(f"Best metrics: {best_metrics}")
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
+        logger.error(traceback.format_exc())
 
 
 if __name__ == "__main__":
     main()
+

@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, precision_score, recall_score
 
-from models.ensemble.thresholds import tune_threshold_for_precision_optimized
-from utils.logger import ExperimentLogger
+from src.models.ensemble.thresholds import tune_threshold_for_precision_optimized
+from src.utils.logger import ExperimentLogger
 
 
 def compute_dynamic_weights(

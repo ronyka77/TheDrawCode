@@ -16,6 +16,7 @@ from datetime import datetime
 import mlflow
 import numpy as np
 import optuna
+import pandas as pd
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
 
@@ -63,12 +64,12 @@ def load_hyperparameter_space_for_hpo():
         "n_estimators": {
             "type": "int",
             "low": 600,  # Fixed lower range for HPO
-            "high": 1200,  # Fixed lower range for HPO
+            "high": 1500,  # Fixed lower range for HPO
             "step": 20,  # Maybe increase step slightly for faster HPO search within range
         },
         "max_depth": {
             "type": "int",
-            "low": 8,  # Slightly lower minimum allowed
+            "low": 6,  # Slightly lower minimum allowed
             "high": 25,  # Allow potentially deeper trees
             "step": 1,
         },
@@ -81,7 +82,7 @@ def load_hyperparameter_space_for_hpo():
         "min_samples_leaf": {
             "type": "int",
             "low": 6,  # Allow smaller leaf nodes
-            "high": 50,  # Allow slightly larger leaf nodes too
+            "high": 70,  # Allow slightly larger leaf nodes too
             "step": 2,  # Can increase step slightly
         },
         "max_features": {
@@ -141,14 +142,14 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         model = create_model(model_params)
 
         # Combine training and validation data
-        # X_combined = pd.concat([X_train, X_test], axis=0)
-        # y_combined = pd.concat([y_train, y_test], axis=0)
+        X_combined = pd.concat([X_train, X_test], axis=0)
+        y_combined = pd.concat([y_train, y_test], axis=0)
 
-        # # Reset indexes
-        # X_combined.reset_index(drop=True, inplace=True)
-        # y_combined.reset_index(drop=True, inplace=True)
+        # Reset indexes
+        X_combined.reset_index(drop=True, inplace=True)
+        y_combined.reset_index(drop=True, inplace=True)
         # Fit model
-        model.fit(X_train, y_train)
+        model.fit(X_combined, y_combined)
 
         # Get validation predictions and optimize threshold
         best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
@@ -482,12 +483,12 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "n_estimators": 660,
-                "max_depth": 19,
-                "min_samples_split": 32,
-                "min_samples_leaf": 32,
-                "max_features": 0.22,
-                "class_weight": 2.7,
+                "n_estimators": 700,
+                "max_depth": 21, 
+                "min_samples_split": 36,
+                "min_samples_leaf": 22,
+                "max_features": 0.58,
+                "class_weight": 3.95,
                 "bootstrap": True,
                 "criterion": "entropy",
                 "random_state": 19,
