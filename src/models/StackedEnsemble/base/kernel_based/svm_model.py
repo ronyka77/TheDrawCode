@@ -63,51 +63,39 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 # Restrict parallel threads (Less critical for SVM but good practice)
-os.environ["OMP_NUM_THREADS"] = "4"
-os.environ["MKL_NUM_THREADS"] = "4"
-os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "8"
+os.environ["MKL_NUM_THREADS"] = "8"
+os.environ["OPENBLAS_NUM_THREADS"] = "8"
 
 # Base parameters for SVC
 base_params = {
     "probability": True,  # MUST be True for predict_proba
     "class_weight": "balanced",  # Good for imbalanced classes
     "random_state": SEED,
-    'kernel': 'poly', # Can be fixed here or tuned
+    'kernel': 'rbf', # Can be fixed here or tuned
     "verbose": False,  # Set to True for more SVC logs
 }
 
 
 # --- Data Preprocessing ---
-def preprocess_data_svm(X_train, X_test, X_eval):
-    """
-    Scales the feature data using StandardScaler.
-    Args:
-        X_train (pd.DataFrame): Training features.
-        X_test (pd.DataFrame): Testing features.
-        X_eval (pd.DataFrame): Evaluation features.
-    Returns:
-        tuple: (X_train_scaled, X_test_scaled, X_eval_scaled, fitted_scaler)
-    """
-    scaler = StandardScaler()
-    logger.info("Fitting StandardScaler on training data...")
-    # Fit only on training data
-    scaler.fit(X_train)
-
-    logger.info("Transforming training, test, and evaluation data...")
-    # Transform all sets
-    X_train_scaled = scaler.transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    X_eval_scaled = scaler.transform(X_eval)
-
-    logger.info("Data scaling complete.")
-    # Return scaled data as DataFrames to preserve column names if possible (useful for input_example)
+def preprocess_data(X_train, X_test, X_eval=None):
     try:
-        X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns)
-        X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns)
-        X_eval_scaled = pd.DataFrame(X_eval_scaled, columns=X_eval.columns)
-    except Exception:
-        logger.warning("Could not convert scaled data back to DataFrame, returning numpy arrays.")
-
+        with open('src/models/scalers/scaler_svm.pkl', 'rb') as f:
+            scaler = pickle.load(f)
+        logger.info("Loaded existing SVM scaler")
+        X_train_scaled = scaler.transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        X_eval_scaled = scaler.transform(X_eval)
+    except Exception as e:
+        logger.error(f"Error loading SVM scaler: {str(e)}")
+        scaler = StandardScaler()
+        logger.info("Created new SVM scaler")
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        X_eval_scaled = scaler.transform(X_eval)
+        with open('src/models/scalers/scaler_svm.pkl', 'wb') as f:
+            pickle.dump(scaler, f)
+        
     return X_train_scaled, X_test_scaled, X_eval_scaled, scaler
 
 
@@ -180,7 +168,7 @@ def train_model_svm(X_train_scaled, y_train, X_eval_scaled, y_eval, model_params
 
 
 # --- Optuna Objective ---
-def objective(trial, X_train_scaled, y_train, X_eval_scaled, y_eval, hyperparameter_space):
+def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
     """
     Objective function for Optuna hyperparameter optimization.
     Uses SCALED data.
@@ -204,7 +192,10 @@ def objective(trial, X_train_scaled, y_train, X_eval_scaled, y_eval, hyperparame
                 params[param_name] = trial.suggest_categorical(
                     param_name, param_config["choices"]
                 )
-
+            # --- Preprocessing --- (Scale the data)
+        X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(
+            X_train, X_test, X_eval
+        )
         # Train model and get metrics
         # Pass only the suggested params, train_model_svm combines with base_params
         model, metrics = train_model_svm(
@@ -225,6 +216,10 @@ def objective(trial, X_train_scaled, y_train, X_eval_scaled, y_eval, hyperparame
         logger.info(
             f"Trial {trial.number}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f}, Thresh={threshold:.3f}) Params={trial.params}"
         )
+        # Log to MLflow
+        if score > 0.34:
+            input_example = X_eval[:5]
+            log_to_mlflow_svm(model, metrics, params, scaler, input_example)
         return score
 
     except Exception as e:
@@ -234,7 +229,7 @@ def objective(trial, X_train_scaled, y_train, X_eval_scaled, y_eval, hyperparame
 
 # --- Optuna Optimization Runner ---
 def optimize_hyperparameters_svm(
-    X_train_scaled, y_train, X_eval_scaled, y_eval, hyperparameter_space
+    X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
 ):
     """Runs Optuna optimization using the objective function and SCALED data."""
     logger.info(f"Starting Optuna optimization for SVC with {n_trials} trials.")
@@ -246,7 +241,7 @@ def optimize_hyperparameters_svm(
 
     # Wrapper for objective function to pass scaled data
     objective_func = lambda trial: objective(
-        trial, X_train_scaled, y_train, X_eval_scaled, y_eval, hyperparameter_space
+        trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
     )
 
     # --- Callback Logic --- (Similar to xgboost/lightgbm)
@@ -312,13 +307,12 @@ def optimize_hyperparameters_svm(
             f"Starting Optuna batch {batch+1}/{num_batches} (Sampler: {type(sampler).__name__})"
         )
 
-        trials_in_this_batch = min(batch_size, total_trials - study.n_trials)
-        if trials_in_this_batch <= 0:
-            logger.info("Target number of trials reached.")
-            break
-
         study.optimize(
-            objective_func, n_trials=trials_in_this_batch, show_progress_bar=True, callbacks=[callback]
+            objective_func, 
+            n_trials=batch_size, 
+            show_progress_bar=True, 
+            callbacks=[callback],
+            n_jobs=8  # Use all available CPU cores for parallel trials
         )
 
         # Update overall best score from the study instance after batch
@@ -361,77 +355,63 @@ def log_top_trials_svm(trials_list, title="Top SVM Trials"):
 def log_to_mlflow_svm(model, metrics, params, fitted_scaler, input_example):
     """Logs parameters, metrics, scaler, and model to MLflow."""
     logger.info("Logging results to MLflow for SVM...")
-    run_id = mlflow.active_run().info.run_id
+    with mlflow.start_run(
+        run_name=f"svm_fixed_params_{datetime.now().strftime('%Y%m%d_%H%M')}"
+    ):
+        run_id = mlflow.active_run().info.run_id
 
-    # Log best HPO parameters found
-    # Filter out base params if desired, log only tuned ones
-    hpo_params = {k: v for k, v in params.items() if k not in base_params}
-    mlflow.log_params({f"best_optuna_{k}": v for k, v in hpo_params.items()})
+        # Log combined final parameters used for the model
+        final_params = base_params.copy()
+        final_params.update(params)
+        mlflow.log_params(final_params)
 
-    # Log combined final parameters used for the model
-    final_params = base_params.copy()
-    final_params.update(hpo_params)
-    mlflow.log_params({f"final_{k}": v for k, v in final_params.items()})
+        # Log evaluation metrics
+        mlflow.log_metrics(metrics)
 
-    # Log evaluation metrics
-    mlflow.log_metrics(metrics)
-
-    # Log the scaler
-    scaler_path = f"scaler_{run_id}.pkl"
-    try:
-        with open(scaler_path, "wb") as f:
-            pickle.dump(fitted_scaler, f)
-        mlflow.log_artifact(scaler_path)
-        logger.info(f"Scaler artifact logged as {scaler_path}")
-        os.remove(scaler_path) # Clean up local scaler file
-    except Exception as e:
-        logger.error(f"Failed to save or log scaler artifact: {e}")
-
-    # Log the model using mlflow.sklearn
-    logger.info("Logging model using mlflow.sklearn...")
-    signature = None
-    if input_example is not None:
+        # Log the scaler
+        scaler_path = "src/models/scalers/scaler_svm.pkl"
         try:
-            # Ensure input_example is DataFrame for signature inference
-            if not isinstance(input_example, pd.DataFrame):
-                try:
-                    input_example = pd.DataFrame(
-                        input_example, columns=[f"feature_{i}" for i in range(input_example.shape[1])]
-                    )
-                    logger.warning(
-                        "Converted input_example from numpy array to DataFrame for signature."
-                    )
-                except Exception as sig_err:
-                    logger.error(f"Cannot infer signature, input_example conversion failed: {sig_err}")
-            # Infer signature
-            if isinstance(input_example, pd.DataFrame):
-                # Check for non-numeric types just before inference
-                non_numeric = input_example.select_dtypes(exclude=np.number).columns
-                if len(non_numeric) > 0:
-                    logger.warning(f"Input example has non-numeric columns: {list(non_numeric)}. Signature might be inaccurate.")
+            with open(scaler_path, "wb") as f:
+                pickle.dump(fitted_scaler, f)
+            mlflow.log_artifact(scaler_path)
+            logger.info(f"Scaler artifact logged as {scaler_path}")
+            os.remove(scaler_path) # Clean up local scaler file
+        except Exception as e:
+            logger.error(f"Failed to save or log scaler artifact: {e}")
+
+        # Log the model using mlflow.sklearn
+        logger.info("Logging model using mlflow.sklearn...")
+        signature = None
+        if input_example is not None:
+            try:
+                # Ensure dtypes are float for numeric cols
+                num_cols = input_example.select_dtypes(include=np.number).columns
+                input_example[num_cols] = input_example[num_cols].astype('float64')
+                logger.info("Created input_example from DataFrame for signature.")
 
                 model_prediction = model.predict(input_example)
                 signature = mlflow.models.infer_signature(input_example, model_prediction)
                 logger.info("Model signature inferred successfully.")
 
-        except Exception as sig_err:
-            logger.error(f"Error inferring model signature: {sig_err}")
-            logger.error(f"Input example details:\n{input_example.head()}\n{input_example.dtypes}")
+            except Exception as sig_err:
+                logger.error(f"Error inferring model signature: {sig_err}")
+                logger.error(f"Input example details:\n{input_example.head()}\n{input_example.dtypes}")
 
-    # Define registered model name
-    model_name_suffix = datetime.now().strftime("%Y%m%d_%H%M")
-    registered_model_name = f"svm_precision_{model_name_suffix}"
+        # Define registered model name
+        model_name_suffix = datetime.now().strftime("%Y%m%d_%H%M")
+        registered_model_name = f"model_svm_{model_name_suffix}"
 
-    mlflow.sklearn.log_model(
-        sk_model=model,
-        artifact_path="model_svm_precision",
-        registered_model_name=registered_model_name,
-        signature=signature,
-        pip_requirements=pip_requirements,
-    )
+        mlflow.sklearn.log_model(
+            sk_model=model,
+            artifact_path="model_svm",
+            registered_model_name=registered_model_name,
+            signature=signature,
+            pip_requirements=pip_requirements,
+        )
 
-    logger.info(f"MLflow Run ID: {run_id}")
-    logger.info(f"Scikit-learn SVM model logged successfully as {registered_model_name}.")
+        logger.info(f"MLflow Run ID: {run_id}")
+        logger.info(f"Scikit-learn SVM model logged successfully as {registered_model_name}.")
+        mlflow.end_run()
 
 # --- Main Hypertuning Orchestration ---
 def hypertune_svm(X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_name: str):
@@ -441,88 +421,25 @@ def hypertune_svm(X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_n
     """
     try:
         logger.info("--- Starting hypertuning process for SVM ---")
-
-        # --- Preprocessing --- (Scale the data)
-        X_train_scaled, X_test_scaled, X_eval_scaled, fitted_scaler = preprocess_data_svm(
-            X_train, X_test, X_eval
+        # --- Hyperparameter Optimization (Optuna) ---
+        hyperparameter_space = load_hyperparameter_space_svm()
+        best_hpo_params = optimize_hyperparameters_svm(
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            X_eval,
+            y_eval,
+            hyperparameter_space,
         )
 
-        # Combine scaled training and test sets for final model training
-        logger.info("Combining scaled training and test sets for final model training...")
-        # Ensure combination handles numpy arrays vs pandas dataframes correctly
-        if isinstance(X_train_scaled, pd.DataFrame) and isinstance(X_test_scaled, pd.DataFrame):
-            X_train_combined_scaled = pd.concat([X_train_scaled, X_test_scaled], ignore_index=True)
-        else: # Assume numpy arrays
-            X_train_combined_scaled = np.vstack((X_train_scaled, X_test_scaled))
-        y_train_combined = pd.concat([y_train, y_test], ignore_index=True) if isinstance(y_train, pd.Series) else np.concatenate((y_train, y_test))
-        logger.info(f"Combined scaled training set shape: {X_train_combined_scaled.shape}")
-
-        # --- MLflow Run Setup ---
-        run_name_prefix = "svm_optuna_hypertune"
-        with mlflow.start_run(
-            run_name=f"{run_name_prefix}_{datetime.now().strftime('%Y%m%d_%H%M')}"
-        ):
-            mlflow.set_tags(
-                {
-                    "model_type": "svm",
-                    "tuning_method": "Optuna",
-                    "optuna_trials": n_trials,
-                    "optimization_metric": f"precision_at_min_recall_{min_recall}",
-                    "scaling_method": type(fitted_scaler).__name__,
-                }
-            )
-
-            # --- Hyperparameter Optimization (Optuna) ---
-            hyperparameter_space = load_hyperparameter_space_svm()
-            best_hpo_params = optimize_hyperparameters_svm(
-                X_train_scaled,
-                y_train,
-                X_eval_scaled,
-                y_eval,
-                hyperparameter_space,
-            )
-
-            if not best_hpo_params:
-                logger.error("Optuna optimization failed for SVM. Aborting.")
-                if mlflow.active_run():
-                    mlflow.end_run("FAILED")
-                return None, None
-
-            # Combine base and best HPO params for the final model
-            final_model_params = base_params.copy()
-            final_model_params.update(best_hpo_params)
-
-            # --- Train Final Model ---
-            logger.info("Training final SVM model with best Optuna parameters...")
-            final_model = SVC(**final_model_params)
-            final_model.fit(X_train_combined_scaled, y_train_combined)
-            logger.info("Final model training complete.")
-
-            # --- Final Evaluation (on separate evaluation set) ---
-            logger.info("Evaluating final model on the scaled evaluation set...")
-            final_threshold, final_metrics = optimize_threshold(
-                final_model, X_eval_scaled, y_eval, min_recall=min_recall
-            )
-            final_metrics["threshold"] = final_threshold
-            logger.info(f"Final evaluation metrics (SVM): {final_metrics}")
-
-            # --- MLflow Logging ---
-            # Create input example from SCALED eval data
-            input_example_data = X_eval_scaled[:5] # Use first 5 rows of scaled data
-
-            log_to_mlflow_svm(
-                final_model,
-                final_metrics,
-                best_hpo_params, # Log the params found by HPO
-                fitted_scaler, # Log the scaler used
-                input_example_data,
-            )
-            return best_hpo_params, final_metrics
+        if not best_hpo_params:
+            logger.error("Optuna optimization failed for SVM. Aborting.")
+            return None, None
+        return best_hpo_params, final_metrics
 
     except Exception as e:
         logger.error(f"Error in hypertune_svm: {str(e)}")
-        if mlflow.active_run():
-            mlflow.end_run("FAILED")
         return None, None
 
 # --- (Optional) Precision Target Training ---
@@ -537,7 +454,7 @@ def train_with_precision_target_svm(
         logger.info("--- Training SVM model with fixed precision-target parameters ---")
 
         # --- Preprocessing --- (Scale the data)
-        X_train_scaled, X_test_scaled, X_eval_scaled, fitted_scaler = preprocess_data_svm(
+        X_train_scaled, X_test_scaled, X_eval_scaled, fitted_scaler = preprocess_data(
             X_train, X_test, X_eval
         )
 
@@ -641,7 +558,7 @@ if __name__ == "__main__":
 
         # --- Choose Mode: hypertune or fixed params ---
         # mode = "hypertune"
-        mode = "fixed_params" # Or "hypertune"
+        mode = "hypertune" # Or "hypertune"
 
         best_model_params = None
         final_metrics = None

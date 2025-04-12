@@ -124,3 +124,5 @@ discretizer.pkl
 scaler_sklearn.pkl
 scaler_robust.pkl
 optuna_mlp.db
+optuna_pytorch.db
+optuna_svm.db

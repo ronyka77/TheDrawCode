@@ -883,19 +883,19 @@ def main():
     logger = ExperimentLogger("get_fixtures")
     api_football = ApiFootball(api_key, logger)
 
-    # api_football.get_fixtures_for_leagues()
+    api_football.get_fixtures_for_leagues()
 
-    # api_football.get_statistics_for_fixtures()
+    api_football.get_statistics_for_fixtures()
 
-    # api_football.delete_fixtures_not_in_leagues()
+    api_football.delete_fixtures_not_in_leagues()
 
     api_football.delete_old_unscored_fixtures()
 
-    # api_football.get_teams_for_leagues()
+    api_football.get_teams_for_leagues()
 
-    # api_football.update_venues()
+    api_football.update_venues()
 
-    # api_football.process_and_save_venues()
+    api_football.process_and_save_venues()
 
 
 if __name__ == "__main__":

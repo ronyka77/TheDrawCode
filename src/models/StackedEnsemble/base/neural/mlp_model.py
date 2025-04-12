@@ -10,10 +10,14 @@ import optuna
 import pandas as pd
 
 # Set TensorFlow environment variables FIRST
-# os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # No longer needed for GPU
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # No longer needed for GPU
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"   # Reduce TensorFlow logging verbosity
-os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"  # Enable GPU memory growth
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # REMOVE this line to allow GPU usage
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # REMOVE this line to allow GPU usage
+# Restrict parallel threads (Less critical for SVM but good practice)
+os.environ["OMP_NUM_THREADS"] = "8"
+os.environ["MKL_NUM_THREADS"] = "8"
+os.environ["OPENBLAS_NUM_THREADS"] = "8"
+
 import tensorflow as tf
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.preprocessing import RobustScaler
@@ -33,7 +37,6 @@ from src.utils.create_evaluation_set import import_selected_features_ensemble, s
 
 experiment_name = "mlp_soccer_prediction"
 logger = ExperimentLogger(experiment_name=experiment_name)
-
 
 # Set random seeds for reproducibility
 random_seed = 19
@@ -62,27 +65,9 @@ scaler = None  # Global scaler object
 
 # Define base configurations
 base_params = {
-    'epochs': 100,
-    'batch_size': 64,
     'verbose': 0,
     'metrics': ['accuracy', 'AUC']
 }
-
-# Verify GPU availability after TensorFlow import
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    try:
-        # Currently, memory growth needs to be the same across GPUs
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-        logical_gpus = tf.config.list_logical_devices('GPU')
-        logger.info(f"{len(gpus)} Physical GPUs, {len(logical_gpus)} Logical GPUs available.")
-    except RuntimeError as e:
-        # Memory growth must be set before GPUs have been initialized
-        logger.error(f"Error setting memory growth: {e}")
-else:
-    logger.warning("No GPUs detected by TensorFlow. Model will train on CPU.")
-
 # Define the Wrapper Class
 class KerasMLPWrapper(BaseEstimator, ClassifierMixin):
     """
@@ -150,14 +135,14 @@ def load_hyperparameter_space():
     hyperparameter_space = {
         'learning_rate': {
             'type': 'float',
-            'low': 1e-4,
-            'high': 1e-2,
+            'low': 1e-5,
+            'high': 5e-2,
             'log': True
         },
         'hidden_layers': {
             'type': 'int',
             'low': 1,
-            'high': 5
+            'high': 6
         },
         'neurons_per_layer': {
             'type': 'int',
@@ -190,13 +175,14 @@ def load_hyperparameter_space():
         'batch_size': {
             'type': 'int',
             'low': 16,
-            'high': 128
+            'high': 128,
+            'step': 16
         },
         'epochs': {
             'type': 'int',
             'low': 50,
             'high': 200,
-            'step': 10
+            'step': 5
         },
         'patience': {
             'type': 'int',
@@ -205,36 +191,31 @@ def load_hyperparameter_space():
         },
         'class_weight_multiplier': {
             'type': 'float',
-            'low': 1.0,
-            'high': 5.0,
+            'low': 0.5,
+            'high': 3.0,
             'step': 0.05
         }
     }
     return hyperparameter_space
 
 def preprocess_data(X_train, X_test, X_eval=None):
-    is_scaler_loaded = False
     try:
         with open('src/models/scalers/scaler_mlp.pkl', 'rb') as f:
             scaler = pickle.load(f)
         logger.info("Loaded existing MLP scaler")
-        is_scaler_loaded = True
+        X_train_scaled = scaler.transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        X_eval_scaled = scaler.transform(X_eval)
     except Exception as e:
         logger.error(f"Error loading MLP scaler: {str(e)}")
         scaler = RobustScaler()
         logger.info("Created new MLP scaler")
-        is_scaler_loaded = False
-    
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    if X_eval is not None:
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
         X_eval_scaled = scaler.transform(X_eval)
-    else:
-        X_eval_scaled = None
-
-    if not is_scaler_loaded:
         with open('src/models/scalers/scaler_mlp.pkl', 'wb') as f:
             pickle.dump(scaler, f)
+        
     return X_train_scaled, X_test_scaled, X_eval_scaled, scaler
 
 def create_model(model_params):

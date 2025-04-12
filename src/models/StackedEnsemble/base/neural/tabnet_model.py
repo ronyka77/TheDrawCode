@@ -18,6 +18,7 @@ from sklearn.metrics import precision_score, recall_score
 from sklearn.preprocessing import QuantileTransformer
 from sklearn.utils.multiclass import type_of_target
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
+from torch.cuda.amp import autocast, GradScaler  # Import autocast for mixed precision
 
 # Logger and shared utilities
 from src.utils.logger import ExperimentLogger
@@ -43,7 +44,7 @@ n_trials = 20000
 
 # Then modify your base_params to include the custom metrics
 base_params = {
-    "optimizer_fn": optim.Adam,
+    "optimizer_fn": optim.Adam,  # Use Adam as default optimizer
     "mask_type": "sparsemax",
     "eval_metric": ["logloss", "auc"],  # Default metrics, custom one passed in fit
     "verbose": 0,
@@ -63,13 +64,38 @@ os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
-# PyTorch specific reproducibility settings
+
+# PyTorch specific reproducibility settings and optimizations
 torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+    torch.backends.cudnn.benchmark = True  # Auto-optimizes for hardware if input sizes don't change
+    torch.backends.cudnn.deterministic = False  # Better performance, less deterministic
+    # Enable TF32 for better performance on Ampere GPUs (RTX 30xx and newer)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
+    # Check if PyTorch version supports torch.compile
+    if hasattr(torch, 'compile'):
+        logger.info("torch.compile is available - will use it for performance optimization")
+        USE_TORCH_COMPILE = True
+    else:
+        logger.info("torch.compile not available in this PyTorch version")
+        USE_TORCH_COMPILE = False
+else:
+    USE_TORCH_COMPILE = False
+
+# Create gradient scaler for mixed precision training
+scaler = GradScaler() if torch.cuda.is_available() else None
 
 # Verify CUDA availability
 if torch.cuda.is_available():
+    gpu_name = torch.cuda.get_device_name(0)
+    gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # Convert to GB
     logger.info(f"CUDA is available! Found {torch.cuda.device_count()} GPU(s).")
-    logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    logger.info(f"Using GPU: {gpu_name} with {gpu_memory:.2f} GB memory")
+    logger.info(f"CUDA Version: {torch.version.cuda}")
+    logger.info(f"PyTorch CUDA capabilities: TF32={torch.backends.cuda.matmul.allow_tf32}, cuDNN benchmark={torch.backends.cudnn.benchmark}")
 else:
     logger.warning("CUDA is NOT available. TabNet will run on CPU.")
     # Force base_params to CPU if CUDA isn't found, to avoid potential errors
@@ -83,12 +109,12 @@ def load_hyperparameter_space():
         "learning_rate": {
             "type": "float",
             "low": 1e-4,
-            "high": 5e-1,
+            "high": 8e-1,
             "log": True,
         },
-        "n_d": {"type": "int", "low": 8, "high": 64},
-        "n_a": {"type": "int", "low": 8, "high": 64},
-        "n_steps": {"type": "int", "low": 3, "high": 15},
+        "n_d": {"type": "int", "low": 8, "high": 128},
+        "n_a": {"type": "int", "low": 8, "high": 128},
+        "n_steps": {"type": "int", "low": 2, "high": 15},
         "gamma": {"type": "float", "low": 0.5, "high": 3.0, "step": 0.05},
         "lambda_sparse": {"type": "float", "low": 1e-7, "high": 1e-2, "log": True},
         "momentum": {"type": "float", "low": 0.7, "high": 0.99, "step": 0.005},
@@ -107,7 +133,7 @@ def load_hyperparameter_space():
         "scheduler_factor": {"type": "float", "low": 0.1, "high": 0.5},
         "scheduler_min_lr": {"type": "float", "low": 1e-6, "high": 1e-4, "log": True},
         "scheduler_t_max": {"type": "int", "low": 5, "high": 20},
-        "scheduler_div_factor": {"type": "float", "low": 10.0, "high": 30.0},
+        "scheduler_div_factor": {"type": "float", "low": 10.0, "high": 40.0, "step": 0.5},
         "fit_weights": {
             "type": "categorical",
             "choices": [0, 1]
@@ -260,17 +286,23 @@ def create_model(model_params):
         constructor_params = {k: v for k, v in model_params.items() if k in valid_constructor_args}
         config_params = {k: v for k, v in model_params.items() if k in config_keys}
 
+        # Always use Adam optimizer for GPU optimization
+        params["optimizer_fn"] = optim.Adam
+        
         # Update base params with constructor params
         params.update(constructor_params)
 
-        # Configure optimizer
+        # Configure optimizer with GPU-optimized settings
         lr = config_params.get("learning_rate", 0.01)
         weight_decay = config_params.get("weight_decay", 1e-5)
         if "optimizer_params" not in params: 
             params["optimizer_params"] = {}
         params["optimizer_params"]["lr"] = lr
         params["optimizer_params"]["weight_decay"] = weight_decay
-
+        # Add optimizer settings that can improve GPU performance
+        params["optimizer_params"]["eps"] = 1e-7  # Improves numerical stability
+        params["optimizer_params"]["amsgrad"] = True  # Can improve convergence on GPU
+        
         # Configure scheduler
         scheduler_type = config_params.get("scheduler_type", "none")
         scheduler_params_config = {}
@@ -312,6 +344,21 @@ def create_model(model_params):
 
         # Instantiate model (without loss_fn argument)
         model = TabNetClassifier(**final_params)
+        
+        # Apply torch.compile if available and using GPU (for PyTorch 2.0+)
+        if USE_TORCH_COMPILE and torch.cuda.is_available():
+            try:
+                # We need to compile specific parts of the model
+                # TabNetClassifier is complex, so we compile only the network component
+                if hasattr(model, 'network') and hasattr(torch, 'compile'):
+                    logger.info("Applying torch.compile to TabNet network for GPU acceleration")
+                    # Apply compilation with 'reduce-overhead' mode which is good for GPU performance
+                    model.network = torch.compile(model.network, mode="reduce-overhead")
+                    logger.info("Successfully applied torch.compile to TabNet network")
+            except Exception as e:
+                logger.warning(f"Could not apply torch.compile: {str(e)}")
+                # Continue with uncompiled model if compilation fails
+                
         return model
     except Exception as e:
         logger.error(f"Error creating TabNet model: {str(e)}")
@@ -396,12 +443,20 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
             y_combined,
             **fit_params
         )
+        
+        # Log peak GPU memory usage during training
+        if torch.cuda.is_available():
+            peak_mem = torch.cuda.max_memory_allocated() / (1024**2)
+            logger.info(f"Peak GPU memory during training: {peak_mem:.2f} MB")
 
         # Optimize threshold using shared utility
         best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
 
         # Add fit_weights used to metrics dict for logging
         metrics["fit_weights_used"] = fit_weights_value
+        # Add GPU memory usage to metrics if available
+        if torch.cuda.is_available():
+            metrics["peak_gpu_memory_mb"] = peak_mem
 
         return model, metrics
     except Exception as e:

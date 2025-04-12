@@ -52,7 +52,7 @@ from src.utils.logger import ExperimentLogger
 
 experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name, log_dir="./logs/ensemble_model_improved")
-from src.models.ensemble.ensemble_model_0410 import EnsembleModel
+from src.models.ensemble.ensemble_model_0412 import EnsembleModel
 from src.utils.create_evaluation_set import (
     import_selected_features_ensemble,
     setup_mlflow_tracking,
@@ -278,6 +278,8 @@ def log_all_model_params(ensemble_model):
         params_dict["MLP"] = ensemble_model.get_model_params(ensemble_model.model_mlp)
     if hasattr(ensemble_model, "model_extra"):
         params_dict["Extra"] = ensemble_model.get_model_params(ensemble_model.model_extra)
+    if hasattr(ensemble_model, "model_svm"):
+        params_dict["SVM"] = ensemble_model.get_model_params(ensemble_model.model_svm)
 
     # Optionally, log calibrated versions if available.
     if (
@@ -322,7 +324,13 @@ def log_all_model_params(ensemble_model):
         params_dict["MLP_sklearn_calibrated"] = ensemble_model.get_model_params(
             ensemble_model.model_mlp_sklearn_calibrated
         )
-
+    if (
+        hasattr(ensemble_model, "model_svm_calibrated")
+        and ensemble_model.model_svm_calibrated is not None
+    ):
+        params_dict["SVM_calibrated"] = ensemble_model.get_model_params(
+            ensemble_model.model_svm_calibrated
+        )
     # Log additional settings (such as meta-learner parameters) if applicable.
     if hasattr(ensemble_model, "meta_learner") and ensemble_model.meta_learner is not None:
         params_dict["MetaLearner"] = ensemble_model.get_model_params(ensemble_model.meta_learner)

@@ -177,7 +177,6 @@ def optimize_threshold(
     """
     Optimize prediction threshold with focus on a specified metric while maintaining
     minimum recall requirements.
-
     Args:
         model: Trained model
         X: Feature data for threshold optimization
@@ -186,7 +185,6 @@ def optimize_threshold(
         metric_to_optimize: Metric to optimize ('precision', 'f1', etc.)
         threshold_range: Range of thresholds to search (min, max)
         n_thresholds: Number of threshold values to try
-
     Returns:
         tuple: (best_threshold, metrics_at_best_threshold)
     """

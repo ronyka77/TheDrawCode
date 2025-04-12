@@ -86,7 +86,13 @@ class YourCustomNet(nn.Module):
         
         X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
         dataset = TensorDataset(X_tensor)
-        dataloader = TorchDataLoader(dataset, batch_size=batch_size, shuffle=False)
+        dataloader = TorchDataLoader(
+            dataset, 
+            batch_size=32, 
+            num_workers=4,
+            pin_memory=True,  # Enables faster CPU to GPU transfers
+            persistent_workers=True  # Keeps workers alive between epochs
+        )
 
         with torch.no_grad():
             for batch_X_tuple in dataloader:
@@ -115,9 +121,6 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
-    # Potentially add deterministic flags (can impact performance)
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
 
 # Define device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -468,12 +471,18 @@ def objective(
         trial.set_user_attr("score", score) # Log the final score too
 
         logger.info(f"Trial {trial.number}: Score: {score:.4f} (Precision: {precision:.4f}, Recall: {recall:.4f})")
-        # Simplified threshold logging for debugging
-        try:
-            threshold_val = metrics.get("threshold", "N/A")
-            logger.info(f"Trial {trial.number}: Threshold: {threshold_val}") # Simplest form
-        except Exception as log_e:
-            logger.error(f"Trial {trial.number}: Error logging threshold: {log_e}")
+        
+        if score > 0.35:
+            log_to_mlflow_pytorch(
+                model,
+                metrics,
+                params,
+                experiment_name,
+                X_val,
+                scaler,
+                pip_requirements,
+                run_name_prefix=f"pytorch_trial_{trial.number}",
+            )
         return score
 
     except optuna.TrialPruned as e:
@@ -637,9 +646,7 @@ def log_to_mlflow_pytorch(
             logger.info(f"Logged metrics: {metrics}")
 
             # Log the scaler
-            scaler_path = "scaler_pytorch.pkl"
-            with open(scaler_path, "wb") as f:
-                pickle.dump(scaler, f)
+            scaler_path = "src/models/scalers/scaler_pytorch.pkl"
             mlflow.log_artifact(scaler_path, artifact_path="scaler")
             logger.info("Logged scaler artifact.")
 
@@ -932,7 +939,7 @@ def main():
         logger.info(f"Target mean - Train: {y_train.mean():.3f}, Val: {y_val.mean():.3f}, Test: {y_test.mean():.3f}")
 
         # Fit the scaler ONLY on training data
-        scaler_path = "scaler_pytorch.pkl"
+        scaler_path = "src/models/scalers/scaler_pytorch.pkl"
         if os.path.exists(scaler_path):
             logger.info(f"Loading existing scaler from {scaler_path}")
             with open(scaler_path, 'rb') as f:
@@ -942,6 +949,8 @@ def main():
             scaler = RobustScaler()
             scaler.fit(X_train)
             logger.info("RobustScaler fitted on training data.")
+            with open(scaler_path, 'wb') as f:
+                pickle.dump(scaler, f)
         best_params = None
         final_metrics = None
 

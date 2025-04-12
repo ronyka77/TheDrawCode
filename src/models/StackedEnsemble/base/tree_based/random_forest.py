@@ -225,6 +225,9 @@ def optimize_hyperparameters(
 
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
+            # Log to MLflow
+            if score > 0.34:
+                log_to_mlflow(model, metrics, params, experiment_name)
             return score
 
         except Exception as e:
