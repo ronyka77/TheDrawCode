@@ -17,6 +17,7 @@ import mlflow.pyfunc
 import mlflow.sklearn
 import mlflow.xgboost
 import numpy as np
+import pandas as pd  # Add pandas import
 import sklearn
 import torch
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -78,7 +79,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
         # --- MLflow Run IDs for Base Models ---
         self.xgb_run_id = "4a3ebfc328af4041925d8b39786fb0ea"  
-        self.lgb_run_id = "2c9ea4315c16460689e00596ed2b6d9d"  
+        self.lgb_run_id = "99c15164c539454c86cb85ae36ab7033"  
         self.tabnet_run_id = "c531685eae4d429fb7fc1af4f6b38a95" 
         self.extra_run_id = "2830d0b8ebcb4c46809e6afab57da539" 
         self.mlp_run_id = "35dffd6200a74b2d9c1709e373c8af9f"
@@ -221,7 +222,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
         # Optionally calculate dynamic weights based on validation performance
         if self.dynamic_weighting:
-            
             # Use test predictions for weights used during FINAL meta-learner TRAINING
             self.logger.info("Computing dynamic weights based on test performance...")
             self.dynamic_weights_train, self.thresholds_train = compute_precision_focused_weights_optimized(
@@ -360,14 +360,42 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 p_tabnet = self.model_tabnet.predict_proba(X_tabnet.values)[:, 1]
             p_lgb = self.model_lgb.predict_proba(X_lgb)[:, 1]
             p_extra = self.model_extra.predict_proba(X_extra)[:, 1]
-            # Scale for MLP
+            
+            # --- MLP Scaling and Prediction ---
+            # Ensure X_mlp is a DataFrame with correct columns before transform
+            if not isinstance(X_mlp, pd.DataFrame):
+                self.logger.warning("X_mlp is not a DataFrame before scaling. Attempting conversion.")
+                X_mlp = pd.DataFrame(X_mlp, columns=self.mlp_features)
+            # Re-select columns just in case order changed or to ensure DataFrame type
+            X_mlp = X_mlp[self.mlp_features]
+            if not isinstance(X_mlp, pd.DataFrame):
+                self.logger.warning("X_mlp is not a DataFrame before scaling. Attempting conversion.")
+                X_mlp = pd.DataFrame(X_mlp, columns=self.mlp_features)
+            # Re-select columns just in case order changed or to ensure DataFrame type
+            X_mlp = X_mlp[self.mlp_features]
             X_mlp_scaled = self.model_mlp_scaler.transform(X_mlp)
             p_mlp = self.model_mlp.predict_proba(X_mlp_scaled)[:, 1]
-            # Scale for PyTorch
+
+            # --- PyTorch Scaling and Prediction ---
+            # Ensure X_pytorch is a DataFrame with correct columns before transform
+            if not isinstance(X_pytorch, pd.DataFrame):
+                self.logger.warning("X_pytorch is not a DataFrame before scaling. Attempting conversion.")
+                X_pytorch = pd.DataFrame(X_pytorch, columns=self.pytorch_features)
+            # Re-select columns
+            X_pytorch = X_pytorch[self.pytorch_features]
             X_pytorch_scaled = self.model_pytorch_scaler.transform(X_pytorch)
-            p_pytorch = self.model_pytorch.predict_proba(X_pytorch_scaled)[:, 1]
-            # Scale for SVM
+            # Assuming predict_proba handles numpy/dataframe after scaling
+            p_pytorch = self.model_pytorch.predict_proba(X_pytorch_scaled)[:, 1] 
+
+            # --- SVM Scaling and Prediction ---
+            # Ensure X_svm is a DataFrame with correct columns before transform
+            if not isinstance(X_svm, pd.DataFrame):
+                self.logger.warning("X_svm is not a DataFrame before scaling. Attempting conversion.")
+                X_svm = pd.DataFrame(X_svm, columns=self.svm_features)
+            # Re-select columns
+            X_svm = X_svm[self.svm_features]
             X_svm_scaled = self.model_svm_scaler.transform(X_svm)
+            # Predict directly with the scaled data (likely a numpy array now)
             p_svm = self.model_svm.predict_proba(X_svm_scaled)[:, 1]
 
             meta_features = create_meta_features_optimized(

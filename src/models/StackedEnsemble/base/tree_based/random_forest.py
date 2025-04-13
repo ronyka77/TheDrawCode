@@ -41,7 +41,7 @@ sklearn_version = sklearn.__version__
 pip_requirements = [f"scikit-learn=={sklearn_version}", f"mlflow=={mlflow.__version__}"]
 
 # Update base parameters for RandomForest
-base_params = {"random_state": 19, "n_jobs": 12, "verbose": 0, "criterion": "entropy"}
+base_params = {"random_state": 19, "n_jobs": 8, "verbose": 0, "criterion": "entropy"}
 # Set fixed seed and hash seed for determinism
 SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
@@ -49,9 +49,9 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "12"
-os.environ["MKL_NUM_THREADS"] = "12"
-os.environ["OPENBLAS_NUM_THREADS"] = "12"
+os.environ["OMP_NUM_THREADS"] = "8"
+os.environ["MKL_NUM_THREADS"] = "8"
+os.environ["OPENBLAS_NUM_THREADS"] = "8"
 
 
 def load_hyperparameter_space_for_hpo():
@@ -301,7 +301,7 @@ def optimize_hyperparameters(
         logger.info(
             f"Starting batch {batch + 1}/{num_batches} with new sampler (seed={random_seed})"
         )
-        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback])
+        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback], n_jobs=8)
 
         # Merge current batch's top trials with global_top_trials
         for trial_record in top_trials:

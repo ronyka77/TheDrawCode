@@ -607,7 +607,7 @@ def hypertune_meta_learner(
             }
 
             params = {
-                "learning_rate": trial.suggest_float("learning_rate", 1e-4, 5e-1, log=True),
+                "learning_rate": trial.suggest_float("learning_rate", 1e-4, 8e-1, log=True),
                 "n_d": trial.suggest_int("n_d", 8, 64),
                 "n_a": trial.suggest_int("n_a", 8, 64),
                 "n_steps": trial.suggest_int("n_steps", 3, 15),
