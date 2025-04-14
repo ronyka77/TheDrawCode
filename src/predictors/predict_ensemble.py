@@ -59,6 +59,9 @@ class DrawPredictor:
             if hasattr(self.model, "optimal_threshold"):
                 self.threshold = self.model.optimal_threshold
                 print(f"Using model's optimal threshold: {self.threshold:.2%}")
+            # elif hasattr(self.test_model, "metadata") and "threshold" in self.test_model.metadata.get_all_tags():
+            #     self.threshold = float(self.test_model.metadata.get_tag("threshold"))
+            #     print(f"Using model's threshold: {self.threshold:.2%}")
             else:
                 self.threshold = 0.27
                 print("No optimal threshold found in model, using default 27% threshold")
@@ -317,11 +320,11 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
             matches_with_results = matches_with_results.loc[
                 :, ~matches_with_results.columns.duplicated(keep="last")
             ]
-        # Filter matches with results for date >= 2025-03-01 and order by date descending
+        # Filter matches with results for date >= 2025-04-01 and order by date descending
         if "Date" in matches_with_results.columns:
             matches_with_results["Date"] = pd.to_datetime(matches_with_results["Date"])
             matches_with_results = matches_with_results[
-                matches_with_results["Date"] >= "2025-03-01"
+                matches_with_results["Date"] >= "2025-04-01"
             ]
             matches_with_results = matches_with_results.sort_values(by="Date", ascending=False)
         return matches_with_results, precision, draws_recall
@@ -373,23 +376,28 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        "035abdf986654b1e8b551d0ce044c929",
-        "d3c066618b4d425fbb2ffff99a478238",
-        "97207cdaab54477fa267d8cd29ce35e9",
-        "835b997b8acd46f7a72ab5350451e427",
-        "538f96a0c783429f9f2e6967cc4693a2",
-        "1aec65aae580476b813fe97fee26e9e0",
-        "355e5d963cf644debba80148a3fcd430",
-        "ffacc3add86741a3a91f6115aae22b26",
-        "c3c7d0788ef14f8da4ad02d709e2bca9",
-        "d111479cd80548dd9dad5176f1dca58d",
-        "d437d40570524d18be10da4251fc3c2a",
-        "0ebd3bd3b1f3472d9871100270888c92",
-        "39f18a98d0004d48afd4da01f89be180",
-        "d408352aa7174d53985b62286ff3c3c2",
-        "1bbb837e359b43a79949b47a4c747893",
-        "6b0fe5666ce0464087b3dfc9fcab9f44",
-        "e870ebb733e04fd5853c4633cdda2409",
+        # "035abdf986654b1e8b551d0ce044c929",
+        # "d3c066618b4d425fbb2ffff99a478238",
+        # "97207cdaab54477fa267d8cd29ce35e9",
+        # "835b997b8acd46f7a72ab5350451e427",
+        # "538f96a0c783429f9f2e6967cc4693a2",
+        # "1aec65aae580476b813fe97fee26e9e0",
+        # "355e5d963cf644debba80148a3fcd430",
+        # "ffacc3add86741a3a91f6115aae22b26",
+        # "c3c7d0788ef14f8da4ad02d709e2bca9",
+        # "d111479cd80548dd9dad5176f1dca58d",
+        # "d437d40570524d18be10da4251fc3c2a",
+        # "0ebd3bd3b1f3472d9871100270888c92",
+        # "39f18a98d0004d48afd4da01f89be180",
+        # "d408352aa7174d53985b62286ff3c3c2",
+        # "1bbb837e359b43a79949b47a4c747893",
+        # "6b0fe5666ce0464087b3dfc9fcab9f44",
+        # "e870ebb733e04fd5853c4633cdda2409",
+        # "468ce9f3a3ee4eda857506a0f12ce066",
+        # "aa2badab5f4e444dac33e6bc4a917e40",
+        # "aaf2b87d37924dd7900f1f67692c28ab",
+        # "295e613f2ec644b4902aca3516dabd9d",
+        "e837c4a1541844c0a5ab903198426694",
     ]
     # Filter configuration to remove predictions near specific thresholds
     filter_config = {

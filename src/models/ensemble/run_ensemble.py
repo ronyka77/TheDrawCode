@@ -15,6 +15,7 @@ from pathlib import Path
 import mlflow
 import mlflow.sklearn
 import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin
 
 # Filter scikit-learn parameter renaming warnings
 warnings.filterwarnings("ignore", message=".*force_all_finite.*", category=FutureWarning)
@@ -52,7 +53,9 @@ from src.utils.logger import ExperimentLogger
 
 experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name, log_dir="./logs/ensemble_model_improved")
+from src.models.ensemble.data_utils import prepare_data
 from src.models.ensemble.ensemble_model_0412 import EnsembleModel
+from src.models.StackedEnsemble.shared.data_loader import DataLoader
 from src.utils.create_evaluation_set import (
     import_selected_features_ensemble,
     setup_mlflow_tracking,
@@ -102,11 +105,8 @@ def run_ensemble(
             )
 
             logger.info("Starting ensemble model execution...")
-
             try:
                 logger.info("Loading data...")
-                from src.models.StackedEnsemble.shared.data_loader import DataLoader
-
                 X_train, y_train, X_test, y_test, X_val, y_val = DataLoader().load_data()
                 # Convert all columns to float64 to ensure consistent data types
                 X_train = X_train.astype("float64")
@@ -133,12 +133,12 @@ def run_ensemble(
 
             # Feature selection
             logger.info("Selecting features...")
-            import_selected_features_ensemble("all")
+            features = import_selected_features_ensemble("all")
 
             # Filter features for all datasets
-            X_train_filtered = X_train
-            X_test_filtered = X_test
-            X_val_filtered = X_val
+            X_train_filtered = prepare_data(X_train, features)
+            X_test_filtered = prepare_data(X_test, features)
+            X_val_filtered = prepare_data(X_val, features)
 
             # Log the conversion
             mlflow.log_param("data_type_conversion", "all_columns_to_float64")
@@ -154,7 +154,6 @@ def run_ensemble(
                 dynamic_weighting=dynamic_weighting,
                 target_precision=target_precision,
                 required_recall=required_recall,
-                X_train=X_train_filtered,
             )
 
             # Train the model
@@ -190,9 +189,6 @@ def run_ensemble(
 
             # Register model with timestamp-based name following project guidelines
             model_name = f"ensemble_{datetime.now().strftime('%Y%m%d_%H%M')}"
-
-            # Create a scikit-learn compatible wrapper for the ensemble model
-            from sklearn.base import BaseEstimator, ClassifierMixin
 
             class EnsembleModelWrapper(BaseEstimator, ClassifierMixin):
                 def __init__(self, model):

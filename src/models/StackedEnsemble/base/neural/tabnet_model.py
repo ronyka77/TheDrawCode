@@ -59,11 +59,11 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "4"
-os.environ["MKL_NUM_THREADS"] = "4"
-os.environ["OPENBLAS_NUM_THREADS"] = "4"
-os.environ["NUMEXPR_NUM_THREADS"] = "4"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "8"
+os.environ["MKL_NUM_THREADS"] = "8"
+os.environ["OPENBLAS_NUM_THREADS"] = "8"
+os.environ["NUMEXPR_NUM_THREADS"] = "8"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "8"
 
 # PyTorch specific reproducibility settings and optimizations
 torch.manual_seed(SEED)
@@ -357,7 +357,6 @@ def create_model(model_params):
                     logger.info("Successfully applied torch.compile to TabNet network")
             except Exception as e:
                 logger.warning(f"Could not apply torch.compile: {str(e)}")
-                # Continue with uncompiled model if compilation fails
                 
         return model
     except Exception as e:

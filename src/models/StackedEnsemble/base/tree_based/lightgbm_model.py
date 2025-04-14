@@ -31,7 +31,7 @@ from src.utils.create_evaluation_set import (
     import_selected_features_ensemble,
     setup_mlflow_tracking,
 )
-
+from src.models.ensemble.data_utils import prepare_data
 # Setup MLflow tracking
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
@@ -73,28 +73,28 @@ def load_hyperparameter_space():
         "learning_rate": {"type": "float", "low": 0.05, "high": 0.16, "log": False, "step": 0.005},
         "num_leaves": {"type": "int", "low": 50, "high": 150, "log": False, "step": 5},
         "max_depth": {"type": "int", "low": 4, "high": 10, "log": False, "step": 1},
-        "min_child_samples": {"type": "int", "low": 150, "high": 400, "log": False, "step": 10},
+        "min_child_samples": {"type": "int", "low": 150, "high": 450, "log": False, "step": 10},
         "feature_fraction": {
             "type": "float",
             "low": 0.55,
-            "high": 0.70,
+            "high": 0.75,
             "log": False,
             "step": 0.01,
         },
         "bagging_fraction": {
             "type": "float",
             "low": 0.55,
-            "high": 0.70,
+            "high": 0.75,
             "log": False,
             "step": 0.005,
         },
         "bagging_freq": {"type": "int", "low": 7, "high": 15, "log": False, "step": 1},
-        "reg_alpha": {"type": "float", "low": 0.5, "high": 15.0, "log": False, "step": 0.1},
-        "reg_lambda": {"type": "float", "low": 1.0, "high": 15.0, "log": False, "step": 0.1},
+        "reg_alpha": {"type": "float", "low": 0.5, "high": 20.0, "log": False, "step": 0.1},
+        "reg_lambda": {"type": "float", "low": 1.0, "high": 20.0, "log": False, "step": 0.1},
         "min_split_gain": {"type": "float", "low": 0.10, "high": 0.25, "log": False, "step": 0.01},
-        "early_stopping_rounds": {"type": "int", "low": 300, "high": 900, "log": False, "step": 10},
+        "early_stopping_rounds": {"type": "int", "low": 200, "high": 900, "log": False, "step": 10},
         "path_smooth": {"type": "float", "low": 0.005, "high": 0.60, "log": False, "step": 0.005},
-        "cat_smooth": {"type": "float", "low": 5.0, "high": 30.0, "log": False, "step": 0.1},
+        "cat_smooth": {"type": "float", "low": 5.0, "high": 35.0, "log": False, "step": 0.1},
         "max_bin": {"type": "int", "low": 200, "high": 700, "log": False, "step": 10},
     }
     return hyperparameter_space
@@ -349,72 +349,28 @@ def hypertune_lightgbm(experiment_name: str):
         tuple: (best_params, best_metrics)
     """
     try:
-        # Start MLflow run
-        with mlflow.start_run(run_name=f"lightgbm_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-            # Set tags
-            mlflow.set_tags(
-                {"model_type": "lightgbm_base", "training_mode": "global", "cpu_only": True}
-            )
+        # Load hyperparameter space
+        hyperparameter_space = load_hyperparameter_space()
 
-            # Load hyperparameter space
-            hyperparameter_space = load_hyperparameter_space()
+        # Run hyperparameter optimization
+        logger.info("Starting hyperparameter optimization")
+        best_params = optimize_hyperparameters(
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            X_eval,
+            y_eval,
+            hyperparameter_space=hyperparameter_space,
+        )
 
-            # Run hyperparameter optimization
-            logger.info("Starting hyperparameter optimization")
-            best_params = optimize_hyperparameters(
-                X_train,
-                y_train,
-                X_test,
-                y_test,
-                X_eval,
-                y_eval,
-                hyperparameter_space=hyperparameter_space,
-            )
+        # Train final model with best parameters
+        logger.info("Training final model with best parameters")
+        model, metrics = train_model(
+            X_train, y_train, X_test, y_test, X_eval, y_eval, best_params
+        )
 
-            # Train final model with best parameters
-            logger.info("Training final model with best parameters")
-            model, metrics = train_model(
-                X_train, y_train, X_test, y_test, X_eval, y_eval, best_params
-            )
-            # Log best parameters to MLflow
-            logger.info("Logging best parameters to MLflow")
-            for param_name, param_value in best_params.items():
-                mlflow.log_param(param_name, param_value)
-
-            # Log final metrics
-            mlflow.log_metrics(
-                {
-                    "precision": metrics.get("precision", 0.0),
-                    "recall": metrics.get("recall", 0.0),
-                    "f1": metrics.get("f1", 0.0),
-                    "auc": metrics.get("auc", 0.0),
-                    "threshold": metrics.get("threshold", 0.5),
-                }
-            )
-
-            # Create input example with a sample from evaluation data
-            # Handle integer columns by converting them to float64 to properly manage missing values
-            input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, "iloc") else X_eval[:5].copy()
-
-            # Identify and convert integer columns to float64 to prevent schema enforcement errors
-            if hasattr(input_example, "dtypes"):
-                for col in input_example.columns:
-                    if X_eval[col].dtype.kind == "i":
-                        logger.info(
-                            f"Converting integer column '{col}' to float64 to handle potential missing values"
-                        )
-                        X_eval[col] = X_eval[col].astype("float64")
-
-            # Infer signature with proper handling for integer columns with potential missing values
-            signature = mlflow.models.infer_signature(input_example, model.predict(input_example))
-            mlflow.lightgbm.log_model(
-                model,
-                "model",
-                registered_model_name=f"lightgbm_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                signature=signature,
-            )
-
-            return best_params, metrics
+        return best_params, metrics
 
     except Exception as e:
         logger.error(f"Error in hyperparameter tuning: {str(e)}")
@@ -477,10 +433,11 @@ def log_to_mlflow(model, metrics, params, experiment_name):
                 registered_model_name=f"lightgbm_{datetime.now().strftime('%Y%m%d_%H%M')}",
                 signature=signature,
             )
-
+            run_id = run.info.run_id
             logger.info(f"Model logged to MLflow: {model_info.model_uri}")
-            logger.info(f"Run ID: {run.info.run_id}")
-            return run.info.run_id
+            logger.info(f"Run ID: {run_id}")
+            mlflow.end_run()
+            return run_id
 
     except Exception as e:
         logger.error(f"Error logging to MLflow: {str(e)}")
@@ -505,20 +462,20 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "learning_rate": 0.135,
-                "num_leaves": 130,
+                "learning_rate": 0.14,
+                "num_leaves": 105,
                 "max_depth": 8,
-                "min_child_samples": 380,
-                "feature_fraction": 0.68,
-                "bagging_fraction": 0.67,
-                "bagging_freq": 7,
-                "reg_alpha": 9.1,
-                "reg_lambda": 4.4,
-                "min_split_gain": 0.24000000000000002,
-                "early_stopping_rounds": 600,
-                "path_smooth": 0.225,
-                "cat_smooth": 26.3,
-                "max_bin": 350,
+                "min_child_samples": 160,
+                "feature_fraction": 0.75,
+                "bagging_fraction": 0.5650000000000001,
+                "bagging_freq": 11,
+                "reg_alpha": 19.1,
+                "reg_lambda": 9.9,
+                "min_split_gain": 0.1,
+                "early_stopping_rounds": 770,
+                "path_smooth": 0.07500000000000001,
+                "cat_smooth": 28.900000000000002,
+                "max_bin": 300,
             }
         )
 
@@ -548,13 +505,10 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
         features = import_selected_features_ensemble(model_type="lgbm")
-        X_train = X_train[features]
-        X_test = X_test[features]
-        X_eval = X_eval[features]
-        # Convert all columns to float64 to ensure consistent data types
-        X_train = X_train.astype("float64")
-        X_test = X_test.astype("float64")
-        X_eval = X_eval.astype("float64")
+        X_train = prepare_data(X_train, features)
+        X_test = prepare_data(X_test, features)
+        X_eval = prepare_data(X_eval, features)
+        
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
@@ -563,13 +517,9 @@ def main():
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
 
-        # Hyperparameter optimization - run 3 times and select best
-        logger.info("Starting hyperparameter optimization")
-
         logger.info("Starting hyperparameter optimization run")
         current_params, current_metrics = hypertune_lightgbm(experiment_name)
         logger.info(f"Run completed with parameters: {current_params}")
-        logger.info(f"Run metrics: {current_metrics}")
 
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(

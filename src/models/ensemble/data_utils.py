@@ -16,11 +16,9 @@ from src.utils.logger import ExperimentLogger
 def prepare_data(X: pd.DataFrame, selected_features: list[str]) -> pd.DataFrame:
     """
     Ensure X contains the required features and fill missing values.
-
     Args:
         X: Input dataframe
         selected_features: List of required feature names
-
     Returns:
         Prepared dataframe with required features
     """
@@ -35,7 +33,6 @@ def prepare_data(X: pd.DataFrame, selected_features: list[str]) -> pd.DataFrame:
 
     # Select only the required features
     X_selected = X[selected_features].copy()
-
     # Fill missing values with appropriate strategies
     for col in X_selected.columns:
         # Use mean for numeric columns
@@ -44,7 +41,9 @@ def prepare_data(X: pd.DataFrame, selected_features: list[str]) -> pd.DataFrame:
         else:
             # Use mode for categorical columns
             X_selected[col] = X_selected[col].fillna(X_selected[col].mode()[0])
-
+    # Convert all columns to float64 to ensure consistent data types
+    X_selected = X_selected.astype("float64")
+    
     return X_selected
 
 def apply_adasyn_resampling(

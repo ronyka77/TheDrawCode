@@ -25,6 +25,8 @@ from sklearn.preprocessing import RobustScaler, StandardScaler
 from torch.utils.data import DataLoader as TorchDataLoader
 from torch.utils.data import TensorDataset
 
+from src.models.ensemble.data_utils import prepare_data
+
 # Import custom utilities
 from src.models.StackedEnsemble.shared.data_loader import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
@@ -40,6 +42,38 @@ logger = ExperimentLogger(experiment_name)
 
 # Setup MLflow tracking
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
+
+# Set fixed seed and hash seed for determinism
+SEED = 19
+os.environ["PYTHONHASHSEED"] = str(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+
+# Restrict parallel threads across various libraries
+os.environ["OMP_NUM_THREADS"] = "8"
+os.environ["MKL_NUM_THREADS"] = "8"
+os.environ["OPENBLAS_NUM_THREADS"] = "8"
+os.environ["NUMEXPR_NUM_THREADS"] = "8"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "8"
+
+# PyTorch specific reproducibility settings and optimizations
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+    torch.backends.cudnn.benchmark = True  # Auto-optimizes for hardware if input sizes don't change
+    torch.backends.cudnn.deterministic = False  # Better performance, less deterministic
+    # Enable TF32 for better performance on Ampere GPUs (RTX 30xx and newer)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    # Check if PyTorch version supports torch.compile
+    if hasattr(torch, 'compile'):
+        logger.info("torch.compile is available - will use it for performance optimization")
+        USE_TORCH_COMPILE = True
+    else:
+        logger.info("torch.compile not available in this PyTorch version")
+        USE_TORCH_COMPILE = False
+else:
+    USE_TORCH_COMPILE = False
 
 # Define a placeholder if the actual model file doesn't exist yet
 class YourCustomNet(nn.Module):
@@ -136,6 +170,10 @@ pip_requirements = [
 ]
 logger.info(f"Defined pip requirements: {pip_requirements}")
 
+base_params = {
+    "n_jobs": 8,
+    "random_state": SEED
+}
 
 # --- Phase 2: Hyperparameter Space and Model Handling ---
 def load_hyperparameter_space():
@@ -566,7 +604,7 @@ def optimize_hyperparameters(
 
     # Run the optimization
     try:
-        study.optimize(objective_func, n_trials=n_trials, callbacks=[log_callback], show_progress_bar=True, n_jobs=8)
+        study.optimize(objective_func, n_trials=n_trials, callbacks=[log_callback], show_progress_bar=True)
     except KeyboardInterrupt:
         logger.warning("Optimization stopped manually via KeyboardInterrupt.")
     
@@ -576,24 +614,7 @@ def optimize_hyperparameters(
         logger.warning("No trials completed successfully.")
         return {}
 
-    best_trial = study.best_trial
-    logger.info(f"Best trial number: {best_trial.number}")
-    logger.info(f"Best score (objective value): {best_trial.value:.4f}")
-    logger.info("Best hyperparameters found:")
-    for key, value in best_trial.params.items():
-        logger.info(f"  {key}: {value}")
-
-    # Log final top trials list
-    logger.info("--- Final Top 10 Trials --- ")
-    header = "| Rank | Trial # | Score  | Params |"
-    sep =    "|------|---------|--------|--------|"
-    logger.info(header)
-    logger.info(sep)
-    for i, (t_num, t_score, t_params) in enumerate(top_trials_overall):
-        params_str = json.dumps(t_params, sort_keys=True, default=lambda x: f"{x:.4g}" if isinstance(x, float) else x)
-        logger.info(f"| {i+1:<4} | {t_num:<7} | {t_score:.4f} | {params_str} |")
-
-    return best_trial.params
+    return study.best_trial.params
 
 
 # --- Phase 5: MLflow Logging and Main Workflow ---
@@ -726,80 +747,59 @@ def hypertune_pytorch(
         tuple: (best_params, final_metrics) or (None, None) on failure.
     """
     try:
-        # Start MLflow run for the entire HPO process
-        with mlflow.start_run(
-            run_name=f"pytorch_hpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        ) as hpo_run:
-            hpo_run_id = hpo_run.info.run_id
-            logger.info(f"Starting HPO MLflow run: {hpo_run_id}")
-            mlflow.set_tags({
-                "model_type": "pytorch_custom",
-                "run_type": "hyperparameter_optimization",
-                "device": str(device), 
-            })
+        # Load hyperparameter space
+        hyperparameter_space = load_hyperparameter_space()
 
-            # Load hyperparameter space
-            hyperparameter_space = load_hyperparameter_space()
+        # Run hyperparameter optimization
+        logger.info("Initiating Optuna hyperparameter search...")
+        best_hpo_params = optimize_hyperparameters(
+            X_train, y_train, 
+            X_test, y_test, 
+            X_val, y_val, 
+            hyperparameter_space,
+            input_dim,
+            device,
+            scaler
+        )
 
-            # Run hyperparameter optimization
-            logger.info("Initiating Optuna hyperparameter search...")
-            best_hpo_params = optimize_hyperparameters(
-                X_train, y_train, 
-                X_test, y_test, 
-                X_val, y_val, 
-                hyperparameter_space,
-                input_dim,
-                device,
-                scaler
-            )
+        if not best_hpo_params:
+            logger.error("Hyperparameter optimization failed to find best parameters.")
+            mlflow.log_param("status", "HPO Failed")
+            return None, None
 
-            if not best_hpo_params:
-                logger.error("Hyperparameter optimization failed to find best parameters.")
-                mlflow.log_param("status", "HPO Failed")
-                return None, None
+        logger.info(f"Best HPO parameters identified: {best_hpo_params}")
+        mlflow.log_params({f"best_{k}": v for k,v in best_hpo_params.items()}) # Log best HPO params to HPO run
 
-            logger.info(f"Best HPO parameters identified: {best_hpo_params}")
-            mlflow.log_params({f"best_{k}": v for k,v in best_hpo_params.items()}) # Log best HPO params to HPO run
+        # --- Train Final Model with Best Parameters ---
+        logger.info("Training final model using best hyperparameters...")
+        final_model = create_pytorch_model(best_hpo_params, input_dim, device, scaler)
+        
+        # Train the final model (without passing Optuna trial)
+        final_model, final_metrics = train_pytorch_model(
+            final_model,
+            X_train, y_train,
+            X_test, y_test,
+            X_val, y_val,
+            best_hpo_params,
+            device,
+            scaler,
+            trial=None # Not an Optuna trial run
+        )
+        
+        # --- Log Final Model Separately ---
+        logger.info("Logging the final trained model and artifacts to MLflow...")
+        log_to_mlflow_pytorch(
+            model=final_model,
+            metrics=final_metrics,
+            params=best_hpo_params,
+            experiment_name=experiment_name, 
+            X_eval=X_val,
+            scaler=scaler,
+            pip_requirements=pip_requirements,
+            run_name_prefix="pytorch_best_model"
+        )
 
-            # --- Train Final Model with Best Parameters ---
-            logger.info("Training final model using best hyperparameters...")
-            final_model = create_pytorch_model(best_hpo_params, input_dim, device, scaler)
-            
-            # Train the final model (without passing Optuna trial)
-            final_model, final_metrics = train_pytorch_model(
-                final_model,
-                X_train, y_train,
-                X_test, y_test,
-                X_val, y_val,
-                best_hpo_params,
-                device,
-                scaler,
-                trial=None # Not an Optuna trial run
-            )
-            
-            if not final_metrics:
-                logger.error("Final model training failed.")
-                mlflow.log_param("status", "Final Training Failed")
-                return best_hpo_params, None
-
-            logger.info(f"Final model trained. Metrics: {final_metrics}")
-            mlflow.log_metrics({f"final_{k}": v for k, v in final_metrics.items()}) # Log final metrics to HPO run
-            mlflow.log_param("status", "HPO Completed")
-
-            # --- Log Final Model Separately ---
-            logger.info("Logging the final trained model and artifacts to MLflow...")
-            log_to_mlflow_pytorch(
-                model=final_model,
-                metrics=final_metrics,
-                params=best_hpo_params,
-                experiment_name=experiment_name, 
-                X_eval=X_val,
-                scaler=scaler,
-                pip_requirements=pip_requirements,
-                run_name_prefix="pytorch_best_model"
-            )
-
-            return best_hpo_params, final_metrics
+        return best_hpo_params, final_metrics
 
     except Exception as e:
         logger.error(f"Error during hyperparameter tuning orchestration: {str(e)}")
@@ -903,8 +903,6 @@ def main():
         logger.info("Starting PyTorch Custom Model HPO script...")
         
         # Load data using the shared DataLoader
-        # Split arguments can be adjusted if needed (e.g., val_size)
-        # Removed val_size and test_size from init, assuming DataLoader handles splits internally
         dataloader = DataLoader() 
         X_train, y_train, X_test, y_test, X_val, y_val = dataloader.load_data()
         
@@ -921,9 +919,9 @@ def main():
             if 'target' in features: 
                 features.remove('target') 
 
-        X_train = X_train[features]
-        X_test = X_test[features]
-        X_val = X_val[features]
+        X_train = prepare_data(X_train, features)
+        X_test = prepare_data(X_test, features)
+        X_val = prepare_data(X_val, features)
         input_dim = len(features)
         logger.info(f"Selected {input_dim} features.")
 

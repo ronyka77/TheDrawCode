@@ -20,6 +20,7 @@ import pandas as pd
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
 
+from src.models.ensemble.data_utils import prepare_data
 from src.utils.logger import ExperimentLogger
 
 experiment_name = "random_forest_soccer_prediction"
@@ -333,78 +334,28 @@ def hypertune_random_forest(experiment_name: str):
     Main training function with MLflow tracking.
     """
     try:
-        with mlflow.start_run(run_name=f"rf_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-            mlflow.set_tags(
-                {"model_type": "random_forest_base", "training_mode": "global", "cpu_only": True}
-            )
+        # Load hyperparameter space
+        hyperparameter_space = load_hyperparameter_space_for_hpo()
 
-            # Load hyperparameter space
-            hyperparameter_space = load_hyperparameter_space_for_hpo()
+        # Run hyperparameter optimization
+        logger.info("Starting hyperparameter optimization")
+        best_params = optimize_hyperparameters(
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            X_eval,
+            y_eval,
+            hyperparameter_space=hyperparameter_space,
+        )
 
-            # Run hyperparameter optimization
-            logger.info("Starting hyperparameter optimization")
-            best_params = optimize_hyperparameters(
-                X_train,
-                y_train,
-                X_test,
-                y_test,
-                X_eval,
-                y_eval,
-                hyperparameter_space=hyperparameter_space,
-            )
+        # Train final model with best parameters
+        logger.info("Training final model with best parameters")
+        model, metrics = train_model(
+            X_train, y_train, X_test, y_test, X_eval, y_eval, best_params
+        )
 
-            # Train final model with best parameters
-            logger.info("Training final model with best parameters")
-            model, metrics = train_model(
-                X_train, y_train, X_test, y_test, X_eval, y_eval, best_params
-            )
-
-            # Log final metrics
-            mlflow.log_metrics(
-                {
-                    "precision": metrics.get("precision", 0.0),
-                    "recall": metrics.get("recall", 0.0),
-                    "f1": metrics.get("f1", 0.0),
-                    "auc": metrics.get("auc", 0.0),
-                    "threshold": metrics.get("threshold", 0.5),
-                }
-            )
-
-            # Log model
-            # Create input example with a sample from evaluation data
-            # Handle integer columns by converting them to float64 to properly manage missing values
-            input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, "iloc") else X_eval[:5].copy()
-
-            # Identify and convert integer columns to float64 to prevent schema enforcement errors
-            if hasattr(input_example, "dtypes"):
-                for col in input_example.columns:
-                    if input_example[col].dtype.kind == "i":
-                        logger.info(
-                            f"Converting integer column '{col}' to float64 to handle potential missing values"
-                        )
-                        input_example[col] = input_example[col].astype("float64")
-            # Log best parameters to MLflow
-            logger.info("Logging best parameters to MLflow")
-            for param_name, param_value in best_params.items():
-                mlflow.log_param(param_name, param_value)
-
-            # Infer signature with proper handling for integer columns with potential missing values
-            signature = mlflow.models.infer_signature(input_example, model.predict(input_example))
-
-            # Log warning about integer columns in signature
-            logger.info(
-                "Model signature created - check logs for any warnings about integer columns"
-            )
-            # When saving model, use sklearn instead of xgboost
-            mlflow.sklearn.log_model(
-                model,
-                "model",
-                pip_requirements=pip_requirements,
-                registered_model_name=f"rf_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                signature=signature,
-            )
-
-            return best_params, metrics
+        return best_params, metrics
 
     except Exception as e:
         logger.error(f"Error in hyperparameter tuning: {str(e)}")
@@ -523,13 +474,9 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
         features = import_selected_features_ensemble(model_type="rf")
-        X_train = X_train[features]
-        X_test = X_test[features]
-        X_eval = X_eval[features]
-        # Convert all columns to float64 to ensure consistent data types
-        X_train = X_train.astype("float64")
-        X_test = X_test.astype("float64")
-        X_eval = X_eval.astype("float64")
+        X_train = prepare_data(X_train, features)
+        X_test = prepare_data(X_test, features)
+        X_eval = prepare_data(X_eval, features)
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")

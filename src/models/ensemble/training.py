@@ -47,11 +47,11 @@ tf.random.set_seed(random_seed)
 os.environ["PYTHONHASHSEED"] = str(random_seed)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "4"
-os.environ["MKL_NUM_THREADS"] = "4"
-os.environ["OPENBLAS_NUM_THREADS"] = "4"
-os.environ["NUMEXPR_NUM_THREADS"] = "4"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "8"
+os.environ["MKL_NUM_THREADS"] = "8"
+os.environ["OPENBLAS_NUM_THREADS"] = "8"
+os.environ["NUMEXPR_NUM_THREADS"] = "8"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "8"
 # PyTorch specific reproducibility settings
 torch.manual_seed(random_seed)
 
@@ -492,7 +492,7 @@ def hypertune_meta_learner(
     eval_meta_features: Optional[np.ndarray] = None,
     eval_meta_targets: Optional[np.ndarray] = None,
     meta_learner_type="xgb",
-    n_trials=100,
+    n_trials=200,
     timeout=900000,
     target_precision=0.5,
     min_recall=0.25,
@@ -535,9 +535,18 @@ def hypertune_meta_learner(
     os.environ["OMP_NUM_THREADS"] = "8"
     os.environ["MKL_NUM_THREADS"] = "8"
     os.environ["OPENBLAS_NUM_THREADS"] = "8"
-    os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
     os.environ["NUMEXPR_NUM_THREADS"] = "8"
     os.environ["VECLIB_MAXIMUM_THREADS"] = "8"
+    # PyTorch specific reproducibility settings and optimizations
+    torch.manual_seed(random_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(random_seed)
+        torch.backends.cudnn.benchmark = True  # Auto-optimizes for hardware if input sizes don't change
+        torch.backends.cudnn.deterministic = False  # Better performance, less deterministic
+        # Enable TF32 for better performance on Ampere GPUs (RTX 30xx and newer)
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
     logger.info(f"Hyperparameter tuning for meta-learner type: {meta_learner_type}")
     best_model = None
 
@@ -645,6 +654,15 @@ def hypertune_meta_learner(
             if "virtual_batch_size" in train_params:
                 train_params.pop("virtual_batch_size")
             meta_learner = TabNetClassifier(**train_params)
+            if torch.cuda.is_available():
+                try:
+                    if hasattr(meta_learner, 'network') and hasattr(torch, 'compile'):
+                        logger.info("Applying torch.compile to TabNet network for GPU acceleration")
+                        # Apply compilation with 'reduce-overhead' mode which is good for GPU performance
+                        meta_learner.network = torch.compile(meta_learner.network, mode="reduce-overhead")
+                        logger.info("Successfully applied torch.compile to TabNet network")
+                except Exception as e:
+                    logger.warning(f"Could not apply torch.compile: {str(e)}")
             # Update trial params with both training and model params
             params.update(fit_params)
             for key, value in params.items():

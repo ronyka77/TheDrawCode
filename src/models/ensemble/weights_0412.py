@@ -29,8 +29,8 @@ def compute_precision_focused_weights_optimized(
         raise ValueError(f"Expected required_recalls list to have {num_models} elements, got {len(required_recalls)}")
         
     xgb_recall = required_recalls[0]
-    tabnet_recall = required_recalls[1]
-    lgb_recall = required_recalls[2]
+    lgb_recall = required_recalls[1]
+    tabnet_recall = required_recalls[2]
     extra_recall = required_recalls[3]
     mlp_recall = required_recalls[4]
     pytorch_recall = required_recalls[5]

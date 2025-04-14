@@ -62,27 +62,23 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         meta_learner_type="xgb",
         dynamic_weighting=True,
         extra_base_model_type="random_forest",  # Removed, RF is now standard
-        sampling_strategy=0.7,
-        complexity_penalty=0.01,
         target_precision=0.50,
         required_recall=0.25,
-        X_train=None,
     ):
         # Use provided logger or create a new one specific to this version
         self.logger = logger or ExperimentLogger(
             experiment_name="ensemble_model_0410", log_dir="./logs/ensemble_model_0410"
         )
         self.required_recall = required_recall # For meta-learner
-        self.sampling_strategy = sampling_strategy # Used elsewhere?
-        self.complexity_penalty = complexity_penalty # Used elsewhere?
+
         self.target_precision = target_precision # For dynamic weights
 
         # --- MLflow Run IDs for Base Models ---
-        self.xgb_run_id = "4a3ebfc328af4041925d8b39786fb0ea"  
-        self.lgb_run_id = "99c15164c539454c86cb85ae36ab7033"  
+        self.xgb_run_id = "a002b5e26c544deb8d210e8bc4d360fc"  
+        self.lgb_run_id = "68d357aed6bf4f9fa5d47d20edea7d7e"  
         self.tabnet_run_id = "c531685eae4d429fb7fc1af4f6b38a95" 
-        self.extra_run_id = "2830d0b8ebcb4c46809e6afab57da539" 
-        self.mlp_run_id = "35dffd6200a74b2d9c1709e373c8af9f"
+        self.extra_run_id = "bde53176ab4f4c689a0ffa825f24e3a5" 
+        self.mlp_run_id = "035981f3b15f4318818e3d863ec9921f"
         self.pytorch_run_id = "fc1cfea4661b4603958894a956c1e91a"
         self.svm_run_id = "a0ec998ec11941a895e056a81ab04281"  # <<< ADD SVM RUN ID HERE
 
@@ -101,8 +97,8 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             # Adjusted for 7 base models
             self.dynamic_weights = {
                 "xgb": 1 / num_models,
-                "tabnet": 1 / num_models,
                 "lgb": 1 / num_models,
+                "tabnet": 1 / num_models,
                 "extra": 1 / num_models,
                 "mlp": 1 / num_models,
                 "pytorch": 1 / num_models, # Added pytorch
@@ -368,11 +364,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 X_mlp = pd.DataFrame(X_mlp, columns=self.mlp_features)
             # Re-select columns just in case order changed or to ensure DataFrame type
             X_mlp = X_mlp[self.mlp_features]
-            if not isinstance(X_mlp, pd.DataFrame):
-                self.logger.warning("X_mlp is not a DataFrame before scaling. Attempting conversion.")
-                X_mlp = pd.DataFrame(X_mlp, columns=self.mlp_features)
-            # Re-select columns just in case order changed or to ensure DataFrame type
-            X_mlp = X_mlp[self.mlp_features]
             X_mlp_scaled = self.model_mlp_scaler.transform(X_mlp)
             p_mlp = self.model_mlp.predict_proba(X_mlp_scaled)[:, 1]
 
@@ -384,7 +375,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             # Re-select columns
             X_pytorch = X_pytorch[self.pytorch_features]
             X_pytorch_scaled = self.model_pytorch_scaler.transform(X_pytorch)
-            # Assuming predict_proba handles numpy/dataframe after scaling
             p_pytorch = self.model_pytorch.predict_proba(X_pytorch_scaled)[:, 1] 
 
             # --- SVM Scaling and Prediction ---
@@ -395,7 +385,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             # Re-select columns
             X_svm = X_svm[self.svm_features]
             X_svm_scaled = self.model_svm_scaler.transform(X_svm)
-            # Predict directly with the scaled data (likely a numpy array now)
             p_svm = self.model_svm.predict_proba(X_svm_scaled)[:, 1]
 
             meta_features = create_meta_features_optimized(
@@ -555,150 +544,126 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             raise ValueError(f"Failed to load Extra Trees model: {str(e)}") from e
 
         # Load MLP (sklearn) model
-        if not self.mlp_run_id or self.mlp_run_id == "PLACEHOLDER_MLP_RUN_ID":
-            self.logger.warning(
-                "MLP Run ID is not set or is a placeholder. Skipping MLP model loading."
-            )
-        else:
-            try:
-                self.logger.info(f"Loading MLP model from run {self.mlp_run_id}...")
-                mlp_uri = f"runs:/{self.mlp_run_id}/{mlp_path}"
-                self.model_mlp = mlflow.sklearn.load_model(mlp_uri)
-                mlp_pyfunc = mlflow.pyfunc.load_model(mlp_uri)
-                if mlp_pyfunc.metadata.signature and mlp_pyfunc.metadata.signature.inputs:
-                    self.mlp_features = mlp_pyfunc.metadata.signature.inputs.input_names()
-                    self.logger.info(
-                        f"Updated MLP feature signature: {len(self.mlp_features)} features"
-                    )
-                else:
-                    self.logger.warning("No feature signature found for MLP model")
-                    # Attempt to get features from the underlying sklearn model if possible
-                    self.mlp_features = getattr(self.model_mlp, "feature_names_in_", []) 
-
-                # Load the associated MLP scaler
+        try:
+            self.logger.info(f"Loading MLP model from run {self.mlp_run_id}...")
+            mlp_uri = f"runs:/{self.mlp_run_id}/{mlp_path}"
+            self.model_mlp = mlflow.sklearn.load_model(mlp_uri)
+            mlp_pyfunc = mlflow.pyfunc.load_model(mlp_uri)
+            if mlp_pyfunc.metadata.signature and mlp_pyfunc.metadata.signature.inputs:
+                self.mlp_features = mlp_pyfunc.metadata.signature.inputs.input_names()
                 self.logger.info(
-                    f"Loading MLP scaler artifact '{mlp_scaler_path}' from run {self.mlp_run_id}..."
+                    f"Updated MLP feature signature: {len(self.mlp_features)} features"
                 )
-                scaler_local_path = mlflow.artifacts.download_artifacts(
-                    run_id=self.mlp_run_id, artifact_path=mlp_scaler_path
-                )
-                with open(scaler_local_path, "rb") as f:
-                    self.model_mlp_scaler = pickle.load(f)
-                self.logger.info("MLP scaler loaded successfully.")
+            else:
+                self.logger.warning("No feature signature found for MLP model")
+                # Attempt to get features from the underlying sklearn model if possible
+                self.mlp_features = getattr(self.model_mlp, "feature_names_in_", []) 
 
-            except Exception as e:
-                self.logger.error(f"Failed to load MLP model or scaler: {str(e)}")
-                raise ValueError(f"Failed to load MLP model or scaler: {str(e)}") from e
+            # Load the associated MLP scaler
+            self.logger.info(
+                f"Loading MLP scaler artifact '{mlp_scaler_path}' from run {self.mlp_run_id}..."
+            )
+            scaler_local_path = mlflow.artifacts.download_artifacts(
+                run_id=self.mlp_run_id, artifact_path=mlp_scaler_path
+            )
+            with open(scaler_local_path, "rb") as f:
+                self.model_mlp_scaler = pickle.load(f)
+            self.logger.info("MLP scaler loaded successfully.")
+
+        except Exception as e:
+            self.logger.error(f"Failed to load MLP model or scaler: {str(e)}")
+            raise ValueError(f"Failed to load MLP model or scaler: {str(e)}") from e
                 
         # Load PyTorch model
-        if not self.pytorch_run_id or self.pytorch_run_id == "YOUR_PYTORCH_RUN_ID_HERE":
-            self.logger.warning(
-                "PyTorch Run ID is not set or is a placeholder. Skipping PyTorch model loading."
-            )
-        else:
-            try:
-                # Define artifact paths for PyTorch model and its scaler
-                pytorch_model_path = "model" # Assuming artifact path is 'model'
-                pytorch_scaler_path = "scaler/scaler.pkl" # Assuming scaler saved in 'scaler' dir
-                
-                self.logger.info(f"Loading PyTorch model from run {self.pytorch_run_id}...")
-                pytorch_uri = f"runs:/{self.pytorch_run_id}/{pytorch_model_path}"
-                self.model_pytorch = mlflow.pytorch.load_model(pytorch_uri)
-                
-                # Load PyTorch model also as pyfunc to easily get signature
-                pytorch_pyfunc = mlflow.pyfunc.load_model(pytorch_uri)
-                if pytorch_pyfunc.metadata.signature and pytorch_pyfunc.metadata.signature.inputs:
-                    self.pytorch_features = pytorch_pyfunc.metadata.signature.inputs.input_names()
-                    self.logger.info(
-                        f"Updated PyTorch feature signature: {len(self.pytorch_features)} features"
-                    )
-                else:
-                    self.logger.warning("No feature signature found for PyTorch model.")
-                    # PyTorch models don't have a standard feature_names_in_ attribute
-                    # Consider storing feature names as a separate artifact if needed, or rely on signature
-                    self.pytorch_features = [] 
-
-                # Load the associated PyTorch scaler
+        try:
+            # Define artifact paths for PyTorch model and its scaler
+            pytorch_model_path = "model" # Assuming artifact path is 'model'
+            pytorch_scaler_path = "scaler/scaler.pkl" # Assuming scaler saved in 'scaler' dir
+            
+            self.logger.info(f"Loading PyTorch model from run {self.pytorch_run_id}...")
+            pytorch_uri = f"runs:/{self.pytorch_run_id}/{pytorch_model_path}"
+            self.model_pytorch = mlflow.pytorch.load_model(pytorch_uri)
+            
+            # Load PyTorch model also as pyfunc to easily get signature
+            pytorch_pyfunc = mlflow.pyfunc.load_model(pytorch_uri)
+            if pytorch_pyfunc.metadata.signature and pytorch_pyfunc.metadata.signature.inputs:
+                self.pytorch_features = pytorch_pyfunc.metadata.signature.inputs.input_names()
                 self.logger.info(
-                    f"Loading PyTorch scaler artifact '{pytorch_scaler_path}' from run {self.pytorch_run_id}..."
+                    f"Updated PyTorch feature signature: {len(self.pytorch_features)} features"
                 )
-                scaler_local_path = mlflow.artifacts.download_artifacts(
-                    run_id=self.pytorch_run_id, artifact_path=pytorch_scaler_path
-                )
-                with open(scaler_local_path, "rb") as f:
-                    self.model_pytorch_scaler = pickle.load(f)
-                self.logger.info("PyTorch scaler loaded successfully.")
-                
-                # Optional: Attach scaler and device to the loaded PyTorch model instance 
-                # if its predict_proba method relies on them being attributes (like in the hypertuner)
-                if hasattr(self.model_pytorch, 'scaler_') and hasattr(self.model_pytorch, 'device_'):
-                    try: 
-                        # Determine device (use CUDA if available, same logic as hypertuner)
-                        pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                        self.model_pytorch.scaler_ = self.model_pytorch_scaler
-                        self.model_pytorch.device_ = pytorch_device
-                        self.model_pytorch.to(pytorch_device) # Ensure model is on the correct device
-                        self.logger.info(f"Attached scaler and device ({pytorch_device}) to loaded PyTorch model.")
-                    except Exception as attach_e:
-                        self.logger.warning(f"Could not attach scaler/device to PyTorch model: {attach_e}")
-                else:
-                    self.logger.warning("Loaded PyTorch model does not have scaler_/device_ attributes for attachment.")
-                    # Ensure model is moved to the correct device anyway
-                    try:
-                        pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                        self.model_pytorch.to(pytorch_device)
-                        self.logger.info(f"Moved loaded PyTorch model to device: {pytorch_device}")
-                    except Exception as move_e:
-                        self.logger.error(f"Could not move PyTorch model to device: {move_e}")
+            else:
+                self.logger.warning("No feature signature found for PyTorch model.")
+                self.pytorch_features = [] 
 
-            except Exception as e:
-                self.logger.error(f"Failed to load PyTorch model or scaler: {str(e)}")
-                raise ValueError(f"Failed to load PyTorch model or scaler: {str(e)}") from e
+            # Load the associated PyTorch scaler
+            self.logger.info(
+                f"Loading PyTorch scaler artifact '{pytorch_scaler_path}' from run {self.pytorch_run_id}..."
+            )
+            scaler_local_path = mlflow.artifacts.download_artifacts(
+                run_id=self.pytorch_run_id, artifact_path=pytorch_scaler_path
+            )
+            with open(scaler_local_path, "rb") as f:
+                self.model_pytorch_scaler = pickle.load(f)
+            self.logger.info("PyTorch scaler loaded successfully.")
+            
+            # Optional: Attach scaler and device to the loaded PyTorch model instance 
+            # if its predict_proba method relies on them being attributes (like in the hypertuner)
+            if hasattr(self.model_pytorch, 'scaler_') and hasattr(self.model_pytorch, 'device_'):
+                try: 
+                    # Determine device (use CUDA if available, same logic as hypertuner)
+                    pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                    self.model_pytorch.scaler_ = self.model_pytorch_scaler
+                    self.model_pytorch.device_ = pytorch_device
+                    self.model_pytorch.to(pytorch_device) # Ensure model is on the correct device
+                    self.logger.info(f"Attached scaler and device ({pytorch_device}) to loaded PyTorch model.")
+                except Exception as attach_e:
+                    self.logger.warning(f"Could not attach scaler/device to PyTorch model: {attach_e}")
+            else:
+                self.logger.warning("Loaded PyTorch model does not have scaler_/device_ attributes for attachment.")
+                # Ensure model is moved to the correct device anyway
+                try:
+                    pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                    self.model_pytorch.to(pytorch_device)
+                    self.logger.info(f"Moved loaded PyTorch model to device: {pytorch_device}")
+                except Exception as move_e:
+                    self.logger.error(f"Could not move PyTorch model to device: {move_e}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to load PyTorch model or scaler: {str(e)}")
+            raise ValueError(f"Failed to load PyTorch model or scaler: {str(e)}") from e
 
         # Load SVM (sklearn) model
-        if not self.svm_run_id or self.svm_run_id == "YOUR_SVM_RUN_ID_HERE":
-            self.logger.warning(
-                "SVM Run ID is not set or is a placeholder. Skipping SVM model loading."
-            )
-        else:
-            try:
-                self.logger.info(f"Loading SVM model from run {self.svm_run_id}...")
-                svm_uri = f"runs:/{self.svm_run_id}/{svm_path}"
-                self.model_svm = mlflow.sklearn.load_model(svm_uri)
-                svm_pyfunc = mlflow.pyfunc.load_model(svm_uri)
-                if svm_pyfunc.metadata.signature and svm_pyfunc.metadata.signature.inputs:
-                    self.svm_features = svm_pyfunc.metadata.signature.inputs.input_names()
-                    self.logger.info(
-                        f"Updated SVM feature signature: {len(self.svm_features)} features"
-                    )
-                else:
-                    self.logger.warning("No feature signature found for SVM model")
-                    self.svm_features = getattr(self.model_svm, "feature_names_in_", [])
-
-                # Load the associated SVM scaler
-                # Adjust the scaler artifact path based on how it was saved in svm_model.py
-                # Assuming it was saved as 'scaler_{run_id}.pkl' in the root artifact path
-                svm_scaler_artifact_path = "scaler_svm.pkl" 
-                # Alternatively, if saved in a 'scaler' subfolder like MLP/PyTorch:
-                # svm_scaler_artifact_path = "scaler/scaler_svm.pkl" # Or similar
-
+        try:
+            self.logger.info(f"Loading SVM model from run {self.svm_run_id}...")
+            svm_uri = f"runs:/{self.svm_run_id}/{svm_path}"
+            self.model_svm = mlflow.sklearn.load_model(svm_uri)
+            svm_pyfunc = mlflow.pyfunc.load_model(svm_uri)
+            if svm_pyfunc.metadata.signature and svm_pyfunc.metadata.signature.inputs:
+                self.svm_features = svm_pyfunc.metadata.signature.inputs.input_names()
                 self.logger.info(
-                    f"Loading SVM scaler artifact '{svm_scaler_artifact_path}' from run {self.svm_run_id}..."
+                    f"Updated SVM feature signature: {len(self.svm_features)} features"
                 )
-                scaler_local_path = mlflow.artifacts.download_artifacts(
-                    run_id=self.svm_run_id, artifact_path=svm_scaler_artifact_path
-                )
-                with open(scaler_local_path, "rb") as f:
-                    self.model_svm_scaler = pickle.load(f)
-                self.logger.info("SVM scaler loaded successfully.")
-                # Verify scaler type (optional)
-                if not isinstance(self.model_svm_scaler, (StandardScaler, sklearn.preprocessing.RobustScaler)): # Add other expected scaler types if needed
-                    self.logger.warning(f"Loaded SVM scaler is of unexpected type: {type(self.model_svm_scaler).__name__}")
+            else:
+                self.logger.warning("No feature signature found for SVM model")
+                self.svm_features = getattr(self.model_svm, "feature_names_in_", [])
 
+            # Load the associated SVM scaler
+            self.logger.info(
+                f"Loading SVM scaler artifact '{svm_scaler_path}' from run {self.svm_run_id}..."
+            )
+            scaler_local_path = mlflow.artifacts.download_artifacts(
+                run_id=self.svm_run_id, artifact_path=svm_scaler_path
+            )
+            with open(scaler_local_path, "rb") as f:
+                self.model_svm_scaler = pickle.load(f)
+            self.logger.info("SVM scaler loaded successfully.")
+            # Verify scaler type (optional)
+            if not isinstance(self.model_svm_scaler, (StandardScaler, sklearn.preprocessing.RobustScaler)): # Add other expected scaler types if needed
+                self.logger.warning(f"Loaded SVM scaler is of unexpected type: {type(self.model_svm_scaler).__name__}")
 
-            except Exception as e:
-                self.logger.error(f"Failed to load SVM model or scaler: {str(e)}")
-                raise ValueError(f"Failed to load SVM model or scaler: {str(e)}") from e
+        except Exception as e:
+            self.logger.error(f"Failed to load SVM model or scaler: {str(e)}")
+            raise ValueError(f"Failed to load SVM model or scaler: {str(e)}") from e
 
 
         self.logger.info("Base models loading complete.")

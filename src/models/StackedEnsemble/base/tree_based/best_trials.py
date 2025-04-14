@@ -1,7 +1,7 @@
 import optuna
 
-study_name = "xgboost_optimization"
-storage_url = "sqlite:///optuna_xgboost.db"
+study_name = "lightgbm_optimization"
+storage_url = "sqlite:///optuna_lightgbm.db"
 top_n = 10
 
 

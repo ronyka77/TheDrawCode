@@ -74,13 +74,12 @@ class KerasMLPWrapper(BaseEstimator, ClassifierMixin):
     A wrapper for a fitted Keras Sequential model to provide
     a scikit-learn compatible predict_proba method.
     """
-    def __init__(self, model, scaler):
+    def __init__(self, model):
         # Check if the model is a fitted Keras model
         # Keras models might not have model.built immediately after loading, check for weights
         if not isinstance(model, tf.keras.Model) or not model.weights:
             raise ValueError("Model must be a fitted Keras Model instance with weights.")
         self.model = model
-        self.scaler = scaler
         # Infer classes_ if possible (assuming binary 0, 1)
         self.classes_ = np.array([0, 1])
 
@@ -302,7 +301,7 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
 
         # Wrap the fitted Keras model
         logger.info("Wrapping fitted Keras model for threshold optimization.")
-        wrapped_model = KerasMLPWrapper(keras_model, scaler)
+        wrapped_model = KerasMLPWrapper(keras_model)
 
         # Optimize threshold using the wrapped model
         best_threshold, threshold_metrics = optimize_threshold(wrapped_model, X_eval, y_eval, min_recall)
@@ -436,14 +435,7 @@ def hypertune_mlp(experiment_name):
         best_params = optimize_hyperparameters(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, hyperparameter_space)
         logger.info("Training final MLP model with best hyperparameters")
         model, metrics = train_model(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, best_params.copy())
-        for metric_name, metric_value in metrics.items():
-            mlflow.log_metric(metric_name, metric_value)
-        for param_name, param_value in best_params.items():
-            mlflow.log_param(param_name, param_value)
-        input_example = X_eval_scaled[:5].copy() if hasattr(X_eval_scaled, 'iloc') else X_eval_scaled[:5].copy()
-        
-        
-        log_to_mlflow(model, metrics, best_params, experiment_name, input_example, scaler)
+        log_to_mlflow(model, metrics, best_params, experiment_name, scaler)
         return best_params, metrics
     except Exception as e:
         logger.error(f"Error during hypertuning: {str(e)}")
@@ -466,7 +458,7 @@ def log_to_mlflow(model, metrics, params, experiment_name, scaler):
                 mlflow.log_metric(metric_name, metric_value)
             
             # Wrap the fitted Keras model
-            wrapped_model = KerasMLPWrapper(model, scaler)
+            wrapped_model = KerasMLPWrapper(model)
             scaler_path = 'src/models/scalers/scaler_mlp.pkl'
             mlflow.log_artifact(scaler_path, artifact_path="scaler")
             # Create input example
@@ -563,6 +555,7 @@ def main():
         logger.info(f"Testing data shape: {X_test.shape}")
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio (Train): {np.mean(y_train):.3f}")
+
         best_params, metrics = hypertune_mlp(experiment_name)
         logger.info(f"Hypertuning completed with hyperparameters: {best_params}")
         logger.info(f"Hypertuning metrics: {metrics}")

@@ -45,12 +45,14 @@ n_trials = 100000  # Number of hyperparameter optimization trials as in notebook
 # Get current versions
 xgb_version = xgb.__version__
 sklearn_version = sklearn.__version__
-
+mlflow_version = mlflow.__version__
+optuna_version = optuna.__version__
 # Create explicit pip requirements list
 pip_requirements = [
     f"xgboost=={xgb_version}",
     f"scikit-learn=={sklearn_version}",
-    f"mlflow=={mlflow.__version__}",
+    f"mlflow=={mlflow_version}",
+    f"optuna=={optuna_version}",
 ]
 # Set fixed seed and hash seed for determinism
 SEED = 19
@@ -107,14 +109,14 @@ def load_hyperparameter_space():
         "colsample_bytree": {
             "type": "float",
             "low": 0.58,  # narrowed based on top trials (0.62-0.65)
-            "high": 0.90,
+            "high": 0.95,
             "log": False,
             "step": 0.01,
         },
         "subsample": {
             "type": "float",
             "low": 0.58,  # narrowed based on top trials (0.85-0.91)
-            "high": 0.95,
+            "high": 0.97,
             "log": False,
             "step": 0.01,
         },
@@ -417,6 +419,9 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
 
         for metric_name, metric_value in metrics.items():
             trial.set_user_attr(metric_name, metric_value)
+        
+        if score > 0.38:
+            log_to_mlflow(model, metrics, params, experiment_name, X_eval)
         return score
 
     except optuna.TrialPruned:
@@ -442,92 +447,38 @@ def hypertune_xgboost(X_train, y_train, X_test, y_test, X_eval, y_eval, experime
         tuple: (best_params, best_metrics)
     """
     try:
-        # Start MLflow run
-        with mlflow.start_run(run_name=f"xgboost_base_{datetime.now().strftime('%Y%m%d_%H%M')}"):
-            # Set tags
-            mlflow.set_tags(
-                {
-                    "model_type": "xgboost_base",
-                    "training_mode": "global",
-                    "cpu_only": False,  # Updated tag
-                }
-            )
 
-            # Load hyperparameter space
-            hyperparameter_space = load_hyperparameter_space()
+        # Load hyperparameter space
+        hyperparameter_space = load_hyperparameter_space()
 
-            # Run hyperparameter optimization
-            logger.info("Starting hyperparameter optimization")
-            best_params = optimize_hyperparameters(
-                X_train,
-                y_train,
-                X_test,
-                y_test,
-                X_eval,
-                y_eval,
-                hyperparameter_space=hyperparameter_space,
-            )
+        # Run hyperparameter optimization
+        logger.info("Starting hyperparameter optimization")
+        best_params = optimize_hyperparameters(
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            X_eval,
+            y_eval,
+            hyperparameter_space=hyperparameter_space,
+        )
 
-            # Train final model with best parameters
-            logger.info("Training final model with best parameters")
-            # best_params already contains the combined HPO and base params, including early_stopping_rounds
-            final_train_params = best_params
+        # Train final model with best parameters
+        logger.info("Training final model with best parameters")
+        # best_params already contains the combined HPO and base params, including early_stopping_rounds
+        final_train_params = best_params
 
-            model, metrics = train_model(
-                X_train,
-                y_train,
-                X_test,
-                y_test,
-                X_eval,  # Pass X_eval for threshold optimization within train_model
-                y_eval,
-                final_train_params,  # Pass the full best parameters including early stopping
-            )
+        model, metrics = train_model(
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            X_eval,  # Pass X_eval for threshold optimization within train_model
+            y_eval,
+            final_train_params,  # Pass the full best parameters including early stopping
+        )
 
-            # Log final metrics
-            mlflow.log_metrics(
-                {
-                    "precision": metrics.get("precision", 0.0),
-                    "recall": metrics.get("recall", 0.0),
-                    "f1": metrics.get("f1", 0.0),
-                    "auc": metrics.get("auc", 0.0),
-                    "threshold": metrics.get("threshold", 0.5),
-                }
-            )
-
-            # Log model
-            # Create input example using the DataFrame X_eval
-            input_example = X_eval.iloc[:5].copy()
-
-            # Identify and convert integer columns to float64 to prevent schema enforcement errors
-            if hasattr(input_example, "dtypes"):
-                for col in input_example.columns:
-                    if input_example[col].dtype.kind == "i":
-                        logger.info(f"Converting integer column '{col}' to float64 for signature")
-                        input_example[col] = input_example[col].astype("float64")
-            # Log best parameters to MLflow (excluding device, objective, verbosity, seed, nthread if desired)
-            params_to_log = {
-                k: v
-                for k, v in best_params.items()
-                if k not in ["device", "objective", "verbosity", "seed", "nthread", "tree_method"]
-            }
-            logger.info("Logging best HPO parameters to MLflow")
-            mlflow.log_params(params_to_log)
-
-            # Infer signature with proper handling for integer columns
-            signature = mlflow.models.infer_signature(input_example, model.predict(input_example))
-
-            # Log warning about integer columns in signature
-            logger.info("Model signature created")
-            # When saving model, explicitly specify requirements
-            mlflow.xgboost.log_model(
-                model,
-                "model",
-                pip_requirements=pip_requirements,
-                registered_model_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                signature=signature,
-            )
-
-            return best_params, metrics
+        return best_params, metrics
 
     except Exception as e:
         logger.error(f"Error in hyperparameter tuning: {str(e)}")
@@ -674,10 +625,10 @@ def main():
         current_params = None
         current_metrics = None
         # Run Hyperparameter Optimization
-        # current_params, current_metrics = hypertune_xgboost(
-        #     X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass DataFrames
-        #     experiment_name
-        # )
+        current_params, current_metrics = hypertune_xgboost(
+            X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass DataFrames
+            experiment_name
+        )
 
         if current_params and current_metrics:
             logger.info(f"HPO run completed with parameters: {current_params}")
