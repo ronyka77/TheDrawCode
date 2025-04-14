@@ -25,13 +25,14 @@ experiment_name = "lightgbm_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
 # Import shared utility functions
+from src.models.ensemble.data_utils import prepare_data
 from src.models.StackedEnsemble.shared.data_loader import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import (
     import_selected_features_ensemble,
     setup_mlflow_tracking,
 )
-from src.models.ensemble.data_utils import prepare_data
+
 # Setup MLflow tracking
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
@@ -391,7 +392,6 @@ def log_to_mlflow(model, metrics, params, experiment_name):
     try:
         # Set up MLflow tracking
         mlflow.set_experiment(experiment_name)
-
         # Start a new run
         with mlflow.start_run(run_name=f"lightgbm_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
             # Log parameters
@@ -410,7 +410,6 @@ def log_to_mlflow(model, metrics, params, experiment_name):
             )
             # Create input example for model signature
             input_example = X_train.head(5)
-
             # Handle integer columns by converting them to float64 to properly manage missing values
             input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, "iloc") else X_eval[:5].copy()
 
@@ -463,19 +462,19 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params.update(
             {
                 "learning_rate": 0.14,
-                "num_leaves": 105,
-                "max_depth": 8,
-                "min_child_samples": 160,
-                "feature_fraction": 0.75,
-                "bagging_fraction": 0.5650000000000001,
-                "bagging_freq": 11,
-                "reg_alpha": 19.1,
-                "reg_lambda": 9.9,
-                "min_split_gain": 0.1,
-                "early_stopping_rounds": 770,
-                "path_smooth": 0.07500000000000001,
-                "cat_smooth": 28.900000000000002,
-                "max_bin": 300,
+                "num_leaves": 85,
+                "max_depth": 6,
+                "min_child_samples": 270,
+                "feature_fraction": 0.6100000000000001,
+                "bagging_fraction": 0.5750000000000001,
+                "bagging_freq": 14,
+                "reg_alpha": 16.200000000000003,
+                "reg_lambda": 15.5,
+                "min_split_gain": 0.14,
+                "early_stopping_rounds": 670,
+                "path_smooth": 0.34500000000000003,
+                "cat_smooth": 23.400000000000002,
+                "max_bin": 250,
             }
         )
 
@@ -517,9 +516,9 @@ def main():
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
 
-        logger.info("Starting hyperparameter optimization run")
-        current_params, current_metrics = hypertune_lightgbm(experiment_name)
-        logger.info(f"Run completed with parameters: {current_params}")
+        # logger.info("Starting hyperparameter optimization run")
+        # current_params, current_metrics = hypertune_lightgbm(experiment_name)
+        # logger.info(f"Run completed with parameters: {current_params}")
 
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(

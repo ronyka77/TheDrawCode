@@ -10,9 +10,9 @@ import optuna
 import pandas as pd
 
 # Set TensorFlow environment variables FIRST
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # No longer needed for GPU
+# os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # No longer needed for GPU
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"   # Reduce TensorFlow logging verbosity
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # REMOVE this line to allow GPU usage
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # REMOVE this line to allow GPU usage
 # Restrict parallel threads (Less critical for SVM but good practice)
 os.environ["OMP_NUM_THREADS"] = "8"
 os.environ["MKL_NUM_THREADS"] = "8"
@@ -31,6 +31,7 @@ experiment_name = "tabnet_soccer_prediction"
 logger = ExperimentLogger(experiment_name=experiment_name)
 
 # Import shared utility functions
+from src.models.ensemble.data_utils import prepare_data
 from src.models.StackedEnsemble.shared.data_loader import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
@@ -54,7 +55,7 @@ if git_executable and os.path.exists(git_executable):
 mlflow_tracking = setup_mlflow_tracking(experiment_name)
 
 # Global settings
-min_recall = 0.20            # Minimum acceptable recall
+min_recall = 0.30            # Minimum acceptable recall
 n_trials = 100               # Fewer trials for MLP due to longer training times
 pip_requirements = [
     f"tensorflow=={tf.__version__}",
@@ -489,9 +490,9 @@ def log_to_mlflow(model, metrics, params, experiment_name, scaler):
                 registered_model_name=f"mlp_{datetime.now().strftime('%Y%m%d_%H%M')}",
                 signature=signature
             )
-            mlflow.end_run()
             run_id = run.info.run_id
             logger.info(f"MLflow run ID: {run_id}")
+            mlflow.end_run()
             return run_id
     except Exception as e:
         logger.error(f"Error logging to MLflow: {str(e)}")
@@ -548,9 +549,9 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
         features = import_selected_features_ensemble(model_type="mlp")
-        X_train = X_train[features]
-        X_test = X_test[features]
-        X_eval = X_eval[features]
+        X_train = prepare_data(X_train, features)
+        X_test = prepare_data(X_test, features)
+        X_eval = prepare_data(X_eval, features)
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
         logger.info(f"Evaluation data shape: {X_eval.shape}")

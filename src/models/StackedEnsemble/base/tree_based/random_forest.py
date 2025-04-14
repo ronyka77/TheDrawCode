@@ -57,22 +57,18 @@ os.environ["OPENBLAS_NUM_THREADS"] = "8"
 
 def load_hyperparameter_space_for_hpo():
     """
-    Define an extended hyperparameter space specifically for faster HPO
-    runs with a reduced n_estimators range (e.g., 600-1200).
-    Ranges for other parameters are widened slightly to compensate.
+    Refined hyperparameter space based on top-performing trials.
     """
     hyperparameter_space = {
         "n_estimators": {
             "type": "int",
-            "low": 600,  # Fixed lower range for HPO
-            "high": 1500,  # Fixed lower range for HPO
-            "step": 20,  # Maybe increase step slightly for faster HPO search within range
+            "low": 800,    # Focus on range of top performers
+            "high": 1300,  # Cover the successful range
+            "step": 10,    # Larger step to save computation
         },
         "max_depth": {
-            "type": "int",
-            "low": 6,  # Slightly lower minimum allowed
-            "high": 25,  # Allow potentially deeper trees
-            "step": 1,
+            "type": "categorical",  # Change to categorical to focus on two successful regions
+            "choices": [6, 7, 8, 9, 18, 19, 20, 21],  # Target both shallow and deep trees
         },
         "min_samples_split": {
             "type": "int",
@@ -82,21 +78,19 @@ def load_hyperparameter_space_for_hpo():
         },
         "min_samples_leaf": {
             "type": "int",
-            "low": 6,  # Allow smaller leaf nodes
+            "low": 16,  # Allow smaller leaf nodes
             "high": 70,  # Allow slightly larger leaf nodes too
             "step": 2,  # Can increase step slightly
         },
         "max_features": {
-            "type": "float",
-            "low": 0.04,  # Keep wide range, maybe even focus higher?
-            "high": 1.0,  # Keep wide range, lets RF figure out importance
-            "step": 0.02,  # Keep step relatively small
+            "type": "categorical",  # Change to categorical to focus on two successful regions
+            "choices": [0.22, 0.24, 0.26, 0.52, 0.70, 0.74, 0.84, 0.88, 0.98, 1.0],  # Target both low and high values
         },
         "class_weight": {
             "type": "float",
-            "low": 1.6,  # Slightly widen the range
-            "high": 4.0,  # Slightly widen the range
-            "step": 0.05,  # Increase step slightly
+            "low": 1.8,   # Slightly under lowest successful value
+            "high": 3.6,  # Maximum from successful trials
+            "step": 0.05, # Keep fine-grained control
         },
     }
     return hyperparameter_space

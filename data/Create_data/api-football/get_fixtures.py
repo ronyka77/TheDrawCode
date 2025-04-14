@@ -53,6 +53,8 @@ class ApiFootball:
         self.predictions_collection = self.db["predictions"]  # Collection name
         self.leagues_collection = self.db["leagues"]  # Collection name
         self.venues_collection = self.db["venues"]  # Collection name
+        self.injuries_collection = self.db["injuries"]  # Collection name
+        self.team_stats_collection = self.db["team_statistics"]  # Collection name
 
     def _get_request(self, endpoint: str, params: dict = None) -> dict:
         """
@@ -392,6 +394,38 @@ class ApiFootball:
 
         self.logger.info(f"Found {len(fixtures_without_predictions)} fixtures without predictions.")
         return fixtures_without_predictions
+
+    def get_fixture_ids_without_injuries(self) -> list[int]:
+        """
+        Retrieves fixture IDs from MongoDB where there is no corresponding injury document,
+        the date is today or earlier, and the league ID is one of the specified IDs.
+
+        Returns:
+            List[int]: List of fixture IDs without injuries that meet the criteria.
+        """
+        # Get fixture IDs from MongoDB fixtures collection that don't exist in injuries collection
+        try:
+            # Find all fixture IDs in fixtures collection
+            all_fixtures = self.fixtures_collection.distinct("fixture_id", {"missing_injuries_data": {"$ne": True}})
+            # Find all fixture IDs in injuries collection
+            existing_injuries = self.injuries_collection.distinct("fixture_id")
+            # Get difference between all fixtures and those with injuries
+            fixture_ids = list(set(all_fixtures) - set(existing_injuries))
+            self.logger.info(f"Found {len(fixture_ids)} fixtures without injuries in MongoDB")
+        except Exception as e:
+            self.logger.error(f"Error reading fixture IDs from Excel file: {e}")
+            fixture_ids = []
+
+        # Get fixture IDs that already have injuries
+        existing_injuries = self.injuries_collection.distinct(
+            "fixture_id", {"fixture_id": {"$in": fixture_ids}}
+        )
+
+        # Get difference between all fixtures and those with injuries
+        fixtures_without_injuries = list(set(fixture_ids) - set(existing_injuries))
+
+        self.logger.info(f"Found {len(fixtures_without_injuries)} fixtures without injuries.")
+        return fixtures_without_injuries
 
     def get_fixtures_for_leagues(self) -> None:
         """
@@ -874,6 +908,161 @@ class ApiFootball:
         except Exception as e:
             self.logger.error(f"Error processing and saving venues data: {e}")
 
+    def get_injuries(self) -> None:
+        """
+        Gets injury data for all fixtures and stores it in a separate injuries collection.
+        Uses the injuries endpoint of the API-Football API.
+        """
+        try:
+            # Find fixtures that don't have corresponding injury records
+            fixture_ids = self.get_fixture_ids_without_injuries()
+            total_fixtures = len(fixture_ids)
+            
+            self.logger.info(f"Found {total_fixtures} fixtures without injury data")
+            print(f"Found {total_fixtures} fixtures without injury data")
+
+            # Process in batches to avoid rate limits
+            batch_size = 250
+            for i in range(0, total_fixtures, batch_size):
+                batch = fixture_ids[i:i + batch_size]
+                
+                for fixture_id in batch:
+                    # Get injuries data from API
+                    endpoint = "injuries"
+                    params = {"fixture": fixture_id}
+                    response = self._get_request(endpoint, params)
+
+                    if response and "response" in response and response["response"]:
+                        injuries_data = response["response"]
+                        
+                        # Store injuries data in separate collection
+                        self.injuries_collection.insert_one({
+                            "fixture_id": fixture_id,
+                            "injuries": injuries_data,
+                            "updated_at": datetime.now()
+                        })
+                        
+                        self.logger.info(f"Stored injuries data for fixture {fixture_id}")
+                    else:
+                        self.logger.error(f"Failed to get injuries for fixture {fixture_id}.")
+                        # Get fixture date from fixtures collection
+                        fixture_data = self.fixtures_collection.find_one({"fixture_id": fixture_id})
+                        
+                        if fixture_data and "date" in fixture_data:
+                            # Handle both date formats - with and without T separator
+                            try:
+                                fixture_date = datetime.strptime(fixture_data["date"], "%Y-%m-%dT%H:%M")
+                            except ValueError:
+                                fixture_date = datetime.strptime(fixture_data["date"], "%Y-%m-%d %H:%M")
+                            today = datetime.now()
+                            
+                            # If fixture date is earlier than today and no injuries data found
+                            if fixture_date < today and not response.get("response"):
+                                # Update fixture document to flag missing injuries data
+                                self.fixtures_collection.update_one(
+                                    {"fixture_id": fixture_id},
+                                    {"$set": {"missing_injuries_data": True}}
+                                )
+                                self.logger.info(f"Flagged fixture {fixture_id} as missing injuries data")
+                    
+                # Sleep to respect rate limits
+                self.logger.info("Sleeping for 6 seconds")
+                time.sleep(6)
+                
+                self.logger.info(f"Processed {min(i + batch_size, total_fixtures)}/{total_fixtures} fixtures")
+                print(f"Processed {min(i + batch_size, total_fixtures)}/{total_fixtures} fixtures")
+
+        except Exception as e:
+            self.logger.error(f"Error getting injuries data: {e}")
+
+    def get_team_stats_for_fixtures(self):
+        """Get team statistics for fixtures and store in MongoDB."""
+        try:
+            self.logger.info("Getting team statistics for fixtures...")
+
+            # Get all fixtures without team stats
+            tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
+            total_fixtures = self.fixtures_collection.count_documents(
+                {"team_stats": {"$exists": False}, "missing_team_stats_data": {"$exists": False}, "date": {"$lt": tomorrow}}
+            )
+
+            if total_fixtures == 0:
+                self.logger.info("No fixtures found without team statistics.")
+                return
+
+            self.logger.info(f"Found {total_fixtures} fixtures without team statistics")
+
+            # Process fixtures in batches
+            batch_size = 250
+            for i in range(0, total_fixtures, batch_size):
+                batch = list(self.fixtures_collection.find(
+                    {
+                        "team_stats": {"$exists": False},
+                        "missing_team_stats_data": {"$exists": False},
+                        "date": {"$lt": tomorrow}
+                    },
+                    {"fixture_id": 1, "league_id": 1, "home.team_id": 1, "away.team_id": 1, "date": 1, "league_season": 1}
+                ).skip(i).limit(batch_size))
+                
+                for fixture in batch:
+                    fixture_id = fixture["fixture_id"]
+                    fixture_date = datetime.strptime(fixture["date"], "%Y-%m-%d %H:%M")
+                    league_id = fixture["league_id"]
+                    season = fixture["league_season"]
+                    
+                    # Get stats for both home and away teams
+                    home_team_id = fixture["home"]["team_id"]
+                    away_team_id = fixture["away"]["team_id"]
+                    
+                    team_stats = {}
+                    for team_id in [home_team_id, away_team_id]:
+                        # Get team statistics from API
+                        endpoint = "teams/statistics"
+                        params = {
+                            "league": league_id,
+                            "team": team_id,
+                            "season": season,
+                            "date": fixture_date.strftime("%Y-%m-%d")
+                        }
+                        response = self._get_request(endpoint, params)
+
+                        if response and "response" in response:
+                            team_stats[str(team_id)] = response["response"]
+                            self.logger.info(f"Got team stats for team {team_id} in fixture {fixture_id}")
+                        else:
+                            self.logger.error(f"Failed to get team stats for team {team_id} in fixture {fixture_id}")
+                            if fixture_date < datetime.now() and not response.get("response"):
+                                # Update fixture document to flag missing team stats data
+                                self.fixtures_collection.update_one(
+                                    {"fixture_id": fixture_id},
+                                    {"$set": {"missing_team_stats_data": True}}
+                                )
+                                self.logger.info(f"Flagged fixture {fixture_id} as missing team stats data")
+                    
+                    # Store team stats in separate collection
+                    if team_stats:
+                        self.team_stats_collection.insert_one({
+                            "fixture_id": fixture_id,
+                            "team_stats": team_stats,
+                            "updated_at": datetime.now()
+                        })
+                        
+                        # Update fixture to indicate team stats are stored
+                        self.fixtures_collection.update_one(
+                            {"fixture_id": fixture_id},
+                            {"$set": {"team_stats": True}}
+                        )
+                        
+                        self.logger.info(f"Stored team statistics for fixture {fixture_id}")
+                    
+                # Sleep to respect rate limits
+                self.logger.info("Sleeping for 6 seconds")
+                time.sleep(6)
+                
+                self.logger.info(f"Processed {min(i + batch_size, total_fixtures)}/{total_fixtures} fixtures")
+        except Exception as e:
+            self.logger.error(f"Error getting team statistics: {e}")
+
 def main():
     api_key = os.getenv("API_FOOTBALL_API_KEY")
     if not api_key:
@@ -896,6 +1085,8 @@ def main():
     api_football.update_venues()
 
     api_football.process_and_save_venues()
+
+    api_football.get_team_stats_for_fixtures()
 
 
 if __name__ == "__main__":

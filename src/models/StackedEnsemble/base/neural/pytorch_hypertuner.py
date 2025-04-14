@@ -76,7 +76,7 @@ else:
     USE_TORCH_COMPILE = False
 
 # Define a placeholder if the actual model file doesn't exist yet
-class YourCustomNet(nn.Module):
+class PytorchModel(nn.Module):
     def __init__(self, input_dim, **kwargs):
         super().__init__()
         hidden_units = kwargs.get("hidden_units", 64)
@@ -244,7 +244,7 @@ def load_hyperparameter_space():
 
 def create_pytorch_model(model_params, input_dim, device, scaler):
     """
-    Create and configure the custom PyTorch model instance.
+    Create and configure the PyTorch model instance.
     Also attaches scaler and device needed for the predict_proba method.
     Args:
         model_params (dict): Hyperparameters suggested by Optuna.
@@ -252,21 +252,21 @@ def create_pytorch_model(model_params, input_dim, device, scaler):
         device (torch.device): The device (CPU or CUDA) to run the model on.
         scaler (StandardScaler): The fitted scaler instance.
     Returns:
-        YourCustomNet: Configured and device-placed PyTorch model instance.
+        PytorchModel: Configured and device-placed PyTorch model instance.
     """
     # Extract relevant parameters for the model architecture
-    # Ensure keys match the expected arguments in YourCustomNet.__init__
-    # Example: Adjust based on YourCustomNet's actual signature
+    # Ensure keys match the expected arguments in PytorchModel.__init__
+    # Example: Adjust based on PytorchModel's actual signature
     architecture_params = {
         "num_layers": model_params.get("num_layers"),
         "hidden_units": model_params.get("hidden_units"),
         "activation_fn": model_params.get("activation_fn"), 
         "dropout_rate": model_params.get("dropout_rate")
     }
-    # Remove None values if YourCustomNet handles defaults
+    # Remove None values if PytorchModel handles defaults
     architecture_params = {k: v for k, v in architecture_params.items() if v is not None}
     
-    model = YourCustomNet(input_dim=input_dim, **architecture_params)
+    model = PytorchModel(input_dim=input_dim, **architecture_params)
     model.to(device)
     
     # Attach scaler and device to the model instance
@@ -705,7 +705,7 @@ def log_to_mlflow_pytorch(
                 signature=signature,
                 pip_requirements=pip_requirements,
                 input_example=input_example_for_log, # Use numpy array here for input_example param
-                registered_model_name=f"pytorch_custom_{datetime.now().strftime('%Y%m%d_%H%M')}" # Optional registration
+                registered_model_name=f"pytorch_{datetime.now().strftime('%Y%m%d_%H%M')}" # Optional registration
             )
 
             # Validate serving input
@@ -900,7 +900,7 @@ def main():
     runs hyperparameter tuning, and handles final logging.
     """
     try:
-        logger.info("Starting PyTorch Custom Model HPO script...")
+        logger.info("Starting PyTorch Model HPO script...")
         
         # Load data using the shared DataLoader
         dataloader = DataLoader() 
@@ -913,7 +913,7 @@ def main():
         # Select features (using a placeholder type for PyTorch)
         features = import_selected_features_ensemble(model_type="xgb") 
         if not features:
-            logger.warning("No features selected for pytorch_custom. Using all columns.")
+            logger.warning("No features selected for pytorch_model. Using all columns.")
             features = X_train.columns.tolist()
             # Ensure target column is not in features if it exists initially
             if 'target' in features: 

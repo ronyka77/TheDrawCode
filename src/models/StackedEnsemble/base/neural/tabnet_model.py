@@ -15,10 +15,11 @@ from pytorch_tabnet.metrics import Metric
 from pytorch_tabnet.tab_model import TabNetClassifier
 from sklearn.base import BaseEstimator
 from sklearn.metrics import precision_score, recall_score
-from sklearn.preprocessing import QuantileTransformer
+
+# from sklearn.preprocessing import QuantileTransformer
 from sklearn.utils.multiclass import type_of_target
+from torch.cuda.amp import GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
-from torch.cuda.amp import autocast, GradScaler  # Import autocast for mixed precision
 
 # Logger and shared utilities
 from src.utils.logger import ExperimentLogger
