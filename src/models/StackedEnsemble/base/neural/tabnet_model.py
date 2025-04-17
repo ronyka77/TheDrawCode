@@ -47,7 +47,7 @@ n_trials = 20000
 base_params = {
     "optimizer_fn": optim.Adam,  # Use Adam as default optimizer
     "mask_type": "sparsemax",
-    "eval_metric": ["logloss", "auc"],  # Default metrics, custom one passed in fit
+    "eval_metric": ["auc", "logloss"],  # Default metrics, custom one passed in fit
     "verbose": 0,
     "seed": 19,
     "device_name": "cuda",
@@ -109,23 +109,24 @@ def load_hyperparameter_space():
     hyperparameter_space = {
         "learning_rate": {
             "type": "float",
-            "low": 1e-4,
-            "high": 8e-1,
+            "low": 0.0003,
+            "high": 0.02,
             "log": True,
         },
-        "n_d": {"type": "int", "low": 8, "high": 128},
-        "n_a": {"type": "int", "low": 8, "high": 128},
-        "n_steps": {"type": "int", "low": 2, "high": 15},
+        "eps": {"type": "float", "low": 1e-7, "high": 1e-4, "log": True},
+        "n_d": {"type": "int", "low": 32, "high": 96},
+        "n_a": {"type": "int", "low": 32, "high": 96},
+        "n_steps": {"type": "int", "low": 3, "high": 7},
         "gamma": {"type": "float", "low": 0.5, "high": 3.0, "step": 0.05},
         "lambda_sparse": {"type": "float", "low": 1e-7, "high": 1e-2, "log": True},
         "momentum": {"type": "float", "low": 0.7, "high": 0.99, "step": 0.005},
-        "patience": {"type": "int", "low": 5, "high": 30},
-        "max_epochs": {"type": "int", "low": 60, "high": 200, "step": 5},
-        "batch_size": {"type": "int", "low": 1024, "high": 16384},
-        "virtual_batch_size": {"type": "int", "low": 128, "high": 4096},
-        "n_independent": {"type": "int", "low": 1, "high": 5},
-        "n_shared": {"type": "int", "low": 1, "high": 5},
-        "weight_decay": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True},
+        "patience": {"type": "int", "low": 15, "high": 45},
+        "max_epochs": {"type": "int", "low": 90, "high": 180, "step": 5},
+        "batch_size": {"type": "int", "low": 128, "high": 1024, "step": 64},
+        "virtual_batch_size": {"type": "int", "low": 128, "high": 1024, "step": 64},
+        "n_independent": {"type": "int", "low": 2, "high": 4},
+        "n_shared": {"type": "int", "low": 2, "high": 4},
+        "weight_decay": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True},
         "scheduler_type": {
             "type": "categorical",
             "choices": ["cosine", "plateau", "onecycle", "none"],
@@ -134,7 +135,9 @@ def load_hyperparameter_space():
         "scheduler_factor": {"type": "float", "low": 0.1, "high": 0.5},
         "scheduler_min_lr": {"type": "float", "low": 1e-6, "high": 1e-4, "log": True},
         "scheduler_t_max": {"type": "int", "low": 5, "high": 20},
+        "scheduler_pct_start": {"type": "float", "low": 0.1, "high": 0.5, "step": 0.05},
         "scheduler_div_factor": {"type": "float", "low": 10.0, "high": 40.0, "step": 0.5},
+        "scheduler_final_div_factor": {"type": "float", "low": 1000.0, "high": 10000.0, "step": 100.0},
         "fit_weights": {
             "type": "categorical",
             "choices": [0, 1]
@@ -301,7 +304,7 @@ def create_model(model_params):
         params["optimizer_params"]["lr"] = lr
         params["optimizer_params"]["weight_decay"] = weight_decay
         # Add optimizer settings that can improve GPU performance
-        params["optimizer_params"]["eps"] = 1e-7  # Improves numerical stability
+        params["optimizer_params"]["eps"] = config_params.get("eps", 1e-7)  # Improves numerical stability
         params["optimizer_params"]["amsgrad"] = True  # Can improve convergence on GPU
         
         # Configure scheduler
@@ -329,8 +332,8 @@ def create_model(model_params):
             scheduler_fn = OneCycleLR
             scheduler_params_config = {
                 "div_factor": config_params.get("scheduler_div_factor", 25.0),
-                "final_div_factor": 10000.0,
-                "pct_start": 0.3,
+                "final_div_factor": config_params.get("scheduler_final_div_factor", 10000.0),
+                "pct_start": config_params.get("scheduler_pct_start", 0.3),
             }
             params["scheduler_fn"] = scheduler_fn
             params["scheduler_params"] = scheduler_params_config
@@ -726,10 +729,12 @@ def log_to_mlflow(model, metrics, params, experiment_name, X_eval_df_for_sig):
                     registered_model_name=model_reg_name,
                     input_example=input_example if signature else None
                 )
+                run_id = run.info.run_id
                 logger.info(f"Final model logged to MLflow (sklearn flavor): {model_info.model_uri}")
                 logger.info(f"Registered as: {model_reg_name}")
-                logger.info(f"Run ID: {run.info.run_id}")
-                return run.info.run_id
+                logger.info(f"Run ID: {run_id}")
+                mlflow.end_run()
+                return run_id
 
             except Exception as log_model_err:
                 logger.error(f"mlflow.sklearn.log_model failed: {log_model_err}")
@@ -829,12 +834,6 @@ def main():
 
         logger.info(f"Data shapes: Train={X_train.shape}, Test={X_test.shape}, Eval={X_eval_df.shape}")
         logger.info(f"Positive ratios: Train={y_train.mean():.3f}, Test={y_test.mean():.3f}, Eval={y_eval.mean():.3f}")
-
-        # Preprocessing
-        # preprocessor = QuantileTransformer(n_quantiles=4000, output_distribution="uniform", random_state=SEED, subsample=None)
-        # X_train_transformed = preprocessor.fit_transform(X_train)
-        # X_test_transformed = preprocessor.transform(X_test)
-        # X_eval_transformed = preprocessor.transform(X_eval_df) # Transform features for eval
 
         # === Run Hypertuning ===
         best_params_final, best_metrics_final = hypertune_tabnet(

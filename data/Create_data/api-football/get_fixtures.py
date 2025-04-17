@@ -885,7 +885,8 @@ class ApiFootball:
         try:
             # Get all venue data from MongoDB collection
             venues_data = list(self.venues_collection.find({}))
-            
+            self.logger.info(f"Found {len(venues_data)} venues in MongoDB")
+
             # Normalize venue data by flattening nested structure
             venues_df = pd.json_normalize(venues_data, sep="_", max_level=2)
             
@@ -1080,11 +1081,11 @@ def main():
 
     api_football.delete_old_unscored_fixtures()
 
-    api_football.get_teams_for_leagues()
+    # api_football.get_teams_for_leagues()
 
-    api_football.update_venues()
+    # api_football.update_venues()
 
-    api_football.process_and_save_venues()
+    # api_football.process_and_save_venues()
 
     api_football.get_team_stats_for_fixtures()
 

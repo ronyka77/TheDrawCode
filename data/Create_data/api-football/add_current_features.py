@@ -1186,12 +1186,12 @@ class MongoDBFeatures:
                 if df[col].isnull().any():
                     print(f"Missing values found in column: {col}")
                     if col.startswith("team_"):
-                        df[col].fillna("Unknown", inplace=True)
+                        df[col] = df[col].fillna("Unknown")
                     elif col.startswith("venue_"):
                         if col == "venue_capacity":
-                            df[col].fillna(0, inplace=True)
+                            df[col] = df[col].fillna(0)
                         else:
-                            df[col].fillna("Unknown", inplace=True)
+                            df[col] = df[col].fillna("Unknown")
             # Export to Excel
             export_path = "data/Create_data/data_files/base/api_venues.xlsx"
             df.to_excel(export_path, index=False)

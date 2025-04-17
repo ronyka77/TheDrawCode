@@ -217,7 +217,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
             f"Trial {trial.number}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f}, Thresh={threshold:.3f}) Params={trial.params}"
         )
         # Log to MLflow
-        if score > 0.34:
+        if score > 0.35:
             input_example = X_eval[:5]
             log_to_mlflow_svm(model, metrics, params, scaler, input_example)
         return score

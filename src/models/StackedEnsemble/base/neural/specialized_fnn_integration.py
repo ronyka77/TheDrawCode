@@ -65,7 +65,7 @@ def main():
         hypertuner.load_hyperparameter_space = patched_load_hyperparameter_space
         
         # Set custom experiment name
-        hypertuner.experiment_name = "specialized_fnn_experiment"
+        # hypertuner.experiment_name = "specialized_fnn_experiment"
         
         # Now run the original main function which will use our specialized components
         logger.info(f"Running hypertuner with specialized FNN model using experiment name: {hypertuner.experiment_name}")

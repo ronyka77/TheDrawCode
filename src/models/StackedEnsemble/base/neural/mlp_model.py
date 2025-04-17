@@ -12,11 +12,14 @@ import pandas as pd
 # Set TensorFlow environment variables FIRST
 # os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # No longer needed for GPU
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"   # Reduce TensorFlow logging verbosity
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # REMOVE this line to allow GPU usage
+# Uncomment this line to force CPU usage
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force CPU usage
 # Restrict parallel threads (Less critical for SVM but good practice)
-os.environ["OMP_NUM_THREADS"] = "8"
-os.environ["MKL_NUM_THREADS"] = "8"
-os.environ["OPENBLAS_NUM_THREADS"] = "8"
+os.environ["OMP_NUM_THREADS"] = "16"  # Adjust to your CPU core count
+os.environ["MKL_NUM_THREADS"] = "16"  # Same as above
+os.environ["OPENBLAS_NUM_THREADS"] = "16"  # Same as above
+os.environ["TF_INTRA_OP_PARALLELISM_THREADS"] = "16"  # CPU threads for operations
+os.environ["TF_INTER_OP_PARALLELISM_THREADS"] = "16"  # CPU threads between operations
 
 import tensorflow as tf
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -56,7 +59,7 @@ mlflow_tracking = setup_mlflow_tracking(experiment_name)
 
 # Global settings
 min_recall = 0.30            # Minimum acceptable recall
-n_trials = 100               # Fewer trials for MLP due to longer training times
+n_trials = 10000             # Fewer trials for MLP due to longer training times
 pip_requirements = [
     f"tensorflow=={tf.__version__}",
     "scikit-learn", 
@@ -147,7 +150,7 @@ def load_hyperparameter_space():
         'neurons_per_layer': {
             'type': 'int',
             'low': 32,
-            'high': 256,
+            'high': 512,
             'step': 32
         },
         'dropout_rate': {
@@ -175,7 +178,7 @@ def load_hyperparameter_space():
         'batch_size': {
             'type': 'int',
             'low': 16,
-            'high': 128,
+            'high': 512,  # Smaller upper limit for CPU
             'step': 16
         },
         'epochs': {
@@ -257,7 +260,8 @@ def create_model(model_params):
         model.compile(
             optimizer=optimizer,
             loss='binary_crossentropy',
-            metrics=['accuracy', keras.metrics.AUC(name='auc')]
+            metrics=['accuracy', keras.metrics.AUC(name='auc')],
+            jit_compile=True  # Enable XLA compilation for faster CPU execution
         )
         return model
     except Exception as e:
@@ -289,11 +293,14 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         )
 
         logger.info("Starting Keras model fitting...")
+        # For CPU training, moderate batch sizes work better
+        batch_size = model_params.get('batch_size', 32)
+        
         keras_model.fit(
             X_train, y_train,
             validation_data=(X_test, y_test),
             epochs=model_params.get('epochs', 100),
-            batch_size=model_params.get('batch_size', 64),
+            batch_size=batch_size,
             class_weight=class_weight,
             callbacks=[early_stop],
             verbose=0
@@ -359,7 +366,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
                 else:
                     trial.set_user_attr(metric_name, str(metric_value))
             
-            if score > 0.35:
+            if score > 0.36 and score > best_score:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
                 log_to_mlflow(model, metrics, params, experiment_name, scaler)
             return score

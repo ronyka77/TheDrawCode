@@ -48,6 +48,9 @@ SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
 random.seed(SEED)
 np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
 
 # Restrict parallel threads across various libraries
 os.environ["OMP_NUM_THREADS"] = "8"
@@ -123,9 +126,9 @@ class PytorchModel(nn.Module):
         dataloader = TorchDataLoader(
             dataset, 
             batch_size=32, 
-            num_workers=4,
-            pin_memory=True,  # Enables faster CPU to GPU transfers
-            persistent_workers=True  # Keeps workers alive between epochs
+            num_workers=1,
+            # pin_memory=True,  # Enables faster CPU to GPU transfers
+            # persistent_workers=True  # Keeps workers alive between epochs
         )
 
         with torch.no_grad():
@@ -144,17 +147,8 @@ class PytorchModel(nn.Module):
         return np.hstack((probs_class0, probs_class1))
 
 # Global settings
-SEED = 19
 MIN_RECALL = 0.30  # Minimum acceptable recall
-N_TRIALS = 100  # Number of hyperparameter optimization trials (adjust as needed)
-
-# Set seeds
-os.environ["PYTHONHASHSEED"] = str(SEED)
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(SEED)
+N_TRIALS = 10000  # Number of hyperparameter optimization trials (adjust as needed)
 
 # Define device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -171,7 +165,6 @@ pip_requirements = [
 logger.info(f"Defined pip requirements: {pip_requirements}")
 
 base_params = {
-    "n_jobs": 8,
     "random_state": SEED
 }
 
@@ -401,8 +394,6 @@ def train_pytorch_model(
 
         # Threshold Optimization using validation data (X_val, y_val)
         logger.info("Optimizing threshold on validation data...")
-        # Remove pre-calculation: optimize_threshold will call model.predict_proba(X_val)
-        # eval_probs = model.predict_proba(X_val)
         y_val_np = y_val.values # optimize_threshold expects numpy array
         
         # Call optimize_threshold with the model, X, and y
@@ -717,6 +708,7 @@ def log_to_mlflow_pytorch(
                 logger.warning(f"Failed to validate serving input: {val_e}")
 
             logger.info(f"PyTorch model logged to MLflow artifact path 'model' in run {run_id}")
+            mlflow.end_run()
             return run_id
 
     except Exception as e:

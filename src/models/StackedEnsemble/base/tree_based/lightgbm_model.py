@@ -43,7 +43,7 @@ n_trials = 100000  # Number of hyperparameter optimization trials as in notebook
 # Base parameters as in the notebook
 base_params = {
     "objective": "binary",
-    "metric": ["binary_logloss", "auc"],
+    "metric": ["binary_logloss", "aucpr"],
     "verbose": -1,
     "n_jobs": 8,
     "random_state": 19,
@@ -71,31 +71,19 @@ def load_hyperparameter_space():
         dict: Hyperparameter space configuration with narrowed ranges and steps.
     """
     hyperparameter_space = {
-        "learning_rate": {"type": "float", "low": 0.05, "high": 0.16, "log": False, "step": 0.005},
-        "num_leaves": {"type": "int", "low": 50, "high": 150, "log": False, "step": 5},
-        "max_depth": {"type": "int", "low": 4, "high": 10, "log": False, "step": 1},
-        "min_child_samples": {"type": "int", "low": 150, "high": 450, "log": False, "step": 10},
-        "feature_fraction": {
-            "type": "float",
-            "low": 0.55,
-            "high": 0.75,
-            "log": False,
-            "step": 0.01,
-        },
-        "bagging_fraction": {
-            "type": "float",
-            "low": 0.55,
-            "high": 0.75,
-            "log": False,
-            "step": 0.005,
-        },
-        "bagging_freq": {"type": "int", "low": 7, "high": 15, "log": False, "step": 1},
-        "reg_alpha": {"type": "float", "low": 0.5, "high": 20.0, "log": False, "step": 0.1},
-        "reg_lambda": {"type": "float", "low": 1.0, "high": 20.0, "log": False, "step": 0.1},
-        "min_split_gain": {"type": "float", "low": 0.10, "high": 0.25, "log": False, "step": 0.01},
-        "early_stopping_rounds": {"type": "int", "low": 200, "high": 900, "log": False, "step": 10},
-        "path_smooth": {"type": "float", "low": 0.005, "high": 0.60, "log": False, "step": 0.005},
-        "cat_smooth": {"type": "float", "low": 5.0, "high": 35.0, "log": False, "step": 0.1},
+        "learning_rate": {"type": "float", "low": 0.045, "high": 0.18, "log": False, "step": 0.0025},
+        "num_leaves": {"type": "int", "low": 55, "high": 150, "log": False, "step": 5},
+        "max_depth": {"type": "int", "low": 5, "high": 12, "log": False, "step": 1},
+        "min_child_samples": {"type": "int", "low": 200, "high": 600, "log": False, "step": 10},
+        "feature_fraction": {"type": "float", "low": 0.58, "high": 0.75, "log": False, "step": 0.01},
+        "bagging_fraction": {"type": "float", "low": 0.56, "high": 0.75, "log": False, "step": 0.005},
+        "bagging_freq": {"type": "int", "low": 10, "high": 15, "log": False, "step": 1},
+        "reg_alpha": {"type": "float", "low": 10.0, "high": 20.0, "log": False, "step": 0.1},
+        "reg_lambda": {"type": "float", "low": 10.0, "high": 20.0, "log": False, "step": 0.1},
+        "min_split_gain": {"type": "float", "low": 0.12, "high": 0.30, "log": False, "step": 0.005},
+        "early_stopping_rounds": {"type": "int", "low": 600, "high": 1200, "log": False, "step": 10},
+        "path_smooth": {"type": "float", "low": 0.10, "high": 0.60, "log": False, "step": 0.005},
+        "cat_smooth": {"type": "float", "low": 20.0, "high": 35.0, "log": False, "step": 0.1},
         "max_bin": {"type": "int", "low": 200, "high": 700, "log": False, "step": 10},
     }
     return hyperparameter_space
@@ -238,7 +226,7 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
 
-            if score > 0.40:
+            if score > 0.42:
                 log_to_mlflow(model, metrics, params, experiment_name)
             return score
 
@@ -516,9 +504,9 @@ def main():
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
 
-        # logger.info("Starting hyperparameter optimization run")
-        # current_params, current_metrics = hypertune_lightgbm(experiment_name)
-        # logger.info(f"Run completed with parameters: {current_params}")
+        logger.info("Starting hyperparameter optimization run")
+        current_params, current_metrics = hypertune_lightgbm(experiment_name)
+        logger.info(f"Run completed with parameters: {current_params}")
 
         # Train model with precision target
         best_model, best_metrics = train_with_precision_target(

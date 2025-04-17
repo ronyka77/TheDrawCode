@@ -69,7 +69,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 base_params = {
     "objective": "binary:logistic",
     "verbosity": 0,
-    "eval_metric": ["aucpr", "error", "logloss"],
+    "eval_metric": ["aucpr", "logloss"],
     "nthread": 8,
     "seed": 19,
     "device": "cuda",
@@ -87,72 +87,65 @@ def load_hyperparameter_space():
         dict: Hyperparameter space configuration with narrowed ranges and steps.
     """
     hyperparameter_space = {
+        "early_stopping_rounds": {
+            "type": "int",
+            "low": 400,   # Slightly below min
+            "high": 1850, # Slightly above max
+            "step": 10,
+        },
         "learning_rate": {
             "type": "float",
-            "low": 0.03,  # narrowed based on top trials (0.06-0.09)
-            "high": 0.08,
-            "log": False,
-            "step": 0.005,
+            "low": 0.038,   # Slightly below min
+            "high": 0.08,   # Slightly above max
+            "step": 0.001,
         },
         "max_depth": {
             "type": "int",
-            "low": 5,  # narrowed based on top trials (6-7)
-            "high": 13,
+            "low": 5,      # At min
+            "high": 16,    # Slightly above max
             "step": 1,
         },
         "min_child_weight": {
             "type": "int",
-            "low": 200,  # narrowed based on top trials (~450)
-            "high": 600,
+            "low": 320,    # Slightly below min
+            "high": 640,   # Slightly above max
             "step": 10,
         },
         "colsample_bytree": {
             "type": "float",
-            "low": 0.58,  # narrowed based on top trials (0.62-0.65)
-            "high": 0.95,
-            "log": False,
-            "step": 0.01,
+            "low": 0.62,   # Slightly below min
+            "high": 0.97,  # Slightly above max
+            "step": 0.005,
         },
         "subsample": {
             "type": "float",
-            "low": 0.58,  # narrowed based on top trials (0.85-0.91)
-            "high": 0.97,
-            "log": False,
-            "step": 0.01,
+            "low": 0.60,   # Slightly below min
+            "high": 0.94,  # Slightly above max
+            "step": 0.005,
         },
         "gamma": {
             "type": "float",
-            "low": 0.02,  # narrowed based on top trials (0.52-1.59)
-            "high": 4.0,
-            "log": False,
-            "step": 0.02,
+            "low": 0.20,   # Slightly below min
+            "high": 5.1,   # Slightly above max
+            "step": 0.01,
         },
         "lambda": {
             "type": "float",
-            "low": 1.0,  # narrowed based on top trials (7.51-8.01)
-            "high": 10.0,
-            "log": False,
+            "low": 2.8,    # Slightly below min
+            "high": 10.5,  # Slightly above max
             "step": 0.01,
         },
         "alpha": {
             "type": "float",
-            "low": 10.0,  # narrowed based on top trials (61.14-61.92)
-            "high": 70.0,
-            "log": False,
+            "low": 24.0,   # Slightly below min
+            "high": 54.0,  # Slightly above max
             "step": 0.1,
-        },
-        "early_stopping_rounds": {
-            "type": "int",
-            "low": 400,  # kept lower bound as per project rules, widened upper bound
-            "high": 1500,
-            "step": 10,
         },
         "scale_pos_weight": {
             "type": "float",
-            "low": 1.5,  # narrowed based on top trials (1.8-2.28)
-            "high": 3.5,
-            "log": False,
-            "step": 0.02,
+            "low": 1.6,    # Slightly below min
+            "high": 2.8,   # Slightly above max
+            "step": 0.01,
         },
     }
     return hyperparameter_space
