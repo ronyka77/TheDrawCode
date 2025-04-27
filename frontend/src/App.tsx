@@ -1,47 +1,43 @@
-import { ThemeProvider, CssBaseline, createTheme } from '@mui/material';
-// import theme from './theme'; // Keep this commented for now, unless you have a custom theme
-import Layout from './components/Layout'; // Import the main layout
-import './App.css'; // Keep or remove default CSS as needed
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Index from "./pages/Index";
+import About from "./pages/About";
+import Matches from "./pages/Matches";
+import Dashboard from "./pages/Dashboard";
+import NotFound from "./pages/NotFound";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import Cookies from "./pages/Cookies";
+import GDPR from "./pages/GDPR";
+import Register from "./pages/Register";
 
-// Create a default theme instance
-const defaultTheme = createTheme();
+const queryClient = new QueryClient();
 
-function App() {
-  // Remove useState and default Vite/React content
-  // const [count, setCount] = useState(0)
-
-  return (
-    // Pass the default theme to the provider
-    <ThemeProvider theme={defaultTheme}> 
-      <CssBaseline /> {/* Normalizes CSS across browsers */}
-      <Layout />      {/* Render the main application layout */}
-    </ThemeProvider>
-    
-    /* Remove default Vite/React elements
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-    */
-  );
-}
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Index />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/matches" element={<Matches />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/cookies" element={<Cookies />} />
+          <Route path="/gdpr" element={<GDPR />} />
+          <Route path="/register" element={<Register />} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
 
 export default App;

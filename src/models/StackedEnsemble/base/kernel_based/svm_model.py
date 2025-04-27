@@ -26,6 +26,7 @@ import sklearn
 from sklearn.preprocessing import StandardScaler  # Or RobustScaler
 from sklearn.svm import SVC
 
+from src.models.ensemble.data_utils import prepare_data
 from src.models.StackedEnsemble.shared.data_loader import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import (
@@ -77,28 +78,6 @@ base_params = {
 }
 
 
-# --- Data Preprocessing ---
-def preprocess_data(X_train, X_test, X_eval=None):
-    try:
-        with open('src/models/scalers/scaler_svm.pkl', 'rb') as f:
-            scaler = pickle.load(f)
-        logger.info("Loaded existing SVM scaler")
-        X_train_scaled = scaler.transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-        X_eval_scaled = scaler.transform(X_eval)
-    except Exception as e:
-        logger.error(f"Error loading SVM scaler: {str(e)}")
-        scaler = StandardScaler()
-        logger.info("Created new SVM scaler")
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-        X_eval_scaled = scaler.transform(X_eval)
-        with open('src/models/scalers/scaler_svm.pkl', 'wb') as f:
-            pickle.dump(scaler, f)
-        
-    return X_train_scaled, X_test_scaled, X_eval_scaled, scaler
-
-
 # --- Hyperparameter Space ---
 def load_hyperparameter_space_svm():
     """
@@ -110,21 +89,21 @@ def load_hyperparameter_space_svm():
     hyperparameter_space = {
         "C": {
             "type": "float",
-            "low": 1e-2,  # Adjusted range for C
-            "high": 1e2,
+            "low": 0.3,  # Adjusted range for C
+            "high": 1.5,
             "log": True,
         },
         "gamma": {
             "type": "float",
-            "low": 1e-4,  # Adjusted range for gamma
-            "high": 1e0,
+            "low": 1e-5,  # Adjusted range for gamma
+            "high": 1e-3,
             "log": True,
         },
-        "cache_size": {"type": "int", "low": 1000, "high": 10000, "step": 100},
+        "cache_size": {"type": "int", "low": 3000, "high": 10000, "step": 50},
         # 'kernel': {'type': 'categorical', 'choices': ['rbf', 'poly', 'sigmoid']},
-        'degree': {'type': 'int', 'low': 2, 'high': 5}, # Only if kernel='poly'
-        'coef0': {'type': 'float', 'low': 0.0, 'high': 1.0}, # Only if kernel='poly' or 'sigmoid'
-        "tol": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True},
+        'degree': {'type': 'int', 'low': 3, 'high': 6}, # Only if kernel='poly'
+        'coef0': {'type': 'float', 'low': 0.4, 'high': 1.0, 'log': True}, # Only if kernel='poly' or 'sigmoid'
+        "tol": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True},
     }
     return hyperparameter_space
 
@@ -168,12 +147,13 @@ def train_model_svm(X_train_scaled, y_train, X_eval_scaled, y_eval, model_params
 
 
 # --- Optuna Objective ---
-def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
+def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space, best_score):
     """
     Objective function for Optuna hyperparameter optimization.
     Uses SCALED data.
     """
     try:
+        global scaler, X_train_scaled, X_test_scaled, X_eval_scaled
         params = {}
         # Suggest hyperparameters
         for param_name, param_config in hyperparameter_space.items():
@@ -193,9 +173,9 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
                     param_name, param_config["choices"]
                 )
             # --- Preprocessing --- (Scale the data)
-        X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(
-            X_train, X_test, X_eval
-        )
+        # X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(
+        #     X_train, X_test, X_eval
+        # )
         # Train model and get metrics
         # Pass only the suggested params, train_model_svm combines with base_params
         model, metrics = train_model_svm(
@@ -217,7 +197,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
             f"Trial {trial.number}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f}, Thresh={threshold:.3f}) Params={trial.params}"
         )
         # Log to MLflow
-        if score > 0.35:
+        if score > 0.33 and score > best_score:
             input_example = X_eval[:5]
             log_to_mlflow_svm(model, metrics, params, scaler, input_example)
         return score
@@ -241,7 +221,7 @@ def optimize_hyperparameters_svm(
 
     # Wrapper for objective function to pass scaled data
     objective_func = lambda trial: objective(
-        trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
+        trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space, best_score
     )
 
     # --- Callback Logic --- (Similar to xgboost/lightgbm)
@@ -451,12 +431,13 @@ def train_with_precision_target_svm(
     Handles data scaling internally.
     """
     try:
+        global scaler, X_train_scaled, X_test_scaled, X_eval_scaled
         logger.info("--- Training SVM model with fixed precision-target parameters ---")
 
         # --- Preprocessing --- (Scale the data)
-        X_train_scaled, X_test_scaled, X_eval_scaled, fitted_scaler = preprocess_data(
-            X_train, X_test, X_eval
-        )
+        # X_train_scaled, X_test_scaled, X_eval_scaled, fitted_scaler = preprocess_data(
+        #     X_train, X_test, X_eval
+        # )
 
         # Define fixed parameters (Update these based on prior tuning or best guess)
         fixed_params = {
@@ -486,7 +467,7 @@ def train_with_precision_target_svm(
                 {
                     "model_type": "svm",
                     "training_mode": "fixed_params",
-                    "scaling_method": type(fitted_scaler).__name__,
+                    "scaling_method": type(scaler).__name__,
                 }
             )
 
@@ -505,7 +486,7 @@ def train_with_precision_target_svm(
             # --- Log to MLflow ---
             input_example_data = X_eval_scaled[:5]
             log_to_mlflow_svm(
-                model, metrics, fixed_params, fitted_scaler, input_example_data
+                model, metrics, fixed_params, scaler, input_example_data
             )
 
             return model, metrics
@@ -521,7 +502,7 @@ def train_with_precision_target_svm(
 if __name__ == "__main__":
     try:
         logger.info("--- Starting SVM Model Training/Tuning --- ")
-
+        global scaler, X_train_scaled, X_test_scaled, X_eval_scaled
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
@@ -538,16 +519,24 @@ if __name__ == "__main__":
                 logger.error("Failed to load any features. Exiting.")
                 sys.exit(1) # Or handle differently
 
-        X_train = X_train[features]
-        X_test = X_test[features]
-        X_eval = X_eval[features]
-
-        # Ensure data types are appropriate (DataLoader might handle this)
-        # Convert if necessary, e.g., all to float64 for scaler
-        X_train = X_train.astype("float64")
-        X_test = X_test.astype("float64")
-        X_eval = X_eval.astype("float64")
-
+        X_train = prepare_data(X_train, features)
+        X_test = prepare_data(X_test, features)
+        X_eval = prepare_data(X_eval, features)
+        try:
+            with open('src/models/scalers/scaler_svm.pkl', 'rb') as f:
+                scaler = pickle.load(f)
+        except Exception as e:
+            logger.error(f"Error loading SVM scaler: {str(e)}")
+            scaler = StandardScaler()
+            logger.info("Created new SVM scaler")
+            scaler.fit(X_train)
+            with open('src/models/scalers/scaler_svm.pkl', 'wb') as f:
+                pickle.dump(scaler, f)
+        
+        X_train_scaled = scaler.transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        X_eval_scaled = scaler.transform(X_eval)
+        
         # Log data shapes
         logger.info(f"Training data shape after selection: {X_train.shape}")
         logger.info(f"Testing data shape after selection: {X_test.shape}")

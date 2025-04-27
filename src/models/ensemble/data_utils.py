@@ -34,13 +34,17 @@ def prepare_data(X: pd.DataFrame, selected_features: list[str]) -> pd.DataFrame:
     # Select only the required features
     X_selected = X[selected_features].copy()
     # Fill missing values with appropriate strategies
+    
     for col in X_selected.columns:
-        # Use mean for numeric columns
-        if np.issubdtype(X_selected[col].dtype, np.number):
-            X_selected[col] = X_selected[col].fillna(X_selected[col].mean())
-        else:
-            # Use mode for categorical columns
-            X_selected[col] = X_selected[col].fillna(X_selected[col].mode()[0])
+        try:
+            # Use mean for numeric columns
+            if pd.api.types.is_numeric_dtype(X_selected[col]):
+                X_selected[col] = X_selected[col].fillna(X_selected[col].mean())
+            else:
+                # Use mode for categorical columns
+                X_selected[col] = X_selected[col].fillna(X_selected[col].mode()[0])
+        except Exception as e:
+            raise ValueError(f"Error in filling missing values: {str(e)} for column: {col}") from e
     # Convert all columns to float64 to ensure consistent data types
     X_selected = X_selected.astype("float64")
     

@@ -9,17 +9,24 @@ import numpy as np
 import optuna
 import pandas as pd
 
-# Set TensorFlow environment variables FIRST
-# os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # No longer needed for GPU
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"   # Reduce TensorFlow logging verbosity
-# Uncomment this line to force CPU usage
+# Use 80% of logical CPUs (32 threads * 0.8 = 25.6)
+NUM_THREADS = "25"  # Tailored for AMD 7950X3D, 64GB RAM, Windows 11
+
+os.environ["OMP_NUM_THREADS"] = NUM_THREADS
+os.environ["MKL_NUM_THREADS"] = NUM_THREADS
+os.environ["OPENBLAS_NUM_THREADS"] = NUM_THREADS
+os.environ["TF_INTRA_OP_PARALLELISM_THREADS"] = NUM_THREADS
+os.environ["TF_INTER_OP_PARALLELISM_THREADS"] = NUM_THREADS
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force CPU usage
-# Restrict parallel threads (Less critical for SVM but good practice)
-os.environ["OMP_NUM_THREADS"] = "16"  # Adjust to your CPU core count
-os.environ["MKL_NUM_THREADS"] = "16"  # Same as above
-os.environ["OPENBLAS_NUM_THREADS"] = "16"  # Same as above
-os.environ["TF_INTRA_OP_PARALLELISM_THREADS"] = "16"  # CPU threads for operations
-os.environ["TF_INTER_OP_PARALLELISM_THREADS"] = "16"  # CPU threads between operations
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"   # Reduce TensorFlow logging verbosity
+
+# Optional: Set process priority to high (Windows only)
+try:
+    import psutil
+    p = psutil.Process(os.getpid())
+    p.nice(psutil.HIGH_PRIORITY_CLASS)
+except Exception:
+    pass
 
 import tensorflow as tf
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -150,13 +157,13 @@ def load_hyperparameter_space():
         'neurons_per_layer': {
             'type': 'int',
             'low': 32,
-            'high': 512,
-            'step': 32
+            'high': 1024,
+            'step': 16
         },
         'dropout_rate': {
             'type': 'float',
             'low': 0.001,
-            'high': 0.5,
+            'high': 0.7,
             'step': 0.001
         },
         'activation': {
@@ -165,31 +172,31 @@ def load_hyperparameter_space():
         },
         'l1_regularization': {
             'type': 'float',
-            'low': 0.0001,
+            'low': 0.00001,
             'high': 1e-2,
             'log': True
         },
         'l2_regularization': {
             'type': 'float',
-            'low': 0.0001,
+            'low': 0.00001,
             'high': 1e-2,
             'log': True
         },
         'batch_size': {
             'type': 'int',
-            'low': 16,
-            'high': 512,  # Smaller upper limit for CPU
+            'low': 64,
+            'high': 2048,  
             'step': 16
         },
         'epochs': {
             'type': 'int',
             'low': 50,
-            'high': 200,
+            'high': 250,
             'step': 5
         },
         'patience': {
             'type': 'int',
-            'low': 10,
+            'low': 5,
             'high': 50
         },
         'class_weight_multiplier': {
@@ -366,7 +373,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
                 else:
                     trial.set_user_attr(metric_name, str(metric_value))
             
-            if score > 0.36 and score > best_score:
+            if score > 0.35 and score > best_score:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
                 log_to_mlflow(model, metrics, params, experiment_name, scaler)
             return score
@@ -423,7 +430,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     )
     for _ in range(num_batches):
         try:
-            study.optimize(objective, n_trials=batch_size, callbacks=[callback])
+            study.optimize(objective, n_trials=batch_size, callbacks=[callback], n_jobs=2)
         except KeyboardInterrupt:
             logger.info("Study interrupted by user. Saving current state...")
             study.save_state(f"{study_name}_interrupted.pkl")
@@ -540,11 +547,34 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training final model with best parameters")
         model, metrics = train_model(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, params)
         # Log to MLflow
-        log_to_mlflow(model, metrics, params, experiment_name, scaler)
+        # log_to_mlflow(model, metrics, params, experiment_name, scaler)
+        top_features = select_top_features_mlp(model, X_eval)
+        logger.info(f"Top features: {top_features}")
         return model, metrics, params
     except Exception as e:
         logger.error(f"Error during MLflow artifact logging: {str(e)}")
         return mlflow.active_run().info.run_id if mlflow.active_run() else None
+
+def select_top_features_mlp(model: keras.Sequential, X: pd.DataFrame, n_features=60):
+    """
+    Selects the top N features based on MLP feature importances.
+
+    Args:
+        model: Trained MLPClassifier model.
+        X_features: DataFrame containing the features used for training (to get names).
+        n_features: The number of top features to select.
+
+    Returns:
+        A list of the names of the top N features.
+    """
+    # get weight matrix of first Dense layer: shape (n_inputs, n_neurons)
+    W = model.layers[0].get_weights()[0]  
+    # sum abs(weights) across neurons → one score per input feature
+    scores = np.abs(W).sum(axis=1)
+    df = pd.DataFrame({'Feature': X.columns, 'Importance': scores})
+    df = df.sort_values('Importance', ascending=False)
+    return df['Feature'].head(n_features).tolist()
+
 
 def main():
     """

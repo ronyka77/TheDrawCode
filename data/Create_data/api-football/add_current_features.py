@@ -7,6 +7,7 @@ import pandas as pd
 import pymongo
 from dotenv import load_dotenv
 from openpyxl import Workbook
+from pandas import json_normalize
 from sklearn.preprocessing import LabelEncoder
 
 try:
@@ -30,6 +31,7 @@ class MongoDBFeatures:
         self.fixtures_collection = self.db["fixtures"]
         self.predictions_collection = self.db["predictions"]
         self.venues_collection = self.db["venues"]
+        self.team_stats_collection = self.db["team_statistics"]
 
     def get_fixtures_with_home_stats(self) -> list[dict]:
         """
@@ -156,6 +158,7 @@ class MongoDBFeatures:
             fixtures_with_predictions (List[Dict]): List of fixtures with predictions
 
         This function writes the XLSX file directly without retaining extra data in memory.
+        Now processes and writes in batches of 5000 rows for speed.
         """
         try:
             # Create a write-only workbook and worksheet
@@ -175,12 +178,22 @@ class MongoDBFeatures:
             ws.append(headers)
             ws.append([first_row.get(header) for header in headers])
             row_count = 1  # Counting first data row already written
-            # Process remaining rows without storing a sample list
+            batch = []
+            batch_size = 5000
+            # Process remaining rows in batches
             for row_dict in prediction_generator:
-                ws.append([row_dict.get(header) for header in headers])
+                batch.append([row_dict.get(header) for header in headers])
                 row_count += 1
-                if row_count % 5000 == 0:
-                    print(f"Processed {row_count} predictions")
+                if len(batch) == batch_size:
+                    for row in batch:
+                        ws.append(row)
+                    print(f"Processed {row_count} predictions (batch of {batch_size})")
+                    batch = []
+            # Write any remaining rows
+            if batch:
+                for row in batch:
+                    ws.append(row)
+                print(f"Processed {row_count} predictions (final batch)")
 
             output_file = "data/Create_data/data_files/base/predictions.xlsx"
             wb.save(output_file)
@@ -1203,6 +1216,106 @@ class MongoDBFeatures:
                 self.logger.error(f"Error exporting venues data: {e}")
             return pd.DataFrame()
 
+    def flatten_team_stats(self):
+        matches = self.team_stats_collection.find({})
+        matches_list = list(matches)
+        print(f"Found {len(matches_list)} matches")
+        df = pd.DataFrame(columns=['fixture_id', 'team_id', 'updated_at', 'league_id', 'league_name', 
+                                    'league_country', 'league_season', 'team_name', 'form',
+                                    'played_home', 'played_away', 'played_total',
+                                    'wins_home', 'wins_away', 'wins_total',
+                                    'draws_home', 'draws_away', 'draws_total', 
+                                    'loses_home', 'loses_away', 'loses_total',
+                                    'goals_for_home', 'goals_for_away', 'goals_for_total',
+                                    'goals_for_avg_home', 'goals_for_avg_away', 'goals_for_avg_total',
+                                    'goals_against_home', 'goals_against_away', 'goals_against_total',
+                                    'goals_against_avg_home', 'goals_against_avg_away', 'goals_against_avg_total',
+                                    'clean_sheet_home', 'clean_sheet_away', 'clean_sheet_total',
+                                    'failed_to_score_home', 'failed_to_score_away', 'failed_to_score_total',
+                                    'penalty_scored', 'penalty_missed', 'penalty_total'])
+        error_count = 0
+        count = 0
+        rows = []
+        for match in matches_list:
+            try:
+                if count == 1:
+                    print(match)
+                count += 1
+                fixture_id = match['fixture_id']
+                if not fixture_id:
+                    error_count += 1
+                    continue
+
+                updated_at = match['updated_at']
+                team_stats = match.get('team_stats', {})
+                if not team_stats:
+                    error_count += 1
+                    continue
+
+                for team_id, stats in team_stats.items():
+                    # Skip if stats is a list instead of dict
+                    if isinstance(stats, list):
+                        continue
+                        
+                    # Extract base data with safety checks
+                    base_data = {
+                        'fixture_id': fixture_id,
+                        'team_id': int(team_id),
+                        'updated_at': updated_at,
+                        'league_id': stats.get('league', {}).get('id'),
+                        'league_name': stats.get('league', {}).get('name'),
+                        'league_country': stats.get('league', {}).get('country'), 
+                        'league_season': stats.get('league', {}).get('season'),
+                        'team_name': stats.get('team', {}).get('name'),
+                        'form': stats.get('form')
+                    }
+
+                    # Extract fixtures data
+                    fixtures = stats.get('fixtures', {})
+                    for location in ['home', 'away', 'total']:
+                        base_data[f'played_{location}'] = fixtures.get('played', {}).get(location)
+                        base_data[f'wins_{location}'] = fixtures.get('wins', {}).get(location)
+                        base_data[f'draws_{location}'] = fixtures.get('draws', {}).get(location)
+                        base_data[f'loses_{location}'] = fixtures.get('loses', {}).get(location)
+
+                    # Extract goals data
+                    goals = stats.get('goals', {})
+                    for goal_type in ['for', 'against']:
+                        totals = goals.get(goal_type, {}).get('total', {})
+                        averages = goals.get(goal_type, {}).get('average', {})
+                        for location in ['home', 'away', 'total']:
+                            base_data[f'goals_{goal_type}_{location}'] = totals.get(location)
+                            base_data[f'goals_{goal_type}_avg_{location}'] = averages.get(location)
+
+                    # Extract clean sheets and failed to score
+                    clean_sheet = stats.get('clean_sheet', {})
+                    failed_score = stats.get('failed_to_score', {})
+                    for location in ['home', 'away', 'total']:
+                        base_data[f'clean_sheet_{location}'] = clean_sheet.get(location)
+                        base_data[f'failed_to_score_{location}'] = failed_score.get(location)
+
+                    # Extract penalty data
+                    penalty = stats.get('penalty', {})
+                    base_data['penalty_scored'] = penalty.get('scored', {}).get('total')
+                    base_data['penalty_missed'] = penalty.get('missed', {}).get('total')
+                    base_data['penalty_total'] = penalty.get('total')
+
+                    rows.append(base_data)
+
+                if len(rows) % 100 == 0:
+                    print(f"Processed {len(rows)} records")
+
+            except Exception as e:
+                print(f"Error processing match {match.get('fixture_id')}: {e}")
+                error_count += 1
+                continue
+
+        if error_count > 0:
+            print(f"Skipped {error_count} matches due to errors or missing data")
+
+        # Create final DataFrame
+        df = pd.DataFrame(rows)
+        return df
 
 def main():
     mongodb_features = MongoDBFeatures()
@@ -1229,6 +1342,11 @@ def main():
     print("Exporting venues")
     venues = mongodb_features.export_venues()
     print(f"Venues shape: {venues.shape}")
+
+    print("Exporting team stats")
+    team_stats = mongodb_features.flatten_team_stats()
+    team_stats.to_excel("data/Create_data/data_files/base/api_team_stats.xlsx", index=False)
+    print(f"Team stats shape: {team_stats.shape}")
 
 
 if __name__ == "__main__":

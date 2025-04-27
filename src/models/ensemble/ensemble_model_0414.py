@@ -74,14 +74,14 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.target_precision = target_precision # For dynamic weights
 
         # --- MLflow Run IDs for Base Models ---
-        self.xgb_run_id = "1dfc67c8a3994a35adda6006e14f9227"  
-        self.lgb_run_id = "50841f7ed0a8436aa354fc5de287a94c"  
-        self.tabnet_run_id = "c531685eae4d429fb7fc1af4f6b38a95" 
-        self.extra_run_id = "bde53176ab4f4c689a0ffa825f24e3a5" 
-        self.mlp_run_id = "a99c793397414cb98cf2bc1ac7a5246d"
-        self.pytorch_run_id = "639bafb274bb459dadc6fe9eb46c5d35"
-        self.svm_run_id = "778a0ed783ec4beaab0d5effc37c95de"  # <<< ADD SVM RUN ID HERE
-        self.fnn_run_id = "e77bcbaf413f47039e33acfeb21f105e"
+        self.xgb_run_id = "5f827508ce8346a99206d37f626912bf"
+        self.lgb_run_id = "be439e143bd04b768309ca1f4e03199d"  
+        self.tabnet_run_id = "e7d72ec3cd5c48ecb129630a50ed311d" 
+        self.extra_run_id = "ec3e2fdbd57b4edab1988f7e39457de2" 
+        self.mlp_run_id = "2d921ea19abd472f8650055e1b9f92c2"
+        self.pytorch_run_id = "b42c959962574bcc9c41289e80aee7e4"
+        self.svm_run_id = "2b10c9862c7d48db9a1922a3c30ba28e"  # <<< ADD SVM RUN ID HERE
+        self.fnn_run_id = "9868d00ccb3c4629a2d2d00f100c8951"
 
         # Minimum recalls for dynamic weighting (order: xgb, tabnet, lgb, rf, mlp, pytorch, svm)
         self.min_recalls = [0.30, 0.20, 0.30, 0.40, 0.30, 0.30, 0.30, 0.30] # Added SVM recall
@@ -153,7 +153,11 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
         # Prepare feature subsets for each model
         self.logger.info("Preparing feature subsets for base models...")
-        X_val_xgb = X_val_prepared[self.xgb_features]
+        try:
+            X_val_xgb = X_val_prepared[self.xgb_features]
+        except KeyError:
+            self.logger.warning(f"XGB features not found in X_val_prepared. Using all features. {self.xgb_features}")
+            X_val_xgb = X_val_prepared
         X_val_tabnet = X_val_prepared[self.tabnet_features]
         X_val_lgb = X_val_prepared[self.lgb_features]
         X_val_extra = X_val_prepared[self.extra_features]

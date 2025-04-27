@@ -373,17 +373,17 @@ def update_api_data_for_draws():
         logger.info(updated_data.shape)
 
         # Filter data for dates before 2024-11-01
-        api_training_data = updated_data[updated_data["Date"] < "2025-01-01"]
+        api_training_data = updated_data[updated_data["Date"] < "2025-03-01"]
         # Add is_draw column for training data
         api_training_data.loc[:, "is_draw"] = (api_training_data["match_outcome"] == 2).astype(int)
         logger.info("Added is_draw column to training data")
         # Filter data for dates after 2024-11-01 where match_outcome is not blank
         api_prediction_eval = updated_data[
-            (updated_data["Date"] >= "2025-01-01") & (updated_data["match_outcome"].notna())
+            (updated_data["Date"] >= "2025-03-01") & (updated_data["match_outcome"].notna())
         ]
         # Filter data for dates after 2024-11-01 where match_outcome is blank
         api_prediction_data = updated_data[
-            (updated_data["Date"] >= "2025-01-01") & (updated_data["match_outcome"].isna())
+            (updated_data["Date"] >= "2025-03-01") & (updated_data["match_outcome"].isna())
         ]
 
         logger.info(f"api_prediction_data.shape: {api_prediction_data.shape}")
@@ -1026,26 +1026,27 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
         with open(json_path) as f:
             features = json.load(f)
         # Validate loaded data structure
-        if not all(key in features for key in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp"]):
+        if not all(key in features for key in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch"]):
             raise ValueError("JSON file missing required model keys")
         # Return specific model type if requested
         if model_type is not None:
             if model_type == "all":
                 # Get intersection of features across all models
-                common_features = list(
-                    set(features["xgb"]).union(
-                        features["cat"],
-                        features["lgbm"],
-                        features["rf"],
-                        features["tabnet"],
-                        features["mlp"],
-                    )
-                )
+                # common_features = list(
+                #     set(features["xgb"]).union(
+                #         features["cat"],
+                #         features["lgbm"],
+                #         features["rf"],
+                #         features["tabnet"],
+                #         features["mlp"],
+                #     )
+                # )
+                common_features = features["all"]
                 logger.info("Returning features common to all models")
                 return common_features
-            elif model_type not in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "all"]:
+            elif model_type not in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch", "all"]:
                 raise ValueError(
-                    f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'mlp', 'all'"
+                    f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'mlp', 'pytorch', 'all'"
                 )
             logger.info(f"Returning selected features for model type: {model_type}")
             return features[model_type]
@@ -1450,3 +1451,6 @@ if __name__ == "__main__":
     # logger.info("Training data updated successfully")
     update_api_data_for_draws()
     logger.info("Prediction data updated successfully")
+
+    # df, df2 = create_ensemble_evaluation_set()
+    # logger.info(f"Ensemble evaluation set created with columns: {df.columns.tolist()}")

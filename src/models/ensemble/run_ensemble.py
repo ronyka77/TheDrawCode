@@ -54,7 +54,7 @@ from src.utils.logger import ExperimentLogger
 experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name, log_dir="./logs/ensemble_model_improved")
 from src.models.ensemble.data_utils import prepare_data
-from src.models.ensemble.ensemble_model_0414 import EnsembleModel
+from src.models.ensemble.ensemble_model_20 import EnsembleModel
 from src.models.StackedEnsemble.shared.data_loader import DataLoader
 from src.utils.create_evaluation_set import (
     import_selected_features_ensemble,
@@ -68,7 +68,7 @@ def run_ensemble(
     calibrate: bool = False,
     dynamic_weighting: bool = True,
     target_precision: float = 0.50,
-    required_recall: float = 0.25,
+    required_recall: float = 0.20,
     experiment_name: str = "ensemble_model_improved",
     logger: ExperimentLogger = logger,
 ):

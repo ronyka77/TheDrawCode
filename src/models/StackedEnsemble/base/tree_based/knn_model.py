@@ -40,7 +40,7 @@ tmp_dir = setup_mlflow_tracking(experiment_name)
 
 # Global settings
 min_recall = 0.25  # Minimum acceptable recall
-n_trials = 200  # Number of hyperparameter optimization trials (KNN is fast)
+n_trials = 10000  # Number of hyperparameter optimization trials (KNN is fast)
 
 # Set fixed seed and hash seed for determinism
 SEED = 19
@@ -61,10 +61,10 @@ def load_hyperparameter_space():
         dict: Hyperparameter space configuration.
     """
     return {
-        "n_neighbors": {"type": "int", "low": 30, "high": 500, "step": 10},
+        "n_neighbors": {"type": "int", "low": 300, "high": 2000, "step": 10},
         "weights": {"type": "categorical", "choices": ["uniform", "distance"]},
         "p": {"type": "int", "low": 1, "high": 10, "step": 1},  # 1=Manhattan, 2=Euclidean
-        "leaf_size": {"type": "int", "low": 2, "high": 100, "step": 2},
+        "leaf_size": {"type": "int", "low": 16, "high": 150, "step": 2},
         "algorithm": {"type": "categorical", "choices": ["auto", "ball_tree", "kd_tree", "brute"]},
         "metric": {"type": "categorical", "choices": [
             "minkowski", "euclidean", "manhattan", "chebyshev", "canberra", "cosine", "hamming"

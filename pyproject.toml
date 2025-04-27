@@ -61,6 +61,7 @@ dependencies = [
     "bayesian-optimization==1.4.3",
     "black==25.1.0",
     "blinker==1.9.0",
+    "boruta>=0.4.3",
     "boto3==1.37.2",
     "botocore==1.37.27",
     "Bottleneck==1.4.2",

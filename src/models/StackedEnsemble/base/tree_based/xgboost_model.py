@@ -29,6 +29,7 @@ experiment_name = "xgboost_soccer_prediction"
 logger = ExperimentLogger(experiment_name)
 
 # Import data at runtime to avoid global scope issues
+from src.models.ensemble.data_utils import prepare_data
 from src.models.StackedEnsemble.shared.data_loader import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import (
@@ -69,7 +70,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 base_params = {
     "objective": "binary:logistic",
     "verbosity": 0,
-    "eval_metric": ["aucpr", "logloss"],
+    "eval_metric": ["aucpr", "error", "logloss"],
     "nthread": 8,
     "seed": 19,
     "device": "cuda",
@@ -90,13 +91,13 @@ def load_hyperparameter_space():
         "early_stopping_rounds": {
             "type": "int",
             "low": 400,   # Slightly below min
-            "high": 1850, # Slightly above max
+            "high": 2000, # Slightly above max
             "step": 10,
         },
         "learning_rate": {
             "type": "float",
             "low": 0.038,   # Slightly below min
-            "high": 0.08,   # Slightly above max
+            "high": 0.17,   # Slightly above max
             "step": 0.001,
         },
         "max_depth": {
@@ -108,12 +109,12 @@ def load_hyperparameter_space():
         "min_child_weight": {
             "type": "int",
             "low": 320,    # Slightly below min
-            "high": 640,   # Slightly above max
+            "high": 700,   # Slightly above max
             "step": 10,
         },
         "colsample_bytree": {
             "type": "float",
-            "low": 0.62,   # Slightly below min
+            "low": 0.61,   # Slightly below min
             "high": 0.97,  # Slightly above max
             "step": 0.005,
         },
@@ -132,19 +133,19 @@ def load_hyperparameter_space():
         "lambda": {
             "type": "float",
             "low": 2.8,    # Slightly below min
-            "high": 10.5,  # Slightly above max
+            "high": 17.0,  # Slightly above max
             "step": 0.01,
         },
         "alpha": {
             "type": "float",
             "low": 24.0,   # Slightly below min
-            "high": 54.0,  # Slightly above max
+            "high": 58.0,  # Slightly above max
             "step": 0.1,
         },
         "scale_pos_weight": {
             "type": "float",
-            "low": 1.6,    # Slightly below min
-            "high": 2.8,   # Slightly above max
+            "low": 1.5,    # Slightly below min
+            "high": 3.2,   # Slightly above max
             "step": 0.01,
         },
     }
@@ -403,8 +404,8 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
 
         # Pruning: report the score back to Optuna
         trial.report(score, step=model.best_iteration if hasattr(model, "best_iteration") else 0)
-        if trial.should_prune():
-            raise optuna.TrialPruned()
+        # if trial.should_prune():
+        #     raise optuna.TrialPruned()
         logger.info(f"Trial {trial.number}:")
         logger.info(f"  Score: {score:.4f} (Precision: {precision:.4f}, Recall: {recall:.4f})")
         logger.info(f"  Threshold: {threshold:.4f}")
@@ -413,7 +414,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
         for metric_name, metric_value in metrics.items():
             trial.set_user_attr(metric_name, metric_value)
         
-        if score > 0.38:
+        if score > 0.37:
             log_to_mlflow(model, metrics, params, experiment_name, X_eval)
         return score
 
@@ -579,12 +580,127 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         )
 
         # Log to MLflow using the DataFrame X_eval for signature
-        log_to_mlflow(model, metrics, params, experiment_name, X_eval)
+        # log_to_mlflow(model, metrics, params, experiment_name, X_eval)
+        top_features = select_top_features_xgb(model, X_eval)
+        logger.info(f"Top features: {top_features}")
         return model, metrics
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
 
+def select_best_feature_combination(
+    X, y, X_test, y_test, X_eval, y_eval,
+    num_features=70, num_trials=500, min_recall=0.3, random_state=19
+):
+    """
+    Try multiple random combinations of features, train a model for each,
+    and select the best set based on precision (if recall >= min_recall).
+    Args:
+        X (pd.DataFrame): Training features (all 165 columns)
+        y (pd.Series): Training labels
+        logger: Logger instance
+        X_test, y_test, X_eval, y_eval: Validation/eval sets (same columns as X)
+        num_features (int): Number of features to select in each trial
+        num_trials (int): Number of random combinations to try
+        min_recall (float): Minimum recall threshold for score
+        random_state (int): Random seed
+    Returns:
+        best_features (list): List of best feature names
+        best_mask (np.ndarray): Boolean mask for best features
+        best_score (float): Best score achieved
+    """
+
+    rng = np.random.default_rng(random_state)
+    all_features = list(X_eval.columns)
+    best_score = -1.0
+    best_features = None
+    best_mask = None
+    model_params = base_params.copy()
+    model_params.update(
+        {
+            "n_estimators": 100,
+            "max_depth": 14,
+            "learning_rate": 0.125,
+            "random_state": random_state,
+            "n_jobs": 4,
+            "tree_method": "hist",
+            "verbosity": 0,
+            "eval_metric": ['aucpr', 'error', 'logloss'],
+            "colsample_bytree": 0.81,
+            "subsample": 0.68,
+            "gamma": 3.41,
+            "reg_lambda": 3.46,
+            "reg_alpha": 48.6,
+            "min_child_weight": 400,
+            "scale_pos_weight": 2.04,
+            "objective": "binary:logistic",
+            "nthread": 8,
+            "seed": 19,
+            "device": "cuda",
+            "early_stopping_rounds": 700
+        }
+    )
+    logger.info(f"Trying {num_trials} random combinations of {num_features} features out of {len(all_features)}...")
+
+    for trial in range(num_trials):
+        # Randomly select features
+        selected = rng.choice(all_features, size=num_features, replace=False)
+        selected = list(selected)
+        # Subset data
+        X_train_sel = X[selected]
+        X_test_sel = X_test[selected]
+        X_eval_sel = X_eval[selected]
+        # Train model and get metrics
+        try:
+            model, metrics = train_model(
+                X_train_sel, y, X_test_sel, y_test, X_eval_sel, y_eval, model_params
+            )
+            recall = metrics.get("recall", 0.0)
+            precision = metrics.get("precision", 0.0)
+            score = precision if recall >= min_recall else 0.0
+            
+            if score > best_score:
+                best_score = score
+                best_features = selected
+                # Create boolean mask for best features
+                best_mask = np.array([f in best_features for f in all_features])
+            logger.info(f"Trial {trial+1}/{num_trials}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f} best_score={best_score:.4f})")
+        except Exception as e:
+            logger.error(f"Trial {trial+1} failed: {e}")
+
+    logger.info(f"Best score: {best_score:.4f} with features: {best_features}")
+    return best_features, best_mask, best_score
+
+def select_top_features_xgb(model, X_features, n_features: int = 30) -> list[str]:
+    """
+    Selects the top N features based on XGBoost feature importances.
+
+    Args:
+        model: Trained xgb.XGBClassifier model.
+        X_features: DataFrame containing the features used for training (to get names).
+        n_features: The number of top features to select.
+
+    Returns:
+        A list of the names of the top N features.
+    """
+    import pandas as pd
+    if not hasattr(model, 'feature_importances_'):
+        raise ValueError("The provided model has not been trained yet or does not support feature importances.")
+
+    importances = model.feature_importances_
+    feature_names = X_features.columns
+
+    if len(importances) != len(feature_names):
+        raise ValueError("Mismatch between the number of feature importances and feature names.")
+
+    feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
+    feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+
+    top_features = feature_importance_df['Feature'].head(n_features).tolist()
+    logger.info(f"Selected top {n_features} features based on RF importance.")
+    logger.info(f"Top features: {top_features}") # Log the selected features for visibility
+
+    return top_features
 
 def main():
     """
@@ -597,17 +713,12 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
 
-        # Select features
         features = import_selected_features_ensemble(model_type="xgb")
-        X_train = X_train[features]
-        X_test = X_test[features]
-        X_eval = X_eval[features]
-
-        # Convert all columns to float64 to ensure consistent data types
-        X_train = X_train.astype("float64")
-        X_test = X_test.astype("float64")
-        X_eval = X_eval.astype("float64")
-
+        logger.info(f"Features: {len(features)}")
+        X_train = prepare_data(X_train, features)
+        X_test = prepare_data(X_test, features)
+        X_eval = prepare_data(X_eval, features)
+        # best_features, best_mask, best_score = select_best_feature_combination(X_train, y_train, X_test, y_test, X_eval, y_eval)
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
@@ -615,44 +726,26 @@ def main():
         logger.info(
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
-        current_params = None
-        current_metrics = None
+
         # Run Hyperparameter Optimization
-        current_params, current_metrics = hypertune_xgboost(
+        hypertune_xgboost(
             X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass DataFrames
             experiment_name
         )
 
-        if current_params and current_metrics:
-            logger.info(f"HPO run completed with parameters: {current_params}")
-            logger.info(f"HPO run metrics: {current_metrics}")
-            # Train model with precision target using best HPO params (Ideally pass params dynamically)
-            # For now, it uses hardcoded params, but needs X_eval, y_eval
-            logger.info("Proceeding to train final model with precision target settings.")
-            best_model, best_metrics = train_with_precision_target(
-                X_train, y_train, X_test, y_test, X_eval, y_eval
-            )
-
-            if best_model and best_metrics:
-                logger.info("Precision target training completed.")
-                logger.info(f"Best model info: {best_model}")
-                logger.info(f"Best metrics: {best_metrics}")
-            else:
-                logger.error("Precision target training failed.")
-        else:
-            logger.info("Proceeding to train final model with precision target settings.")
-            best_model, best_metrics = train_with_precision_target(
-                X_train,
-                y_train,
-                X_test,
-                y_test,
-                X_eval,
-                y_eval,  # Pass DataFrames
-            )
-            logger.error("Hyperparameter optimization failed. Skipping precision target training.")
+        # logger.info("Proceeding to train final model with precision target settings.")
+        # best_model, best_metrics = train_with_precision_target(
+        #     X_train,
+        #     y_train,
+        #     X_test,
+        #     y_test,
+        #     X_eval,
+        #     y_eval,  # Pass DataFrames
+        # )
+        # logger.error("Hyperparameter optimization failed. Skipping precision target training.")
 
     except Exception as e:
-        logger.error(f"Error in main execution: {str(e)}", exc_info=True)  # Add traceback
+        logger.error(f"Error in main execution: {str(e)}")  # Add traceback
     finally:
         # Clean up DMatrix objects if needed (usually not necessary)
         # del dtrain, dtest, deval

@@ -18,7 +18,7 @@ from sklearn.metrics import precision_score, recall_score
 
 # from sklearn.preprocessing import QuantileTransformer
 from sklearn.utils.multiclass import type_of_target
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
 
 # Logger and shared utilities
@@ -122,8 +122,8 @@ def load_hyperparameter_space():
         "momentum": {"type": "float", "low": 0.7, "high": 0.99, "step": 0.005},
         "patience": {"type": "int", "low": 15, "high": 45},
         "max_epochs": {"type": "int", "low": 90, "high": 180, "step": 5},
-        "batch_size": {"type": "int", "low": 128, "high": 1024, "step": 64},
-        "virtual_batch_size": {"type": "int", "low": 128, "high": 1024, "step": 64},
+        "batch_size": {"type": "int", "low": 128, "high": 4096, "step": 64},
+        "virtual_batch_size": {"type": "int", "low": 128, "high": 4096, "step": 64},
         "n_independent": {"type": "int", "low": 2, "high": 4},
         "n_shared": {"type": "int", "low": 2, "high": 4},
         "weight_decay": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True},
@@ -559,7 +559,7 @@ def optimize_hyperparameters(
                 best_params = current_params.copy()
                 logger.info(f"  >>> New best score in this run: {best_score:.4f} (Trial {trial.number})")
 
-            if score > 0.37:
+            if score >= 0.36:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
                 X_eval_orig_df = X_eval.copy()
                 log_to_mlflow(model, metrics, current_params, experiment_name, X_eval_orig_df)
@@ -614,16 +614,18 @@ def optimize_hyperparameters(
 
     logger.info(f"Starting Optuna study '{study_name}' with {total_trials} trials.")
     sampler = optuna.samplers.TPESampler(seed=SEED)
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=5, interval_steps=1)
     study = optuna.create_study(
         study_name=study_name,
         direction="maximize",
         storage=storage_url,
         load_if_exists=True,
         sampler=sampler,
+        pruner=pruner,
     )
     for _ in range(num_batches):
         try:
-            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)])
+            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)], n_jobs=3)
         except KeyboardInterrupt:
             logger.warning("Optimization interrupted by user.")
             break
@@ -745,6 +747,36 @@ def log_to_mlflow(model, metrics, params, experiment_name, X_eval_df_for_sig):
         logger.error(traceback.format_exc())
         return None
 
+def select_top_features_tabnet(model: TabNetClassifier, X_features: pd.DataFrame, n_features: int = 60) -> list[str]:
+    """
+    Selects the top N features based on TabNet feature importances.
+
+    Args:
+        model: Trained TabNetClassifier model.
+        X_features: DataFrame containing the features used for training (to get names).
+        n_features: The number of top features to select.
+
+    Returns:
+        A list of the names of the top N features.
+    """
+    if not hasattr(model, 'feature_importances_'):
+        raise ValueError("The provided model has not been trained yet or does not support feature importances.")
+
+    importances = model.feature_importances_
+    feature_names = X_features.columns
+
+    if len(importances) != len(feature_names):
+        raise ValueError("Mismatch between the number of feature importances and feature names.")
+
+    feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
+    feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+
+    top_features = feature_importance_df['Feature'].head(n_features).tolist()
+    logger.info(f"Selected top {n_features} features based on TabNet importance.")
+    logger.info(f"Top features: {top_features}") # Log the selected features for visibility
+
+    return top_features
+
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
     Train TabNet model with focus on precision target.
@@ -764,39 +796,113 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         # Specific parameters for this training run with advanced scheduling
         params.update(
             {
-                "learning_rate": 0.09474214540906088,
-                "n_d": 44,
-                "n_a": 33,
-                "n_steps": 5,
-                "gamma": 0.55,
-                "lambda_sparse": 4.048782658463083e-05,
-                "momentum": 0.9099999999999999,
-                "patience": 17,
-                "max_epochs": 115,
-                "batch_size": 2191,
-                "virtual_batch_size": 2329,
-                "verbose": 0,
-                "n_independent": 3,
+                "batch_size": 1858,
+                "fit_weights": 1,
+                "gamma": 1.2000000000000002,
+                "lambda_sparse": 6.908309901130179e-05,
+                "learning_rate": 0.2095511673283359,
+                "max_epochs": 110,
+                "momentum": 0.755,
+                "n_a": 39,
+                "n_d": 29,
+                "n_independent": 4,
                 "n_shared": 3,
-                "weight_decay": 1.3840159514938363e-06,
-                "scheduler_type": "cosine",
-                "scheduler_patience": 10,
-                "scheduler_factor": 0.26185413862174955,
-                "scheduler_min_lr": 4.402942895530242e-05,
-                "scheduler_t_max": 10,
-                "scheduler_div_factor": 22.13424785773977,
+                "n_steps": 4,
+                "patience": 30,
+                "scheduler_div_factor": 22.417309143099093,
+                "scheduler_type": "onecycle",
+                "virtual_batch_size": 2736,
+                "weight_decay": 0.0001655421704998041,
             }
         )
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
         # Log to MLflow
-        log_to_mlflow(model, metrics, params, experiment_name, X_eval)
-        return model, metrics
+        # log_to_mlflow(model, metrics, params, experiment_name, X_eval)
+        # Select top features
+        top_features = compute_permutation_importance(model, X_eval, y_eval, metrics['threshold'])
+        return model, metrics, top_features
     except Exception as e:
         logger.error(f"Error during MLflow artifact logging: {str(e)}")
         logger.error(traceback.format_exc())
         return mlflow.active_run().info.run_id if mlflow.active_run() else None
+
+def compute_permutation_importance(
+    model,
+    X_val: pd.DataFrame, 
+    y_val: np.ndarray,
+    threshold: float = 0.3,
+    n_repeats: int = 3,
+    number_of_features: int = 100,
+) -> pd.DataFrame:
+    """
+    Compute permutation feature importance for TabNet model.
+    Args:
+        model: Trained TabNet model with predict_proba(X) method
+        X_val: Validation features (DataFrame)
+        y_val: Validation labels (array-like)
+        threshold: Threshold for positive class prediction
+        n_repeats: Number of shuffles per feature
+        number_of_features: Number of top features to display in logs
+    Returns:
+        DataFrame with columns: ['feature', 'importance'] sorted by importance descending
+    """
+    try:
+        feature_names = X_val.columns.tolist()
+        if isinstance(X_val, pd.DataFrame):
+            X_val = X_val.values
+        y_val_np = y_val.values if hasattr(y_val, 'values') else y_val
+        
+        # Convert to numpy and ensure correct shape
+        if y_val_np.ndim == 2 and y_val_np.shape[1] == 1:
+            y_val_np = y_val_np.ravel()
+            
+        # Compute baseline metric
+        probs = model.predict_proba(X_val)[:, 1]
+        preds = (probs >= threshold).astype(int)
+        
+        # Calculate baseline precision
+        baseline = np.sum((y_val_np == 1) & (preds == 1)) / (np.sum(preds == 1))
+        logger.info(f"Baseline precision: {baseline:.4f}")
+        
+        importances = []
+        for feat_idx, feat in enumerate(feature_names):
+            drops = []
+            for i in range(n_repeats):
+                logger.info(f"Shuffling feature: {feat} - Repeat: {i+1}")
+                X_shuffled = X_val.copy()
+                # Use column index since X_val is numpy array
+                X_shuffled[:, feat_idx] = np.random.permutation(X_val[:, feat_idx])
+                
+                # Get predictions with shuffled feature
+                probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
+                preds_shuffled = (probs_shuffled >= threshold).astype(int)
+                
+                # Calculate precision with shuffled feature
+                precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1) + 1e-7)
+                drop = baseline - precision
+                drops.append(drop)
+                
+            mean_drop = np.mean(drops)
+            importances.append((feat, mean_drop))
+            logger.debug(f"Feature: {feat}, Mean importance drop: {mean_drop:.4f}")
+            
+        # Sort by importance descending
+        importances.sort(key=lambda x: x[1], reverse=True)
+        df_importance = pd.DataFrame(importances, columns=["feature", "importance"])
+        
+        # Log top features
+        logger.info("Top features by permutation importance:")
+        logger.info(df_importance.head(number_of_features).to_string(index=False))
+        
+        return df_importance
+        
+    except Exception as e:
+        logger.error(f"Error computing permutation importance: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise
+
 
 def main():
     """
@@ -813,7 +919,7 @@ def main():
         X_eval_orig_df = X_eval_orig_df.copy() # Store original for signature
 
         # Select features
-        features = import_selected_features_ensemble(model_type="tabnet")
+        features = import_selected_features_ensemble(model_type="all")
         if not features:
             logger.warning("No features selected. Using all numeric features.")
             features = import_selected_features_ensemble("all")
@@ -836,18 +942,17 @@ def main():
         logger.info(f"Positive ratios: Train={y_train.mean():.3f}, Test={y_test.mean():.3f}, Eval={y_eval.mean():.3f}")
 
         # === Run Hypertuning ===
-        best_params_final, best_metrics_final = hypertune_tabnet(
-            experiment_name,
-            X_train, y_train,
-            X_test, y_test,
-            X_eval, y_eval 
-        )
+        # best_params_final, best_metrics_final = hypertune_tabnet(
+        #     experiment_name,
+        #     X_train, y_train,
+        #     X_test, y_test,
+        #     X_eval, y_eval 
+        # )
 
         train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
-        logger.error(traceback.format_exc())
 
 
 if __name__ == "__main__":

@@ -8,54 +8,45 @@ This document provides a detailed overview of the ensemble model used in the Soc
 
 The ensemble model is primarily implemented in the following files:
 
-- `src/models/ensemble/ensemble_model.py`: Contains the core `EnsembleModel` class, which defines the ensemble architecture, base model configuration, and meta-feature generation. (Note: filename might differ, e.g., `ensemble_model_0404.py`)
+- `src/models/ensemble/ensemble_model_0414.py`: Contains the core `EnsembleModel` class, which defines the ensemble architecture, base model configuration, and meta-feature generation. (Note: filename might differ, e.g., `ensemble_model.py`)
 - `src/models/ensemble/run_ensemble.py`: Orchestrates the end-to-end process of data loading, model training, evaluation, and MLflow integration for model tracking and registration.
-- `src/models/ensemble/weights.py`: Implements dynamic weighting algorithms with precision-focused calculations.
+- `src/models/ensemble/weights_0414.py`: Implements dynamic weighting algorithms with precision-focused calculations.
 - `src/models/ensemble/thresholds.py`: Provides optimized threshold tuning functions to balance precision and recall.
 
 ## Base Models
 
 The ensemble model integrates the following primary base models:
 
-- **XGBoost:** Utilizes `XGBClassifier` with CPU-only settings:
-  ```python
-  # Key environment variables for CPU-only operation
-  os.environ["OMP_NUM_THREADS"] = "4"
-  os.environ["MKL_NUM_THREADS"] = "4"
-  os.environ["OPENBLAS_NUM_THREADS"] = "4"
-  ```
+| Model           | Library/Type         | Description/Role                                      |
+|-----------------|---------------------|-------------------------------------------------------|
+| XGBoost         | XGBClassifier        | Gradient boosting, strong tabular performance         |
+| LightGBM        | LGBMClassifier       | Fast, efficient gradient boosting                     |
+| TabNet          | TabNetClassifier     | Deep learning for tabular data                        |
+| RandomForest    | Extra Trees/Sklearn  | Bagging-based ensemble, robust to overfitting         |
+| MLP             | Sklearn MLP          | Shallow neural network for tabular data               |
+| PyTorch         | Custom/PyTorch       | Deep neural network, hypertuned                       |
+| SVM             | Sklearn SVM          | Kernel-based, good for complex boundaries             |
+| Specialized FNN | Custom/PyTorch       | Domain-optimized FNN for soccer prediction            |
 
-- **TabNet:** Integrated using `TabNetClassifier` from the `pytorch_tabnet.tab_model` package. Key configuration parameters include:
-    - learning_rate: 0.02196
-    - n_d: 11
-    - n_a: 16
-    - n_steps: 9
-    - gamma: 1.8
-    - lambda_sparse: 2.48893e-05
-    - momentum: 0.95
-    - mask_type: 'entmax'
-
-- **LightGBM:** Configured with `LGBMClassifier` using a binary objective and tuned hyperparameters for robust performance.
-
-- **Extra Base Model:** Currently configured to use Random Forest as the default extra model, with options to use CatBoost, SVM, or MLP instead:
-  ```python
-  # Extra model loading
-  self.rf_run_id = 'cbfda1f197654fd2bdcb610a73cf8fad'
-  ```
+All models are loaded from MLflow using specific run IDs and their associated feature signatures and scalers.
 
 ## MLflow Integration
 
 The ensemble model uses MLflow to load pre-trained base models and register the final model:
 
 ```python
-# Load models from MLflow with specific run IDs
-self.xgb_run_id = '30402608b8dc4c899d675e5b56c48c01'
-self.lgb_run_id = '8312e6c4f0184ed9afb56f87c10f45a0'
-self.tabnet_run_id = '46e86bfb663e4548a1a91360f9827de7'
-self.rf_run_id = 'cbfda1f197654fd2bdcb610a73cf8fad'
+# Example: Load models from MLflow with specific run IDs
+self.xgb_run_id = 'f731a0b52acb4803869eab6039b7d621'
+self.lgb_run_id = 'be439e143bd04b768309ca1f4e03199d'
+self.tabnet_run_id = '8f17f9bc76384ac1be363ab16764f899'
+self.extra_run_id = '2f6dbe0a4b844febae0ab2a601c656cd'
+self.mlp_run_id = 'a99c793397414cb98cf2bc1ac7a5246d'
+self.pytorch_run_id = '639bafb274bb459dadc6fe9eb46c5d35'
+self.svm_run_id = '3c4ad60c660a42139edc79bd26fece65'
+self.fnn_run_id = 'e77bcbaf413f47039e33acfeb21f105e'
 ```
 
-The `load_models_from_mlflow` method loads models and extracts their feature signatures, ensuring consistent feature selection.
+The `load_models_from_mlflow` method loads models, scalers, and extracts their feature signatures, ensuring consistent feature selection and preprocessing.
 
 ## Dynamic Weighting and Precision Focus
 
@@ -64,14 +55,14 @@ A key enhancement to the ensemble model is the implementation of precision-focus
 ```python
 # Compute dynamic weights based on validation performance
 self.dynamic_weights, self.thresholds = compute_precision_focused_weights_optimized(
-    p_xgb, p_tabnet, p_lgb, p_extra, y_val, self.target_precision, self.min_recalls, self.logger
+    p_xgb, p_tabnet, p_lgb, p_extra, p_mlp, p_pytorch, p_svm, p_fnn, y_val, self.target_precision, self.min_recalls, self.logger
 )
 ```
 
 This approach:
 1. Calculates optimal thresholds for each base model
 2. Assigns weights proportional to each model's precision
-3. Ensures minimum weights for each model (5%)
+3. Ensures minimum weights for each model
 4. Normalizes the weights to sum to 1.0
 
 ## Threshold Optimization
@@ -98,7 +89,7 @@ This approach:
 The ensemble model uses meta-features derived from base model predictions:
 
 1. Base model predictions are combined with dynamic weights
-2. A meta-learner (default: LightGBM) is trained on these meta-features
+2. A meta-learner (default: XGBoost/LightGBM) is trained on these meta-features
 3. The meta-learner is hypertuned for optimal performance
 4. A global threshold is applied to the meta-learner's predictions
 
@@ -145,6 +136,8 @@ mlflow.sklearn.log_model(
   ```
 
 - **Error Analysis:** Built-in methods for prediction explanation and error analysis.
+
+- **Specialized FNN Integration:** The ensemble now includes a domain-optimized feed-forward neural network (FNN) as a base model, leveraging soccer-specific feature processing, feature interaction layers, and calibrated probability outputs. See `README_specialized_fnn.md` for details.
 
 ## Future Enhancements
 

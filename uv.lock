@@ -438,6 +438,20 @@ wheels = [
 ]
 
 [[package]]
+name = "boruta"
+version = "0.4.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/ab/103f819f83e9e2833f95f3dfb5e6d162ad1616b136b96c683ad4d7de224c/Boruta-0.4.3.tar.gz", hash = "sha256:abd67119bb88c7d1675b0dfc78072e50b5ba1d32b7cc7664258a640ad3a495a4", size = 57656 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/de/37bb80bba7fb7baa703b78fab37487b21b43fe4bb5d5a1ab09ecab9b76c6/Boruta-0.4.3-py3-none-any.whl", hash = "sha256:58cc1d7f180d0ee3aace5b171a25f00b7fd8e323a749954d899cc983b2924085", size = 57909 },
+]
+
+[[package]]
 name = "boto3"
 version = "1.37.2"
 source = { registry = "https://pypi.org/simple" }
@@ -5221,6 +5235,7 @@ dependencies = [
     { name = "bayesian-optimization" },
     { name = "black" },
     { name = "blinker" },
+    { name = "boruta" },
     { name = "boto3" },
     { name = "botocore" },
     { name = "bottleneck" },
@@ -5516,6 +5531,7 @@ requires-dist = [
     { name = "bayesian-optimization", specifier = "==1.4.3" },
     { name = "black", specifier = "==25.1.0" },
     { name = "blinker", specifier = "==1.9.0" },
+    { name = "boruta", specifier = ">=0.4.3" },
     { name = "boto3", specifier = "==1.37.2" },
     { name = "botocore", specifier = "==1.37.27" },
     { name = "bottleneck", specifier = "==1.4.2" },

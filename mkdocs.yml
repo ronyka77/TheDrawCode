@@ -8,29 +8,64 @@ repo_name: ronyka77/TheDrawCode # CHANGE THIS
 edit_uri: "edit/main/docs/" # Optional: Example link to edit pages on main branch in docs folder
 
 # Copyright
-copyright: Copyright &copy; 2025 Richard Szita
+copyright: Copyright © 2025 Richard Szita
 
-# Configuration
+# Use Material for MkDocs theme
+# See https://squidfunk.github.io/mkdocs-material/
 theme:
-  name: mkdocs
+  name: material
   language: en
-  # custom_dir: overrides/ # Optional: For theme customizations
-  favicon: assets/favicon.png # Optional: Add a favicon
-  logo: assets/logo.png # Optional: Add a logo
+  logo: assets/logo.png
+  favicon: assets/favicon.png
+  palette:
+    - scheme: default
+      primary: blue
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  features:
+    - navigation.tabs
+    - navigation.top
+    - navigation.instant
+    - navigation.sections
+    - navigation.expand
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+    - content.action.view
+    - content.code.copy
+    - content.code.select
+    - content.footnote.tooltips
+    - content.footnote.backlinks
+    - content.tooltips
+    - announce.dismiss
 
 # Extensions
 markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
-  - admonition
-  - pymdownx.details
-  - pymdownx.tabbed:
-      alternate_style: true
   - attr_list
   - md_in_html
 
@@ -41,3 +76,10 @@ nav:
   - Technical Details: technical.md
   - UI Planning: plan_ui.md
   - Ensemble Model: ensemble_model_documentation.md
+
+# Extra configuration for social links, edit button, etc.
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/ronyka77/TheDrawCode
+      name: GitHub

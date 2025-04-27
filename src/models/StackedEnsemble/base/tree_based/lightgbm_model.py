@@ -43,7 +43,7 @@ n_trials = 100000  # Number of hyperparameter optimization trials as in notebook
 # Base parameters as in the notebook
 base_params = {
     "objective": "binary",
-    "metric": ["binary_logloss", "aucpr"],
+    "metric": ["aucpr", "binary_logloss"],
     "verbose": -1,
     "n_jobs": 8,
     "random_state": 19,
@@ -72,14 +72,14 @@ def load_hyperparameter_space():
     """
     hyperparameter_space = {
         "learning_rate": {"type": "float", "low": 0.045, "high": 0.18, "log": False, "step": 0.0025},
-        "num_leaves": {"type": "int", "low": 55, "high": 150, "log": False, "step": 5},
+        "num_leaves": {"type": "int", "low": 55, "high": 200, "log": False, "step": 5},
         "max_depth": {"type": "int", "low": 5, "high": 12, "log": False, "step": 1},
         "min_child_samples": {"type": "int", "low": 200, "high": 600, "log": False, "step": 10},
         "feature_fraction": {"type": "float", "low": 0.58, "high": 0.75, "log": False, "step": 0.01},
         "bagging_fraction": {"type": "float", "low": 0.56, "high": 0.75, "log": False, "step": 0.005},
         "bagging_freq": {"type": "int", "low": 10, "high": 15, "log": False, "step": 1},
-        "reg_alpha": {"type": "float", "low": 10.0, "high": 20.0, "log": False, "step": 0.1},
-        "reg_lambda": {"type": "float", "low": 10.0, "high": 20.0, "log": False, "step": 0.1},
+        "reg_alpha": {"type": "float", "low": 8.0, "high": 20.0, "log": False, "step": 0.1},
+        "reg_lambda": {"type": "float", "low": 8.0, "high": 20.0, "log": False, "step": 0.1},
         "min_split_gain": {"type": "float", "low": 0.12, "high": 0.30, "log": False, "step": 0.005},
         "early_stopping_rounds": {"type": "int", "low": 600, "high": 1200, "log": False, "step": 10},
         "path_smooth": {"type": "float", "low": 0.10, "high": 0.60, "log": False, "step": 0.005},
@@ -226,7 +226,7 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
 
-            if score > 0.42:
+            if score > 0.41 and score > best_score:
                 log_to_mlflow(model, metrics, params, experiment_name)
             return score
 
@@ -480,6 +480,89 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         return None, None
 
 
+def select_best_feature_combination(
+    X, y, X_test, y_test, X_eval, y_eval,
+    num_features=95, num_trials=1000, min_recall=0.2, random_state=19
+):
+    """
+    Try multiple random combinations of features, train a model for each,
+    and select the best set based on precision (if recall >= min_recall).
+    Args:
+        X (pd.DataFrame): Training features (all 165 columns)
+        y (pd.Series): Training labels
+        logger: Logger instance
+        X_test, y_test, X_eval, y_eval: Validation/eval sets (same columns as X)
+        num_features (int): Number of features to select in each trial
+        num_trials (int): Number of random combinations to try
+        min_recall (float): Minimum recall threshold for score
+        random_state (int): Random seed
+    Returns:
+        best_features (list): List of best feature names
+        best_mask (np.ndarray): Boolean mask for best features
+        best_score (float): Best score achieved
+    """
+
+    rng = np.random.default_rng(random_state)
+    all_features = list(X_eval.columns)
+    best_score = -1.0
+    best_features = None
+    best_mask = None
+    model_params = base_params.copy()
+    model_params.update(
+            {
+                "learning_rate": 0.1625,
+                "num_leaves": 75,
+                "max_depth": 10,
+                "min_child_samples": 540,
+                "feature_fraction": 0.61,
+                "bagging_fraction": 0.645,
+                "bagging_freq": 15,
+                "reg_alpha": 19.4,
+                "reg_lambda": 11.8,
+                "min_split_gain": 0.17,
+                "early_stopping_rounds": 670,
+                "path_smooth": 0.51,
+                "cat_smooth": 33.8,
+                "max_bin": 670,
+                "device": "cpu",
+                "n_jobs": 8,
+                "objective": "binary",
+                "metric": ["aucpr", "binary_logloss"],
+                "random_state": 19,
+                "verbose": -1,
+            }
+        )
+    logger.info(f"Trying {num_trials} random combinations of {num_features} features out of {len(all_features)}...")
+
+    for trial in range(num_trials):
+        # Randomly select features
+        selected = rng.choice(all_features, size=num_features, replace=False)
+        selected = list(selected)
+        # Subset data
+        X_train_sel = X[selected]
+        X_test_sel = X_test[selected]
+        X_eval_sel = X_eval[selected]
+        # Train model and get metrics
+        try:
+            model, metrics = train_model(
+                X_train_sel, y, X_test_sel, y_test, X_eval_sel, y_eval, model_params
+            )
+            recall = metrics.get("recall", 0.0)
+            precision = metrics.get("precision", 0.0)
+            score = precision if recall >= min_recall else 0.0
+            
+            if score > best_score:
+                best_score = score
+                best_features = selected
+                # Create boolean mask for best features
+                best_mask = np.array([f in best_features for f in all_features])
+            logger.info(f"Trial {trial+1}/{num_trials}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f} best_score={best_score:.4f})")
+        except Exception as e:
+            logger.error(f"Trial {trial+1} failed: {e}")
+
+    logger.info(f"Best score: {best_score:.4f} with {num_features} features: {best_features}")
+    return best_features, best_mask, best_score
+
 def main():
     """
     Main execution function.
@@ -492,10 +575,13 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
         features = import_selected_features_ensemble(model_type="lgbm")
+        
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
         
+        # best_features, best_mask, best_score = select_best_feature_combination(X_train, y_train, X_test, y_test, X_eval, y_eval)
+
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
@@ -509,11 +595,11 @@ def main():
         logger.info(f"Run completed with parameters: {current_params}")
 
         # Train model with precision target
-        best_model, best_metrics = train_with_precision_target(
-            X_train, y_train, X_test, y_test, X_eval, y_eval
-        )
-        logger.info(f"Best model: {best_model}")
-        logger.info(f"Best metrics: {best_metrics}")
+        # best_model, best_metrics = train_with_precision_target(
+        #     X_train, y_train, X_test, y_test, X_eval, y_eval
+        # )
+        # logger.info(f"Best model: {best_model}")
+        # logger.info(f"Best metrics: {best_metrics}")
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

@@ -47,11 +47,11 @@ tf.random.set_seed(random_seed)
 os.environ["PYTHONHASHSEED"] = str(random_seed)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "8"
-os.environ["MKL_NUM_THREADS"] = "8"
-os.environ["OPENBLAS_NUM_THREADS"] = "8"
-os.environ["NUMEXPR_NUM_THREADS"] = "8"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "8"
+os.environ["OMP_NUM_THREADS"] = "16"
+os.environ["MKL_NUM_THREADS"] = "16"
+os.environ["OPENBLAS_NUM_THREADS"] = "16"
+os.environ["NUMEXPR_NUM_THREADS"] = "16"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "16"
 # PyTorch specific reproducibility settings
 torch.manual_seed(random_seed)
 
@@ -530,13 +530,7 @@ def hypertune_meta_learner(
     np.random.seed(random_seed)
     tf.random.set_seed(random_seed)
     os.environ["PYTHONHASHSEED"] = str(random_seed)
-
-    # Restrict parallel threads across various libraries
-    os.environ["OMP_NUM_THREADS"] = "8"
-    os.environ["MKL_NUM_THREADS"] = "8"
-    os.environ["OPENBLAS_NUM_THREADS"] = "8"
-    os.environ["NUMEXPR_NUM_THREADS"] = "8"
-    os.environ["VECLIB_MAXIMUM_THREADS"] = "8"
+    
     # PyTorch specific reproducibility settings and optimizations
     torch.manual_seed(random_seed)
     if torch.cuda.is_available():

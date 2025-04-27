@@ -42,7 +42,7 @@ sklearn_version = sklearn.__version__
 pip_requirements = [f"scikit-learn=={sklearn_version}", f"mlflow=={mlflow.__version__}"]
 
 # Update base parameters for RandomForest
-base_params = {"random_state": 19, "n_jobs": 8, "verbose": 0, "criterion": "entropy"}
+base_params = {"random_state": 19, "n_jobs": 6, "verbose": 0, "criterion": "entropy"}
 # Set fixed seed and hash seed for determinism
 SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
@@ -50,9 +50,9 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "8"
-os.environ["MKL_NUM_THREADS"] = "8"
-os.environ["OPENBLAS_NUM_THREADS"] = "8"
+os.environ["OMP_NUM_THREADS"] = "6"
+os.environ["MKL_NUM_THREADS"] = "6"
+os.environ["OPENBLAS_NUM_THREADS"] = "6"
 
 
 def load_hyperparameter_space_for_hpo():
@@ -221,7 +221,7 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
             # Log to MLflow
-            if score > 0.34:
+            if score > 0.33:
                 log_to_mlflow(model, metrics, params, experiment_name)
             return score
 
@@ -431,16 +431,16 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "n_estimators": 700,
-                "max_depth": 21, 
-                "min_samples_split": 36,
-                "min_samples_leaf": 22,
-                "max_features": 0.58,
-                "class_weight": 3.95,
                 "bootstrap": True,
-                "criterion": "entropy",
+                "class_weight": 3.55,
+                "criterion": "entropy", 
+                "max_depth": 21,
+                "max_features": 0.58,
+                "min_samples_leaf": 54,
+                "min_samples_split": 36,
+                "n_estimators": 960,
+                "n_jobs": 6,
                 "random_state": 19,
-                "n_jobs": 8,
                 "verbose": 0,
             }
         )
@@ -448,11 +448,44 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training final model with best parameters")
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
         # Log to MLflow
-        log_to_mlflow(model, metrics, params, experiment_name)
+        # log_to_mlflow(model, metrics, params, experiment_name)
+        top_features = select_top_features_rf(model, X_train)
+        logger.info(f"Top features: {top_features}")
         return model, metrics
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
+
+
+def select_top_features_rf(model: RandomForestClassifier, X_features: pd.DataFrame, n_features: int = 40) -> list[str]:
+    """
+    Selects the top N features based on Random Forest feature importances.
+
+    Args:
+        model: Trained RandomForestClassifier model.
+        X_features: DataFrame containing the features used for training (to get names).
+        n_features: The number of top features to select.
+
+    Returns:
+        A list of the names of the top N features.
+    """
+    if not hasattr(model, 'feature_importances_'):
+        raise ValueError("The provided model has not been trained yet or does not support feature importances.")
+
+    importances = model.feature_importances_
+    feature_names = X_features.columns
+
+    if len(importances) != len(feature_names):
+        raise ValueError("Mismatch between the number of feature importances and feature names.")
+
+    feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
+    feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+
+    top_features = feature_importance_df['Feature'].head(n_features).tolist()
+    logger.info(f"Selected top {n_features} features based on RF importance.")
+    logger.info(f"Top features: {top_features}") # Log the selected features for visibility
+
+    return top_features
 
 
 def main():

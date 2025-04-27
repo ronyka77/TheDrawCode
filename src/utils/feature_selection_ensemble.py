@@ -12,6 +12,7 @@ Usage example:
 """
 
 import os
+import pickle
 import random
 import sys
 from pathlib import Path
@@ -23,10 +24,15 @@ import torch
 import torch.optim as optim
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
+from pytorch_tabnet.metrics import Metric
 from pytorch_tabnet.tab_model import TabNetClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.inspection import permutation_importance
+from sklearn.metrics import precision_score, recall_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.multiclass import type_of_target
+from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
 from xgboost import XGBClassifier
 
 # Add project root to Python path
@@ -52,11 +58,9 @@ logger = ExperimentLogger(
 
 from utils.create_evaluation_set import (
     create_ensemble_evaluation_set,
+    import_selected_features_ensemble,
     import_training_data_ensemble,
-    setup_mlflow_tracking,
 )
-
-mlruns_dir = setup_mlflow_tracking(experiment_name)
 
 # Set fixed seed and hash seed for determinism
 SEED = 19
@@ -72,6 +76,67 @@ os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 # PyTorch specific reproducibility settings
 torch.manual_seed(SEED)
+
+min_recall = 0.3
+
+class PrecisionFocusedMetric(Metric):
+    def __init__(self, beta=0.5):
+        self._name = "precision_focused"
+        self._maximize = True
+        self.beta = beta
+
+    def __call__(self, y_true, y_score):
+        """F-beta score with beta < 1 to favor precision over recall"""
+
+        # Ensure y_true is a 1D array
+        # Check type of target
+        y_true_type = type_of_target(y_true)
+        if y_true_type == "multilabel-indicator":
+            # Assuming binary classification represented as one-hot
+            # Convert back to 1D: take the argmax along the class axis (axis=1)
+            y_true_flat = np.argmax(y_true, axis=1)
+        elif y_true_type == "binary":
+            y_true_flat = y_true.astype(int) # Ensure integer type
+        else:
+            # Handle unexpected types or raise an error
+            logger.warning(f"Unexpected y_true type '{y_true_type}' in PrecisionFocusedMetric. Attempting to flatten.")
+            try:
+                y_true_flat = y_true.astype(int).ravel() # General attempt to flatten
+            except Exception as e:
+                logger.error(f"Could not convert y_true to 1D array: {e}")
+                return 0.0 # Return 0 score if conversion fails
+
+        # Ensure y_score handling is robust
+        # Check if y_score has 2 columns (expected for binary probabilities)
+        if y_score.ndim == 2 and y_score.shape[1] == 2:
+            pred = (y_score[:, 1] > 0.5).astype(int) # Use probability of positive class
+        elif y_score.ndim == 1: # If y_score is already 1D predictions/scores
+            pred = (y_score > 0.5).astype(int) # Threshold directly
+        else:
+            logger.error(f"Unexpected y_score shape {y_score.shape} in PrecisionFocusedMetric.")
+            return 0.0 # Return 0 score if y_score format is wrong
+
+        # Calculate precision and recall safely
+        try:
+            # Check target types again just before sklearn call for debugging
+            # logger.debug(f"y_true_flat type: {type_of_target(y_true_flat)}, pred type: {type_of_target(pred)}")
+            precision = precision_score(y_true_flat, pred, zero_division=0)
+            recall = recall_score(y_true_flat, pred, zero_division=0)
+        except ValueError as e:
+            logger.error(f"Error calculating scores in PrecisionFocusedMetric: {e}")
+            logger.error(f"y_true_flat sample: {y_true_flat[:5]}, shape: {y_true_flat.shape}, type: {type_of_target(y_true_flat)}")
+            logger.error(f"pred sample: {pred[:5]}, shape: {pred.shape}, type: {type_of_target(pred)}")
+            return 0.0 # Return 0 score if scikit-learn metric fails
+
+        # If recall below threshold, return 0
+        if recall < min_recall:
+            return 0.0
+
+        # F-beta with beta < 1 favors precision
+        f_beta = (
+            (1 + self.beta**2) * (precision * recall) / (self.beta**2 * precision + recall + 1e-8)
+        )
+        return f_beta
 
 
 def select_features(
@@ -208,7 +273,7 @@ def select_features_differentiated(
     y: pd.Series,
     X_val: pd.DataFrame,
     y_val: pd.Series,
-    top_k_per_model: int = 60,
+    top_k_per_model: int = 65,
     fixed_features: Optional[list[str]] = None,
     verbose: bool = True,
 ) -> dict[str, list[str]]:
@@ -226,107 +291,119 @@ def select_features_differentiated(
     """
 
     fixed_features = fixed_features or []
+    from src.models.StackedEnsemble.base.neural.mlp_model import create_model as create_model_mlp
+    # from src.models.StackedEnsemble.base.neural.tabnet_model import (
+    #     create_model as create_model_tabnet,
+    # )
     models = {
-        "tabnet": TabNetClassifier(
-            n_d=20,
-            n_a=11,
-            n_steps=2,
-            gamma=1.85,
-            lambda_sparse=0.0004179320179043156,
-            momentum=0.895,
-            mask_type="sparsemax",
-            device_name="cuda",
-            optimizer_fn=optim.Adam,
-            optimizer_params={"lr": 0.013847429792123665},
-            verbose=0,
-            seed=19,
-        ),
+    #     "tabnet": create_model_tabnet({
+    #         "fit_weights": 1,
+    #         "scheduler_type": "none", 
+    #         "learning_rate": 0.0025663935806495273,
+    #         "eps": 4.4331373706050046e-07,
+    #         "n_d": 75,
+    #         "n_a": 48,
+    #         "n_steps": 6,
+    #         "gamma": 2.4000000000000004,
+    #         "lambda_sparse": 0.00045184291660952525,
+    #         "momentum": 0.9249999999999999,
+    #         "patience": 38,
+    #         "max_epochs": 180,
+    #         "batch_size": 768,
+    #         "virtual_batch_size": 384,
+    #         "verbose": 0,
+    #         "n_independent": 4,
+    #         "n_shared": 3,
+    #         "weight_decay": 0.00037739593920011535,
+    #         "scheduler_pct_start": 0.25,
+    #         "scheduler_final_div_factor": 1100.0
+    #     }),
         "xgb": XGBClassifier(
             tree_method="hist",
-            device="cpu",
-            nthread=4,
+            device="cuda", 
+            nthread=8,
             objective="binary:logistic",
             eval_metric=["aucpr", "error", "logloss"],
             verbosity=0,
-            learning_rate=0.08,
-            max_depth=13,
-            min_child_weight=260,
-            subsample=0.59,
-            colsample_bytree=0.6699999999999999,
-            reg_alpha=41.8,
-            reg_lambda=5.15,
-            gamma=0.5,
-            early_stopping_rounds=890,
-            scale_pos_weight=2.44,
+            learning_rate=0.05,
+            max_depth=8,
+            min_child_weight=430,
+            subsample=0.71,
+            colsample_bytree=0.84,
+            reg_alpha=25.200000000000003,
+            reg_lambda=9.700000000000001,
+            gamma=2.14,
+            early_stopping_rounds=700,
+            scale_pos_weight=2.36,
             seed=19,
         ),
-        "cat": CatBoostClassifier(
-            learning_rate=0.055,
-            depth=7,
-            min_data_in_leaf=165,
-            subsample=0.5900000000000001,
-            colsample_bylevel=0.5800000000000001,
-            reg_lambda=0.6540483398088304,
-            leaf_estimation_iterations=12,
-            bagging_temperature=9.3,
-            scale_pos_weight=4.7,
-            early_stopping_rounds=700,
-            loss_function="Logloss",
-            eval_metric="AUC",
-            custom_metric=["Precision", "Recall"],
-            task_type="CPU",
-            thread_count=4,
-            verbose=-1,
-        ),
+        # "cat": CatBoostClassifier(
+        #     learning_rate=0.055,
+        #     depth=7,
+        #     min_data_in_leaf=165,
+        #     subsample=0.5900000000000001,
+        #     colsample_bylevel=0.5800000000000001,
+        #     reg_lambda=0.6540483398088304,
+        #     leaf_estimation_iterations=12,
+        #     bagging_temperature=9.3,
+        #     scale_pos_weight=4.7,
+        #     early_stopping_rounds=700,
+        #     loss_function="Logloss",
+        #     eval_metric="AUC",
+        #     custom_metric=["Precision", "Recall"],
+        #     task_type="CPU",
+        #     thread_count=4,
+        #     verbose=-1,
+        # ),
         "lgbm": LGBMClassifier(
             objective="binary",
-            metric=["binary_logloss", "auc"],
+            metric=["aucpr", "binary_logloss"], 
             verbose=-1,
-            n_jobs=4,
+            n_jobs=8,
             random_state=19,
             device="cpu",
-            learning_rate=0.15000000000000002,
-            num_leaves=150,
-            max_depth=10,
-            min_child_samples=400,
-            feature_fraction=0.55,
-            bagging_fraction=0.68,
-            bagging_freq=13,
-            reg_alpha=0.8,
-            reg_lambda=12.0,
-            min_split_gain=0.12000000000000001,
-            path_smooth=0.28,
-            cat_smooth=20.4,
-            max_bin=620,
+            learning_rate=0.14,
+            num_leaves=85,
+            max_depth=6,
+            min_child_samples=270,
+            feature_fraction=0.6100000000000001,
+            bagging_fraction=0.5750000000000001,
+            bagging_freq=14,
+            reg_alpha=16.200000000000003,
+            reg_lambda=15.5,
+            min_split_gain=0.14,
+            early_stopping_rounds=670,
+            path_smooth=0.34500000000000003,
+            cat_smooth=23.400000000000002,
+            max_bin=250,
         ),
         # "rf": RandomForestClassifier(
-        #     n_estimators=1770,
-        #     max_depth=15,
-        #     min_samples_split=55,
-        #     min_samples_leaf=36,
-        #     max_features=0.42,
+        #     n_estimators=1060,
+        #     max_depth=6,
+        #     min_samples_split=70,
+        #     min_samples_leaf=24,
+        #     max_features=1.0,
         #     bootstrap=True,
-        #     class_weight={0: 1.0, 1: 2.2},
-        #     criterion='entropy',
+        #     class_weight={0: 1.0, 1: 2.0},
+        #     criterion="entropy",
         #     random_state=19,
-        #     n_jobs=4,
+        #     n_jobs=8,
         #     verbose=0
         # ),
-        "mlp": MLPClassifier(
-            hidden_layer_sizes=(128, 64, 32),
-            alpha=0.04259050184156992,
-            batch_size=1536,
-            learning_rate_init=0.04342726319130476,
-            max_iter=70,
-            n_iter_no_change=27,
-            beta_1=0.9,
-            beta_2=0.983,
-            activation="relu",  # ReLU activation function
-            solver="adam",  # Adam optimizer
-            early_stopping=True,  # Enable early stopping
-            random_state=19,  # For reproducibility
-            verbose=False,
-        ),
+        "mlp": create_model_mlp({
+            'input_dim': X.shape[1],
+            'hidden_layers': 3,
+            'neurons_per_layer': 62, 
+            'dropout_rate': 0.04,
+            'activation': 'tanh',
+            'l1_regularization': 0.004681388569246714,
+            'l2_regularization': 0.0001459323364245875,
+            'learning_rate': 0.04014677776290513,
+            'batch_size': 423,
+            'epochs': 173,
+            'patience': 23,
+            'class_weight_multiplier': 2.2
+        }),
     }
 
     selected = {}
@@ -349,24 +426,24 @@ def select_features_differentiated(
                 X.values,
                 y.values,
                 eval_set=[(X_val.values, y_val.values)],
-                eval_metric=["auc"],
-                patience=22,
-                max_epochs=115,
-                batch_size=1057,
-                virtual_batch_size=2663,
+                eval_metric=[PrecisionFocusedMetric],
+                patience=30,
+                max_epochs=110,
+                batch_size=1858,
+                virtual_batch_size=2736,
+                weights=1,
                 drop_last=False,
             )
             imp = np.array(model.feature_importances_)
         elif name == "mlp":
-            scaler = StandardScaler()
+            scaler = pickle.load(open("src/models/scalers/scaler_mlp.pkl", "rb"))
             X_scaled = scaler.fit_transform(X)
             X_val_scaled = scaler.transform(X_val)
             model.fit(X_scaled, y)
-            # Calculate permutation importance on the validation set
-            result = permutation_importance(
-                model, X_val_scaled, y_val, n_repeats=10, random_state=19, n_jobs=4
-            )
-            imp = result.importances_mean  # Use permutation importance
+            # Get weight matrix of first Dense layer
+            W = model.layers[0].get_weights()[0]
+            # Sum abs(weights) across neurons → one score per input feature 
+            imp = np.abs(W).sum(axis=1)
         else:
             imp = np.zeros(X.shape[1])
         # Create a DataFrame mapping features to their importance
@@ -394,10 +471,10 @@ def select_features_differentiated(
     # Return a dictionary with details for each model and the overall union.
     return {
         "xgb": selected["xgb"],
-        "cat": selected["cat"],
+        # "cat": selected["cat"],
         "lgbm": selected["lgbm"],
-        "rf": selected["rf"],
-        "tabnet": selected["tabnet"],
+        # "rf": selected["rf"],
+        # "tabnet": selected["tabnet"],
         "mlp": selected["mlp"],
         "union": union_features,
     }
@@ -426,12 +503,13 @@ if __name__ == "__main__":
     # Load data using utility functions
     features_train, target_train, features_test, target_test = import_training_data_ensemble()
     features_val, target_val = create_ensemble_evaluation_set()
+    features_all = import_selected_features_ensemble("all")
     # Drop referee and league_name columns from all datasets
     columns_to_drop = ["referee", "league_name"]
     logger.info(f"Dropping columns as per requirements: {columns_to_drop}")
-    features_train = features_train.drop(columns=columns_to_drop, errors="ignore")
-    features_test = features_test.drop(columns=columns_to_drop, errors="ignore")
-    features_val = features_val.drop(columns=columns_to_drop, errors="ignore")
+    features_train = features_train[features_all]
+    features_test = features_test[features_all]
+    features_val = features_val[features_all]
 
     # Validate that all columns exist in both training and validation sets
     missing_train = [col for col in features_val.columns if col not in features_train.columns]

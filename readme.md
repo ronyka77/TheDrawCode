@@ -25,8 +25,9 @@ A machine learning system that accurately predicts soccer match draws and goal p
 
 ## ✨ Key Features
 
-- **Ensemble Model Architecture**: Combines XGBoost, TabNet, LightGBM, and Random Forest for robust predictions.
+- **Ensemble Model Architecture**: Combines XGBoost, TabNet, LightGBM, Random Forest, and KNN for robust predictions.
 - **Precision-Focused Weighting**: Optimized weights based on each model's precision performance.
+- **KNN Model Support**: K-Nearest Neighbors can now be used as a base model in the ensemble.
 - **Vectorized Threshold Optimization**: Efficient threshold tuning for precision-recall balance.
 - **CPU-Only Optimization**: Explicitly configured for deterministic CPU-based training.
 - **Reproducible Results**: Comprehensive seed setting and environment variable control.
@@ -40,7 +41,7 @@ The system employs a multi-stage ensemble approach. Core Python code resides in 
 
 - **Data Ingestion & Preprocessing** (`src/utils`, `data/`)
 - **Feature Engineering** (`src/utils/advanced_goal_features.py`)
-- **Base Model Training** (`src/models/StackedEnsemble/base/`)
+- **Base Model Training** (`src/models/StackedEnsemble/base/` — includes XGBoost, TabNet, LightGBM, Random Forest, KNN)
 - **Ensemble Logic** (`src/models/ensemble/`)
 - **Prediction Service** (`src/predictors/`)
 - **Backend API** (`src/backend/` - if applicable)
@@ -150,7 +151,7 @@ print("Usage example needs actual data loading and training steps.")
 
 ```bash
 # Run from project root
-python -m src.models.ensemble.run_ensemble --extra_model random_forest --meta_learner_type lgb --target_precision 0.5 --required_recall 0.25
+python -m src.models.ensemble.run_ensemble --extra_model knn --meta_learner_type lgb --target_precision 0.5 --required_recall 0.25
 ```
 
 ### Viewing Experiments
@@ -182,6 +183,7 @@ The system follows this workflow:
     # Example run IDs used by the system
     xgb_run_id = '30402608b8dc4c899d675e5b56c48c01'
     # ... other model run IDs ...
+    # knn_run_id = 'your_knn_model_run_id'
     ```
 3.  **Dynamic Weighting**: Calculating weights (`src/models/ensemble/weights.py`).
 4.  **Meta-Feature Creation**.
@@ -203,7 +205,7 @@ _(See `docs/technical.md` for details on specific settings like reproducibility 
 
 ### Adding New Base Models
 
-1.  Implement the model in `src/models/StackedEnsemble/base/`.
+1.  Implement the model in `src/models/StackedEnsemble/base/` (see KNN as an example).
 2.  Add the model type to `extra_base_model_type` options in `src/models/ensemble/ensemble_model.py`.
 3.  Update the `load_models_from_mlflow` method in `src/models/ensemble/ensemble_model.py`.
 4.  Register a new MLflow run ID for your trained model.
