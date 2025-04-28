@@ -80,11 +80,11 @@ make install
 # uv sync --all-extras --dev
 
 
-### Environment Setup Flow
-![Environment Setup Flow](docs/images/env_setup_flow.png)
 
 
 ```
+### Environment Setup Flow
+![Environment Setup Flow](docs/images/env_setup_flow.png)
 
 ### Makefile Setup Note
 
