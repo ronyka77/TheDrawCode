@@ -307,7 +307,7 @@ def optimize_hyperparameters(
         )
         # Pass the lambda function wrapping objective
         study.optimize(
-            objective_func, n_trials=batch_size, show_progress_bar=True, callbacks=[callback]
+            objective_func, n_trials=batch_size, callbacks=[callback]
         )
 
         # Merge current batch's top trials with global_top_trials

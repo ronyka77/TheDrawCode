@@ -88,8 +88,8 @@ def load_hyperparameter_space_for_hpo():
         },
         "class_weight": {
             "type": "float",
-            "low": 1.8,   # Slightly under lowest successful value
-            "high": 3.6,  # Maximum from successful trials
+            "low": 1.6,   # Slightly under lowest successful value
+            "high": 3.5,  # Maximum from successful trials
             "step": 0.05, # Keep fine-grained control
         },
     }

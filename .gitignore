@@ -126,3 +126,9 @@ scaler_robust.pkl
 optuna_mlp.db
 optuna_pytorch.db
 optuna_svm.db
+prompt_debug.txt
+prompt_lessons_learned.txt
+prompt_strategy_evaluation
+prompt_requirement_refinement.txt
+prompt_refinement.txt
+The Prompt Stack That Changed How I Work.txt

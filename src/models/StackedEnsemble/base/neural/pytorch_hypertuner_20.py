@@ -497,7 +497,7 @@ def objective(
 
         logger.info(f"Trial {trial.number}: Score: {score:.4f} (Precision: {precision:.4f}, Recall: {recall:.4f})")
         
-        if score > 0.35 :
+        if score > 0.36 :
             log_to_mlflow_pytorch(
                 model,
                 metrics,

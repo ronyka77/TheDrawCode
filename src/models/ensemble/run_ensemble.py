@@ -68,7 +68,7 @@ def run_ensemble(
     calibrate: bool = False,
     dynamic_weighting: bool = True,
     target_precision: float = 0.50,
-    required_recall: float = 0.20,
+    required_recall: float = 0.25,
     experiment_name: str = "ensemble_model_improved",
     logger: ExperimentLogger = logger,
 ):

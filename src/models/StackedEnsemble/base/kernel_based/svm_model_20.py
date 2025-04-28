@@ -256,7 +256,7 @@ def optimize_hyperparameters_svm(
             global_top_trials[:] = global_top_trials[:10]  # Keep only overall top 10
 
             # Log top trials periodically
-            if trial.number > 0 and trial.number % 50 == 0:
+            if trial.number > 0 and trial.number % 10 == 0:
                 log_top_trials_svm(global_top_trials, "Current Overall Top 10 Trials")
         elif trial.state != optuna.trial.TrialState.COMPLETE:
             logger.warning(
@@ -568,8 +568,8 @@ if __name__ == "__main__":
         # Select features
         try:
             # Attempt to load features specific to SVM if defined
-            features = import_selected_features_ensemble(model_type="all")
-            logger.info(f"Using 'mlp' specific feature set with {len(features)} features.")
+            features = import_selected_features_ensemble(model_type="svm")
+            logger.info(f"Using 'svm' specific feature set with {len(features)} features.")
         except (KeyError, FileNotFoundError):
             logger.warning("SVM specific features not found. Falling back to 'all' features.")
             features = import_selected_features_ensemble(model_type="all")
@@ -605,7 +605,7 @@ if __name__ == "__main__":
 
         # --- Choose Mode: hypertune or fixed params ---
         # mode = "hypertune" or "fixed_params"
-        mode = "fixed_params" 
+        mode = "hypertune" 
 
         best_model_params = None
         final_metrics = None

@@ -74,14 +74,14 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.target_precision = target_precision # For dynamic weights
 
         # --- MLflow Run IDs for Base Models ---
-        self.xgb_run_id = "a859bd6aaa8c482f876d2de6a9581712"
-        self.lgb_run_id = "7707502d5d6743088f1cac77a1bae637"  
+        self.xgb_run_id = "8925dbf9a66e4c85a58db7ee39340216"
+        self.lgb_run_id = "ef401e81548c4c278ce4a1ee1bc45d04"  
         self.tabnet_run_id = "e7d72ec3cd5c48ecb129630a50ed311d" 
-        self.extra_run_id = "8519d58b301e481381c0f2e33b77eda1" 
-        self.mlp_run_id = "a4a59c138d9f4b6f89166e20df5acf16"
-        self.pytorch_run_id = "5d87e96f4cd74acc86989b392c3b454b"
-        self.svm_run_id = "6d3ff1af7b264f37a18d81ff3328d318"  # <<< ADD SVM RUN ID HERE
-        self.fnn_run_id = "3f7b671d0fcb451bb2ee9d301f065725"
+        self.extra_run_id = "a8ba00d98cff4be1b298620275ddaa05" 
+        self.mlp_run_id = "eccdd862dc664527b4df956699611a26"
+        self.pytorch_run_id = "5a6e50e334f84e4f9c4fdd1cf5608b7a"
+        self.svm_run_id = "1d469fbfafbc4b46abd465fa06c7138e"  # <<< ADD SVM RUN ID HERE
+        self.fnn_run_id = "69aa097754ac4ea586e4c43dcafd85e9"
 
         # Minimum recalls for dynamic weighting (order: xgb, tabnet, lgb, rf, mlp, pytorch, svm)
         self.min_recalls = [0.25, 0.25, 0.30, 0.30, 0.25, 0.20, 0.25, 0.20] # Added SVM recall
