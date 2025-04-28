@@ -4314,7 +4314,7 @@ wheels = [
 
 [[package]]
 name = "ray"
-version = "2.42.1"
+version = "2.43.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosignal" },
@@ -4329,11 +4329,11 @@ dependencies = [
     { name = "requests" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a8/ab/23d81c1c3f458576519d2c5863250c538b7bb99dd4a87050f6e94c2fc89a/ray-2.42.1-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:12059ae21810d0ae8b09cc7c379d52cd108881b8b9e9c628d32c045970fc2ac4", size = 67528132 },
-    { url = "https://files.pythonhosted.org/packages/63/8f/1f24de59c8a54eaf22abc61adf3d97c5d6a019b6d5414ef6770f5ad0e6e1/ray-2.42.1-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:3228e4846502e0c5beae69b699fc9071a06d3cfbfc0ca5f2bd2707924a52e34b", size = 64877809 },
-    { url = "https://files.pythonhosted.org/packages/9d/52/7e5cda150b9e6012e7a1f22406d3a4e6aee4f4733182e0ae50d5388fd8b1/ray-2.42.1-cp39-cp39-manylinux2014_aarch64.whl", hash = "sha256:57f7a98828581804a9e77ec99f3fddd54225dabda9c0d9a6771eb7d22e693072", size = 66366277 },
-    { url = "https://files.pythonhosted.org/packages/85/80/f40e07356dbf9e00ecdcb096707c51434aa7379aa02f91968edbf57a1461/ray-2.42.1-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:2d40136918cdd7f60710aa46452eefa9c0e460e2c4e75b2fc5723c73de76d701", size = 67272540 },
-    { url = "https://files.pythonhosted.org/packages/be/51/6fbd9efe1631236ddb994f15970bb692f32567cbb83a77b4c414a7d71726/ray-2.42.1-cp39-cp39-win_amd64.whl", hash = "sha256:ce642dbbf1e0f137a3f0ac91af5791bf936765abc403383efe38e0243aa7c7fb", size = 25304933 },
+    { url = "https://files.pythonhosted.org/packages/da/0c/30b1c8b97e7ddd7f0cbc2c00b1bebfad6f5e5397fa3da2ad96978e7fa618/ray-2.43.0-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:d0e26f9db91a5b3343f0858eb256255b35c7e97fc6bf97065f5744ad7e8cc297", size = 67906120 },
+    { url = "https://files.pythonhosted.org/packages/1d/38/2f53ed350da89882341a81a240502753965304c090e90d40d1b4f2404efb/ray-2.43.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:d8cfdec2bf61c48690f6cb4325f1673e0d1d00dea925b59b631196e67f426a0e", size = 65206589 },
+    { url = "https://files.pythonhosted.org/packages/e5/9b/e01eb5c0b6240b162d35a6b82a9a94d7432f8ae864cd56d9785382f73e4e/ray-2.43.0-cp39-cp39-manylinux2014_aarch64.whl", hash = "sha256:87e0cac85189dc519af1b6ef2abd654804c488c932caadd658b90caaa65f8dae", size = 66718649 },
+    { url = "https://files.pythonhosted.org/packages/b5/93/8a17d6f14f51d2673b74d99363f67298372c2d4305242d640e7ced091d85/ray-2.43.0-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:5edf3da18041e0b6170c62e08480ab050f0766361ff3f6e11257cc04ab46e592", size = 67611022 },
+    { url = "https://files.pythonhosted.org/packages/cc/ba/b86858b3934f1b16ec63cd676f50e31e8f0204228163cc59f839de71d437/ray-2.43.0-cp39-cp39-win_amd64.whl", hash = "sha256:889964d09ae048f5bf56a54d2477779f44d780b35dfadaf927da20e4703a6f67", size = 25628537 },
 ]
 
 [[package]]
@@ -5702,7 +5702,7 @@ requires-dist = [
     { name = "qasync", specifier = "==0.27.1" },
     { name = "qpd", specifier = "==0.4.4" },
     { name = "rapidfuzz", specifier = "==3.10.1" },
-    { name = "ray", specifier = "==2.42.1" },
+    { name = "ray", specifier = "==2.43.0" },
     { name = "regex", specifier = "==2024.11.6" },
     { name = "requests", specifier = "==2.32.3" },
     { name = "ruff", specifier = ">=0.11.4" },

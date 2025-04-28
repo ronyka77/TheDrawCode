@@ -80,7 +80,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.extra_run_id = "a8ba00d98cff4be1b298620275ddaa05" 
         self.mlp_run_id = "eccdd862dc664527b4df956699611a26"
         self.pytorch_run_id = "5a6e50e334f84e4f9c4fdd1cf5608b7a"
-        self.svm_run_id = "1d469fbfafbc4b46abd465fa06c7138e"  # <<< ADD SVM RUN ID HERE
+        self.svm_run_id = "1d469fbfafbc4b46abd465fa06c7138e" 
         self.fnn_run_id = "69aa097754ac4ea586e4c43dcafd85e9"
 
         # Minimum recalls for dynamic weighting (order: xgb, tabnet, lgb, rf, mlp, pytorch, svm)
