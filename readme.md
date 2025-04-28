@@ -79,15 +79,11 @@ make install
 # OR install directly using uv
 # uv sync --all-extras --dev
 
-# Set up environment variables for reproducibility (Windows example)
-# Add these to your environment activation or run them in your session
-# $env:PYTHONHASHSEED=19
-# $env:TF_ENABLE_ONEDNN_OPTS=0
-# $env:OMP_NUM_THREADS=4
-# $env:MKL_NUM_THREADS=4
-# $env:OPENBLAS_NUM_THREADS=4
-# $env:NUMEXPR_NUM_THREADS=4
-# $env:VECLIB_MAXIMUM_THREADS=4
+
+### Environment Setup Flow
+![Environment Setup Flow](docs/images/env_setup_flow.png)
+
+
 ```
 
 ### Makefile Setup Note
@@ -151,7 +147,7 @@ print("Usage example needs actual data loading and training steps.")
 
 ```bash
 # Run from project root
-python -m src.models.ensemble.run_ensemble --extra_model knn --meta_learner_type lgb --target_precision 0.5 --required_recall 0.25
+python -m src.models.ensemble.run_ensemble
 ```
 
 ### Viewing Experiments
@@ -190,6 +186,11 @@ The system follows this workflow:
 5.  **Meta-Learner Training**.
 6.  **Threshold Optimization** (`src/models/ensemble/thresholds.py`).
 7.  **Model Registration**: Registering the final model.
+
+
+## 🔄 Model Flow Diagram
+
+![Ensemble Model Flow](docs/images/ensemble_model_flow.png)
 
 ## ⚙️ Configuration
 
