@@ -1232,7 +1232,12 @@ class MongoDBFeatures:
                                     'goals_against_avg_home', 'goals_against_avg_away', 'goals_against_avg_total',
                                     'clean_sheet_home', 'clean_sheet_away', 'clean_sheet_total',
                                     'failed_to_score_home', 'failed_to_score_away', 'failed_to_score_total',
-                                    'penalty_scored', 'penalty_missed', 'penalty_total'])
+                                    'penalty_scored', 'penalty_missed', 'penalty_total',
+                                    'streak_wins', 'streak_draws', 'streak_loses',
+                                    'biggest_wins_home', 'biggest_wins_away',
+                                    'biggest_loses_home', 'biggest_loses_away',
+                                    'biggest_goals_for_home', 'biggest_goals_for_away',
+                                    'biggest_goals_against_home', 'biggest_goals_against_away'])
         error_count = 0
         count = 0
         rows = []
@@ -1300,9 +1305,30 @@ class MongoDBFeatures:
                     base_data['penalty_missed'] = penalty.get('missed', {}).get('total')
                     base_data['penalty_total'] = penalty.get('total')
 
+                    # Extract biggest streaks and scores
+                    biggest = stats.get('biggest', {})
+                    streak = biggest.get('streak', {})
+                    base_data['streak_wins'] = streak.get('wins')
+                    base_data['streak_draws'] = streak.get('draws') 
+                    base_data['streak_loses'] = streak.get('loses')
+
+                    wins = biggest.get('wins', {})
+                    base_data['biggest_wins_home'] = wins.get('home')
+                    base_data['biggest_wins_away'] = wins.get('away')
+
+                    loses = biggest.get('loses', {})
+                    base_data['biggest_loses_home'] = loses.get('home')
+                    base_data['biggest_loses_away'] = loses.get('away')
+
+                    goals = biggest.get('goals', {})
+                    base_data['biggest_goals_for_home'] = goals.get('for', {}).get('home')
+                    base_data['biggest_goals_for_away'] = goals.get('for', {}).get('away')
+                    base_data['biggest_goals_against_home'] = goals.get('against', {}).get('home')
+                    base_data['biggest_goals_against_away'] = goals.get('against', {}).get('away')
+
                     rows.append(base_data)
 
-                if len(rows) % 100 == 0:
+                if len(rows) % 5000 == 0:
                     print(f"Processed {len(rows)} records")
 
             except Exception as e:

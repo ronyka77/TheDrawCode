@@ -335,6 +335,42 @@ def cleanup_deleted_runs(mlruns_dir="mlruns"):
             print(f"Error processing experiment {exp.name} (ID: {exp.experiment_id}): {str(e)}")
             continue
 
+def cleanup_empty_experiments(mlruns_dir="mlruns"):
+    """Clean up experiments that have no runs.
+    
+    Args:
+        mlruns_dir: Path to mlruns directory. Defaults to 'mlruns'.
+    """
+    client = MlflowClient()
+    experiments = client.search_experiments()
+    
+    for exp in experiments:
+        print(f"Checking Experiment: {exp.name} (ID: {exp.experiment_id})")
+        try:
+            # Search for all runs (active and deleted)
+            runs = client.search_runs(
+                [exp.experiment_id],
+                run_view_type=mlflow.entities.ViewType.ALL
+            )
+            
+            if len(runs) == 0:
+                print(f"Experiment {exp.name} has no runs - deleting...")
+                exp_path = os.path.join(mlruns_dir, exp.experiment_id)
+                
+                # Delete from tracking server
+                client.delete_experiment(exp.experiment_id)
+                
+                # Remove experiment directory if it exists
+                if os.path.exists(exp_path):
+                    print(f"Removing experiment directory at {exp_path}")
+                    shutil.rmtree(exp_path)
+            else:
+                print(f"Experiment {exp.name} has {len(runs)} runs")
+        except Exception as e:
+            print(f"Error processing experiment {exp.name} (ID: {exp.experiment_id}): {str(e)}")
+            continue
+
 
 if __name__ == "__main__":
     cleanup_deleted_runs()
+    cleanup_empty_experiments()

@@ -46,8 +46,9 @@ n_trials = 20000
 # Then modify your base_params to include the custom metrics
 base_params = {
     "optimizer_fn": optim.Adam,  # Use Adam as default optimizer
-    "mask_type": "sparsemax",
-    "eval_metric": ["auc", "logloss"],  # Default metrics, custom one passed in fit
+    # "mask_type": "sparsemax",
+    "eval_metric": ["auc", "logloss"],  # Default metrics, custom one passed in 
+    "fit_weights": 1,
     "verbose": 0,
     "seed": 19,
     "device_name": "cuda",
@@ -110,37 +111,36 @@ def load_hyperparameter_space():
         "learning_rate": {
             "type": "float",
             "low": 0.0003,
-            "high": 0.02,
+            "high": 0.04,
             "log": True,
         },
-        "eps": {"type": "float", "low": 1e-7, "high": 1e-4, "log": True},
-        "n_d": {"type": "int", "low": 32, "high": 96},
-        "n_a": {"type": "int", "low": 32, "high": 96},
-        "n_steps": {"type": "int", "low": 3, "high": 7},
+        "eps": {"type": "float", "low": 1e-8, "high": 1e-4, "log": True},
+        "n_d": {"type": "int", "low": 32, "high": 128},
+        "n_a": {"type": "int", "low": 32, "high": 128},
+        "n_steps": {"type": "int", "low": 2, "high": 6},
         "gamma": {"type": "float", "low": 0.5, "high": 3.0, "step": 0.05},
         "lambda_sparse": {"type": "float", "low": 1e-7, "high": 1e-2, "log": True},
         "momentum": {"type": "float", "low": 0.7, "high": 0.99, "step": 0.005},
-        "patience": {"type": "int", "low": 15, "high": 45},
+        "patience": {"type": "int", "low": 15, "high": 60},
         "max_epochs": {"type": "int", "low": 90, "high": 180, "step": 5},
-        "batch_size": {"type": "int", "low": 128, "high": 4096, "step": 64},
-        "virtual_batch_size": {"type": "int", "low": 128, "high": 4096, "step": 64},
-        "n_independent": {"type": "int", "low": 2, "high": 4},
-        "n_shared": {"type": "int", "low": 2, "high": 4},
-        "weight_decay": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True},
+        "batch_size": {"type": "int", "low": 64, "high": 4096, "step": 64},
+        "virtual_batch_size": {"type": "int", "low": 64, "high": 4096, "step": 64},
+        "n_independent": {"type": "int", "low": 1, "high": 4},
+        "n_shared": {"type": "int", "low": 2, "high": 6},
+        "weight_decay": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True},
         "scheduler_type": {
             "type": "categorical",
-            "choices": ["cosine", "plateau", "onecycle", "none"],
+            "choices": ["plateau", "onecycle", "none"],
         },
-        "scheduler_patience": {"type": "int", "low": 3, "high": 10},
-        "scheduler_factor": {"type": "float", "low": 0.1, "high": 0.5},
+        "scheduler_patience": {"type": "int", "low": 2, "high": 10},
+        "scheduler_factor": {"type": "float", "low": 0.05, "high": 0.5},
         "scheduler_min_lr": {"type": "float", "low": 1e-6, "high": 1e-4, "log": True},
-        "scheduler_t_max": {"type": "int", "low": 5, "high": 20},
         "scheduler_pct_start": {"type": "float", "low": 0.1, "high": 0.5, "step": 0.05},
         "scheduler_div_factor": {"type": "float", "low": 10.0, "high": 40.0, "step": 0.5},
         "scheduler_final_div_factor": {"type": "float", "low": 1000.0, "high": 10000.0, "step": 100.0},
-        "fit_weights": {
+        "mask_type": {
             "type": "categorical",
-            "choices": [0, 1]
+            "choices": ["sparsemax", "entmax"]
         },
     }
     return hyperparameter_space
@@ -283,7 +283,7 @@ def create_model(model_params):
             "seed", "verbose", "cat_idxs", "cat_dims", "cat_emb_dim"
         }
         config_keys = {"learning_rate", "weight_decay", "scheduler_type",
-                        "scheduler_t_max", "scheduler_min_lr", "scheduler_patience",
+                        "scheduler_min_lr", "scheduler_patience",
                         "scheduler_factor", "scheduler_div_factor"}
 
         # Extract constructor and config params from input model_params
@@ -310,15 +310,7 @@ def create_model(model_params):
         # Configure scheduler
         scheduler_type = config_params.get("scheduler_type", "none")
         scheduler_params_config = {}
-        if scheduler_type == "cosine":
-            scheduler_fn = CosineAnnealingLR
-            scheduler_params_config = {
-                "T_max": config_params.get("scheduler_t_max", 10),
-                "eta_min": config_params.get("scheduler_min_lr", 1e-5),
-            }
-            params["scheduler_fn"] = scheduler_fn
-            params["scheduler_params"] = scheduler_params_config
-        elif scheduler_type == "plateau":
+        if scheduler_type == "plateau":
             scheduler_fn = ReduceLROnPlateau
             scheduler_params_config = {
                 "patience": config_params.get("scheduler_patience", 5),
@@ -484,9 +476,6 @@ def optimize_hyperparameters(
         nonlocal best_score, best_params
         current_params = {}
         try:
-            # --- Sample fit_weights first ---
-            current_params["fit_weights"] = trial.suggest_categorical("fit_weights", [0, 1])
-
             # --- Sample other parameters ---
             # Sample scheduler type needed for conditional params
             scheduler_type = trial.suggest_categorical("scheduler_type", hyperparameter_space["scheduler_type"]["choices"])
@@ -543,7 +532,7 @@ def optimize_hyperparameters(
             score = precision if recall >= min_recall else 0.0
 
             # Log trial results
-            logger.info(f"  Trial {trial.number}: fit_weights={current_params['fit_weights']}, Score={score:.4f}, Precision={precision:.4f}, Recall={recall:.4f}")
+            logger.info(f"  Trial {trial.number}: Score={score:.4f}, Precision={precision:.4f}, Recall={recall:.4f}")
             for metric_name, metric_value in metrics.items():
                 # Serialize for Optuna
                 if isinstance(metric_value, (int, float, str, bool)) or metric_value is None:
@@ -924,7 +913,7 @@ def main():
         X_eval_orig_df = X_eval_orig_df.copy() # Store original for signature
 
         # Select features
-        features = import_selected_features_ensemble(model_type="all")
+        features = import_selected_features_ensemble(model_type="tabnet")
         if not features:
             logger.warning("No features selected. Using all numeric features.")
             features = import_selected_features_ensemble("all")
@@ -947,12 +936,12 @@ def main():
         logger.info(f"Positive ratios: Train={y_train.mean():.3f}, Test={y_test.mean():.3f}, Eval={y_eval.mean():.3f}")
 
         # === Run Hypertuning ===
-        # best_params_final, best_metrics_final = hypertune_tabnet(
-        #     experiment_name,
-        #     X_train, y_train,
-        #     X_test, y_test,
-        #     X_eval, y_eval 
-        # )
+        best_params_final, best_metrics_final = hypertune_tabnet(
+            experiment_name,
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, y_eval 
+        )
 
         train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 

@@ -159,31 +159,31 @@ def load_hyperparameter_space():
         },
         'dropout_rate': {
             'type': 'float',
-            'low': 0.001,
-            'high': 0.7,
+            'low': 0.59,
+            'high': 0.8,
             'step': 0.001
         },
         'activation': {
             'type': 'categorical',
-            'choices': ['relu', 'elu', 'tanh']
+            'choices': ['elu', 'tanh']
         },
         'l1_regularization': {
             'type': 'float',
-            'low': 0.00001,
-            'high': 1e-2,
+            'low': 1e-6,
+            'high': 5e-4,
             'log': True
         },
         'l2_regularization': {
             'type': 'float',
-            'low': 0.00001,
-            'high': 1e-2,
+            'low': 1e-6,
+            'high': 5e-3,
             'log': True
         },
         'batch_size': {
             'type': 'int',
-            'low': 64,
-            'high': 2048,  
-            'step': 16
+            'low': 512,
+            'high': 4096,  
+            'step': 32
         },
         'epochs': {
             'type': 'int',
@@ -198,9 +198,9 @@ def load_hyperparameter_space():
         },
         'class_weight_multiplier': {
             'type': 'float',
-            'low': 0.5,
-            'high': 3.0,
-            'step': 0.05
+            'low': 1.0,
+            'high': 2.5,
+            'step': 0.01
         }
     }
     return hyperparameter_space
@@ -527,17 +527,17 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()  # Inherits base MLP parameters
         # Specific parameters for this training run with advanced scheduling
         params.update({
-            "learning_rate": 0.004389003217789673,
-            "hidden_layers": 4,
-            "neurons_per_layer": 60,
-            "dropout_rate": 0.502,
+            "learning_rate": 0.0009354890710342875,
+            "hidden_layers": 6,
+            "neurons_per_layer": 652,
+            "dropout_rate": 0.626,
             "activation": "tanh",
-            "l1_regularization": 2.1533893647750033e-05,
-            "l2_regularization": 0.000163584968287901,
-            "batch_size": 837,
-            "epochs": 71,
-            "patience": 6,
-            "class_weight_multiplier": 1.25,
+            "l1_regularization": 0.0016533944910447397,
+            "l2_regularization": 4.494691574496788e-05,
+            "batch_size": 878,
+            "epochs": 69,
+            "patience": 45,
+            "class_weight_multiplier": 2.5,
         })
         X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(X_train, X_test, X_eval)
         # Train final model with best parameters

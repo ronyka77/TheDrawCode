@@ -75,12 +75,12 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
         # --- MLflow Run IDs for Base Models ---
         self.xgb_run_id = "8925dbf9a66e4c85a58db7ee39340216"
-        self.lgb_run_id = "ef401e81548c4c278ce4a1ee1bc45d04"  
+        self.lgb_run_id = "62664fc9e638464593d173a9cde6e0ee"  
         self.tabnet_run_id = "e7d72ec3cd5c48ecb129630a50ed311d" 
         self.extra_run_id = "a8ba00d98cff4be1b298620275ddaa05" 
-        self.mlp_run_id = "eccdd862dc664527b4df956699611a26"
-        self.pytorch_run_id = "5a6e50e334f84e4f9c4fdd1cf5608b7a"
-        self.svm_run_id = "1d469fbfafbc4b46abd465fa06c7138e" 
+        self.mlp_run_id = "7261c0338a81490a89c812e176032bcf"
+        self.pytorch_run_id = "e5182b96976d4729a7c4507a3faf13c8"
+        self.svm_run_id = "0cf8185254cd4da596ff76ec0f60a0ec" 
         self.fnn_run_id = "69aa097754ac4ea586e4c43dcafd85e9"
 
         # Minimum recalls for dynamic weighting (order: xgb, tabnet, lgb, rf, mlp, pytorch, svm)
@@ -716,7 +716,6 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             self.logger.info("FNN scaler loaded successfully.")
             
             # Optional: Attach scaler and device to the loaded PyTorch model instance 
-            # if its predict_proba method relies on them being attributes (like in the hypertuner)
             if hasattr(self.model_pytorch, 'scaler_') and hasattr(self.model_pytorch, 'device_'):
                 try: 
                     # Determine device (use CUDA if available, same logic as hypertuner)

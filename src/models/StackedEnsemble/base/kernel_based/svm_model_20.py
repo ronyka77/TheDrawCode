@@ -89,21 +89,21 @@ def load_hyperparameter_space_svm():
     hyperparameter_space = {
         "C": {
             "type": "float",
-            "low": 0.3,  # Adjusted range for C
-            "high": 1.5,
+            "low": 0.20,  # Adjusted range for C
+            "high": 0.40,
             "log": True,
         },
         "gamma": {
             "type": "float",
-            "low": 1e-5,  # Adjusted range for gamma
-            "high": 1e-3,
+            "low": 1e-6,  # Adjusted range for gamma
+            "high": 3e-2,
             "log": True,
         },
-        "cache_size": {"type": "int", "low": 3000, "high": 10000, "step": 50},
+        "cache_size": {"type": "int", "low": 4000, "high": 14000, "step": 100},
         # 'kernel': {'type': 'categorical', 'choices': ['rbf', 'poly', 'sigmoid']},
-        'degree': {'type': 'int', 'low': 3, 'high': 6}, # Only if kernel='poly'
-        'coef0': {'type': 'float', 'low': 0.4, 'high': 1.0, 'log': True}, # Only if kernel='poly' or 'sigmoid'
-        "tol": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True},
+        'degree': {'type': 'int', 'low': 3, 'high': 7}, # Only if kernel='poly'
+        'coef0': {'type': 'float', 'low': 0.3, 'high': 0.9, 'log': True}, # Only if kernel='poly' or 'sigmoid'
+        "tol": {"type": "float", "low": 1e-7, "high": 1e-5, "log": True},
     }
     return hyperparameter_space
 
@@ -441,16 +441,16 @@ def train_with_precision_target_svm(
 
         # Define fixed parameters (Update these based on prior tuning or best guess)
         fixed_params = {
-            'C': 0.6289604374348485,
-            'cache_size': 7193,
+            'C': 0.6175310980516687,
+            'cache_size': 5466,
             'class_weight': 'balanced',
-            'coef0': 0.9691464190524749,
-            'degree': 5,
-            'gamma': 0.0006988504320938866,
+            'coef0': 0.4568065814626598,
+            'degree': 6,
+            'gamma': 0.00020587086243364596,
             'kernel': 'rbf',
             'probability': True,
             'random_state': 19,
-            'tol': 7.922688637048899e-05,
+            'tol': 9.218236481865033e-05,
             'verbose': False,
         }
         model_params = base_params.copy()

@@ -36,8 +36,7 @@ from src.utils.create_evaluation_set import (
 )
 from src.utils.logger import ExperimentLogger
 
-# --- Global Settings & Constants ---
-experiment_name = "pytorch_optimization_20"
+
 
 
 # Set fixed seed and hash seed for determinism
@@ -162,6 +161,8 @@ pip_requirements = [
 base_params = {
     "random_state": SEED
 }
+
+global logger, experiment_name
 
 # --- Phase 2: Hyperparameter Space and Model Handling ---
 def load_hyperparameter_space():
@@ -497,7 +498,7 @@ def objective(
 
         logger.info(f"Trial {trial.number}: Score: {score:.4f} (Precision: {precision:.4f}, Recall: {recall:.4f})")
         
-        if score > 0.36 :
+        if score > 0.38 :
             log_to_mlflow_pytorch(
                 model,
                 metrics,
@@ -791,7 +792,7 @@ def hypertune_pytorch(
             X_eval=X_val,
             scaler=scaler,
             pip_requirements=pip_requirements,
-            run_name_prefix="pytorch_best_model"
+            run_name_prefix=experiment_name + "_model"
         )
 
         return best_hpo_params, final_metrics
@@ -958,7 +959,8 @@ def main():
     Main execution function: loads data, selects features, fits scaler,
     runs hyperparameter tuning, and handles final logging.
     """
-    global logger
+    global logger, experiment_name
+    experiment_name = "pytorch_optimization_20"
     logger = ExperimentLogger(experiment_name)
 
     # Setup MLflow tracking

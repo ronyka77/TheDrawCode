@@ -49,11 +49,12 @@ def main():
     """
     Main execution function that uses the specialized FNN with the existing workflow.
     """
-    logger.info("Starting specialized FNN experiment")
-    
     # Temporarily patch functions to use our specialized model
     import src.models.StackedEnsemble.base.neural.pytorch_hypertuner as hypertuner
     
+    global logger, experiment_name
+    experiment_name = "specialized_fnn_experiment_20"
+    logger.info("Starting specialized FNN experiment")
     # Save original functions and variables
     original_create_model = hypertuner.create_pytorch_model
     original_load_space = hypertuner.load_hyperparameter_space
@@ -65,7 +66,7 @@ def main():
         hypertuner.load_hyperparameter_space = patched_load_hyperparameter_space
         
         # Set custom experiment name
-        hypertuner.experiment_name = "specialized_fnn_experiment_20"
+        hypertuner.experiment_name = experiment_name
         
         # Now run the original main function which will use our specialized components
         logger.info(f"Running hypertuner with specialized FNN model using experiment name: {hypertuner.experiment_name}")

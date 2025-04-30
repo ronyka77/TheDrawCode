@@ -976,6 +976,35 @@ class ApiFootball:
         except Exception as e:
             self.logger.error(f"Error getting injuries data: {e}")
 
+    def delete_team_stats_without_league(self):
+        """Delete team statistics documents where the first team stats entry has no league."""
+        try:
+            self.logger.info("Deleting team statistics without league information...")
+            docs = list(self.team_stats_collection.find({}))
+            
+            def should_delete(row):
+                ts = row.get('team_stats')
+                # Check if team_stats is a dict with empty arrays
+                if isinstance(ts, dict):
+                    return all(not stats for stats in ts.values())
+                # Check if team_stats is a list
+                elif isinstance(ts, list) and len(ts) > 0:
+                    first = ts[0]
+                    return first == {} or 'league' not in first
+                return False
+            # to_delete = df[df.apply(should_delete, axis=1)]
+            ids_to_delete = [doc['fixture_id'] for doc in docs if should_delete(doc)]
+            self.logger.info(f"Found {len(ids_to_delete)} fixtures to delete")
+
+            # Delete the fixtures
+            result = self.team_stats_collection.delete_many({'fixture_id': {'$in': ids_to_delete}})
+            
+            self.logger.info(f"Deleted team stats from {result.deleted_count} fixtures")
+            print(f"Deleted team stats from {result.deleted_count} fixtures")
+
+        except Exception as e:
+            self.logger.error(f"Error deleting team stats without league: {e}")
+
     def get_team_stats_for_fixtures(self):
         """Get team statistics for fixtures and store in MongoDB."""
         try:
@@ -983,9 +1012,22 @@ class ApiFootball:
 
             # Get all fixtures without team stats
             tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
-            total_fixtures = self.fixtures_collection.count_documents(
-                {"team_stats": {"$exists": False}, "missing_team_stats_data": {"$exists": False}, "date": {"$lt": tomorrow}}
-            )
+            # Get all fixture IDs from fixtures collection before tomorrow
+            fixture_ids = set(doc["fixture_id"] for doc in self.fixtures_collection.find(
+                {"date": {"$lt": tomorrow}}, 
+                {"fixture_id": 1}
+            ))
+            
+            # Get fixture IDs that exist in team_stats collection
+            existing_ids = set(doc["fixture_id"] for doc in self.team_stats_collection.find(
+                {}, {"fixture_id": 1}
+            ))
+            
+            # Find missing fixture IDs
+            missing_ids = fixture_ids - existing_ids
+            
+            # Count total fixtures missing team stats
+            total_fixtures = len(missing_ids)
 
             if total_fixtures == 0:
                 self.logger.info("No fixtures found without team statistics.")
@@ -998,12 +1040,10 @@ class ApiFootball:
             for i in range(0, total_fixtures, batch_size):
                 batch = list(self.fixtures_collection.find(
                     {
-                        "team_stats": {"$exists": False},
-                        "missing_team_stats_data": {"$exists": False},
-                        "date": {"$lt": tomorrow}
+                        "fixture_id": {"$in": list(missing_ids)[i:i+batch_size]},
                     },
                     {"fixture_id": 1, "league_id": 1, "home.team_id": 1, "away.team_id": 1, "date": 1, "league_season": 1}
-                ).skip(i).limit(batch_size))
+                ))
                 
                 for fixture in batch:
                     fixture_id = fixture["fixture_id"]
@@ -1088,7 +1128,7 @@ def main():
     # api_football.process_and_save_venues()
 
     api_football.get_team_stats_for_fixtures()
-
+    # api_football.delete_team_stats_without_league()
 
 if __name__ == "__main__":
     main()
