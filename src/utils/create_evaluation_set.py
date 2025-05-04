@@ -1308,9 +1308,9 @@ def save_data_to_excel(df, output_path, type):
 @retry_on_error(max_retries=3, delay=1.0)
 def create_prediction_set_ensemble() -> pd.DataFrame:
     """Optimized data loading and preprocessing for predictions."""
-    file_path = os.path.join(project_root, "data", "prediction", "api_prediction_data_new.xlsx")
+    file_path = os.path.join(project_root, "data", "prediction", "new_api_prediction_data.xlsx")
     logger.info(f"Loading prediction data from: {file_path}")
-    import_selected_features_ensemble("all")
+    import_selected_features_ensemble_new("all")
     try:
         # Load data with optimized parameters
         data = pd.read_excel(file_path, engine="openpyxl", dtype={"fixture_id": "int64"})
@@ -1369,7 +1369,6 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
     except Exception as e:
         logger.info(f"Critical error: {str(e)}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
-
 
 # OTHER FUNCTIONS
 @retry_on_error(max_retries=3, delay=1.0)
@@ -1445,12 +1444,320 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
         )
         raise
 
+def update_api_data_new_for_draws():
+    """
+    Update prediction data for draws by adding advanced goal features and saving to api_prediction_data_new.xlsx
+    """
+    try:
+        # Load existing training data
+        data_path = "data/prediction/new_api_prediction_data.xlsx"
+        data_path_new = "data/prediction/new_api_prediction_data.xlsx"
+        data = pd.read_excel(data_path)
+        # Initialize the feature engineer
+        feature_engineer = AdvancedGoalFeatureEngineer()
+        # Add advanced goal features
+        updated_data = feature_engineer.add_goal_features(data)
+        logger.info(updated_data.shape)
+
+        # Filter data for dates before 2024-11-01
+        api_training_data = updated_data[updated_data["Date"] < "2025-03-01"]
+        # Add is_draw column for training data
+        api_training_data.loc[:, "is_draw"] = (api_training_data["match_outcome"] == 2).astype(int)
+        logger.info("Added is_draw column to training data")
+        # Filter data for dates after 2024-11-01 where match_outcome is not blank
+        api_prediction_eval = updated_data[
+            (updated_data["Date"] >= "2025-03-01") & (updated_data["match_outcome"].notna())
+        ]
+        # Filter data for dates after 2024-11-01 where match_outcome is blank
+        api_prediction_data = updated_data[
+            (updated_data["Date"] >= "2025-03-01") & (updated_data["match_outcome"].isna())
+        ]
+
+        logger.info(f"api_prediction_data.shape: {api_prediction_data.shape}")
+        logger.info(f"api_prediction_eval.shape: {api_prediction_eval.shape}")
+        logger.info(f"api_training_data.shape: {api_training_data.shape}")
+        # Concatenate the filtered dataframes
+        updated_data = pd.concat([api_prediction_eval, api_prediction_data], ignore_index=True)
+
+        # Export df_before_2024_11_01 to data/api_training_final.xlsx and .parquet
+        save_data_to_excel(api_training_data, "data/new_api_training_final.xlsx", "api_training_final")
+        create_parquet_files(api_training_data, "data/new_api_training_final.parquet")
+        logger.info("api_training_final.xlsx and .parquet updated")
+
+        # Export df_after_2024_11_01_not_blank to data/prediction/api_predictions_eval.xlsx and .parquet
+        save_data_to_excel(
+            api_prediction_eval, "data/prediction/new_api_prediction_eval.xlsx", "api_prediction_eval"
+        )
+        create_parquet_files(api_prediction_eval, "data/prediction/new_api_prediction_eval.parquet")
+        logger.info("api_prediction_eval.xlsx and .parquet updated")
+
+        # Export df_after_2024_11_01_blank to data/prediction/api_predictions_data.xlsx and .parquet
+        save_data_to_excel(
+            api_prediction_data, "data/prediction/new_api_predictions_data.xlsx", "api_prediction_data"
+        )
+        create_parquet_files(api_prediction_data, "data/prediction/new_api_predictions_data.parquet")
+        logger.info("api_predictions_data.xlsx and .parquet updated")
+        # Save updated data back to Excel
+        updated_data.to_excel(data_path_new, index=False)
+    except Exception as e:
+        logger.info(f"Error updating training data for draws: {str(e)}")
+
+def import_training_data_ensemble_new():
+    """Import training data for draw predictions."""
+    parquet_path = os.path.join(project_root, "data", "new_api_training_final.parquet")
+    data_path = os.path.join(project_root, "data", "new_api_training_final.xlsx")
+
+    # Check if parquet file exists and is valid
+    if os.path.exists(parquet_path):
+        try:
+            data = pd.read_parquet(parquet_path)
+            logger.info(f"Loaded training data from parquet: {parquet_path}")
+            if "is_draw" not in data.columns:
+                logger.info("is_draw column not found in parquet file, creating target variable")
+                data["is_draw"] = (data["match_outcome"] == 2).astype(int)
+            # Drop rows where home_failed_to_score_away is NA
+            # data = data.dropna(subset=['home_failed_to_score_away'])
+            # logger.info(f"Dropped rows with NA in home_failed_to_score_away, shape: {data.shape}")
+        except Exception as e:
+            logger.info(f"Failed to load parquet file, falling back to Excel: {str(e)}")
+            data = pd.read_excel(data_path)
+    else:
+        data = pd.read_excel(data_path)
+        logger.info(f"Loaded training data from Excel: {data_path}")
+        # Create target variable
+        data["is_draw"] = (data["match_outcome"] == 2).astype(int)
+        # Select features and target
+        columns_to_drop = [
+            "match_outcome",
+            "home_goals",
+            "away_goals",
+            "total_goals",
+            "score",
+            "Referee",
+            "draw",
+            "venue_name",
+            "Home",
+            "Away",
+            "away_win",
+            "Date",
+            "date",
+            "referee",
+            "league_name",
+            "referee_draw_rate",
+            "referee_draws",
+            "referee_match_count",
+            "referee_foul_rate",
+            "referee_match_count",
+            "referee_encoded",
+            "ref_goal_tendency",
+            "mid_season_factor",
+        ]
+        data = data.drop(columns=columns_to_drop, errors="ignore")
+        # Drop rows where home_failed_to_score_away is NA
+        # data = data.dropna(subset=['home_failed_to_score_away'])
+        # logger.info(f"Dropped rows with NA in home_failed_to_score_away, shape: {data.shape}")
+        # Convert all numeric-like columns (excluding problematic_cols that have
+        # already been handled)
+        data = convert_numeric_columns(
+            data=data,
+            columns=data.columns.tolist(),
+            drop_errors=False,
+            fill_value=0.0,
+            verbose=True,
+        )
+        # Define integer columns that should remain as int64
+        int_columns = [
+            "h2h_draws",
+            "home_h2h_wins",
+            "h2h_matches",
+            "Away_points_cum",
+            "Home_points_cum",
+            "Home_team_matches",
+            "Home_draws",
+            "venue_encoded",
+        ]
+        # Convert integer columns back to int64
+        for col in int_columns:
+            if col in data.columns:
+                data[col] = data[col].astype("int64")
+        # Export processed data to parquet for efficient storage and retrieval
+        create_parquet_files(data, "data/new_api_training_final.parquet")
+        logger.info("Exported processed training data to parquet format")
+    # Split into train and test sets
+    train_data, test_data = train_test_split(
+        data, test_size=0.3, random_state=42, stratify=data["is_draw"]
+    )
+    X_train = train_data.drop(columns="is_draw", errors="ignore")
+    y_train = train_data["is_draw"]
+    X_test = test_data.drop(columns="is_draw", errors="ignore")
+    y_test = test_data["is_draw"]
+    return X_train, y_train, X_test, y_test
+
+def create_evaluation_set_new() -> pd.DataFrame:
+    """Create evaluation set for ensemble training with selected features and evaluation columns.
+    This function creates a dataset containing all features from selected_features_ensemble.json
+    along with the target variable (is_draw) and an evaluator column for model comparison.
+    Returns:
+        pd.DataFrame: DataFrame containing:
+            - All features from selected_features_ensemble
+            - is_draw: Target variable (1 for draw, 0 otherwise)
+            - evaluator: Column for model evaluation tracking
+    Raises:
+        FileNotFoundError: If required data files are not found
+        ValueError: If data validation fails
+        Exception: For other processing errors
+    """
+    try:
+        # Load training data
+        data_path = os.path.join(project_root, "data", "prediction", "new_api_prediction_eval.parquet")
+        logger.info(f"Loading training data from: {data_path}")
+        data = pd.read_parquet(data_path)
+        # Create target variable
+        data["is_draw"] = (data["match_outcome"] == 2).astype(int)
+        # Select features and target
+        columns_to_drop = [
+            "match_outcome",
+            "home_goals",
+            "away_goals",
+            "total_goals",
+            "score",
+            "Referee",
+            "draw",
+            "venue_name",
+            "Home",
+            "Away",
+            "away_win",
+            "Date",
+            "date",
+            "referee_draw_rate",
+            "referee_home_impact",
+            "referee_goals_per_game",
+            "referee_away_impact",
+            "referee_draws",
+            "referee_match_count",
+            "referee_foul_rate",
+            "referee_match_count",
+            "referee_encoded",
+            "ref_goal_tendency",
+            "mid_season_factor",
+        ]
+        data = data.drop(columns=columns_to_drop, errors="ignore")
+        # Import selected features for ensemble models
+        selected_features = data.columns.tolist()  # import_selected_features_ensemble()
+        all_features = [feature for feature in selected_features if feature != "is_draw"]
+
+        # Validate all features exist in data
+        missing_features = [feature for feature in all_features if feature not in data.columns]
+        if missing_features:
+            logger.info(
+                f"Missing required features: {missing_features}",
+                error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS,
+            )
+            raise ValueError(f"Missing required features: {missing_features}")
+        # Select features and add evaluator column
+        evaluation_data = data[selected_features].copy()
+        evaluation_data["is_draw"] = data["is_draw"]
+        # Convert numeric columns
+        evaluation_data = convert_numeric_columns(
+            data=evaluation_data, columns=None, drop_errors=True, fill_value=0.0, verbose=True
+        )
+        # Split into features and target
+        X_val = evaluation_data.drop(columns=["is_draw"])
+        y_val = evaluation_data["is_draw"]
+        # Final validation
+        logger.info(f"Ensemble evaluation set created with shape: {evaluation_data.shape}")
+        logger.info(f"Draw rate: {evaluation_data['is_draw'].mean():.2%}")
+        logger.info(f"Train set shape: {X_val.shape}")
+        logger.info(f"Test set shape: {y_val.shape}")
+
+        return X_val, y_val
+    except FileNotFoundError as e:
+        logger.info(f"Data file not found: {str(e)}", error_code=DataProcessingError.FILE_NOT_FOUND)
+        raise
+    except ValueError as e:
+        logger.info(
+            f"Data validation error: {str(e)}", error_code=DataProcessingError.INVALID_DATA_TYPE
+        )
+        raise
+    except Exception as e:
+        logger.info(
+            f"Error creating ensemble evaluation set: {str(e)}",
+            error_code=DataProcessingError.FILE_CORRUPTED,
+        )
+        raise
+
+def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> Union[dict, list]:
+    """Import selected features for XGBoost, CatBoost, and LightGBM models from JSON file.
+    This function loads the pre-selected features for each model type from the
+    selected_features_ensemble_new.json file. The features were selected based on
+    composite importance scores from feature selection analysis.
+    Args:
+        model_type (Optional[str]): Specific model type to return features for.
+            Options: 'xgb', 'cat', 'lgbm', 'all'. If None, returns all features.
+    Returns:
+        Union[dict, list]: If model_type is None, returns dictionary containing selected features
+            for each model type with keys:
+            - 'xgb': List of features for XGBoost
+            - 'cat': List of features for CatBoost
+            - 'lgbm': List of features for LightGBM
+        If model_type is 'all', returns list of features that are common to all models
+        If model_type is specified ('xgb', 'cat', 'lgbm'), returns list of features for that model type.
+    Raises:
+        FileNotFoundError: If the JSON file cannot be found
+        JSONDecodeError: If the JSON file is malformed
+        ValueError: If invalid model_type is provided
+        Exception: For other errors during file loading
+    """
+    try:
+        # Define path to JSON file
+        json_path = project_root / "src" / "utils" / "selected_features_ensemble_new.json"
+        # Load and parse JSON file
+        with open(json_path) as f:
+            features = json.load(f)
+        # Validate loaded data structure
+        if not all(key in features for key in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm"]):
+            raise ValueError("JSON file missing required model keys")
+        # Return specific model type if requested
+        if model_type is not None:
+            if model_type == "all":
+                common_features = features["all"]
+                logger.info("Returning features common to all models")
+                return common_features
+            elif model_type not in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm", "all"]:
+                raise ValueError(
+                    f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'mlp', 'pytorch', 'svm', 'all'"
+                )
+            logger.info(f"Returning selected features for model type: {model_type}")
+            return features[model_type]
+        logger.info("Successfully loaded all selected features from JSON file")
+        return features
+    except FileNotFoundError as e:
+        logger.info(
+            f"Selected features JSON file not found: {str(e)}",
+            error_code=DataProcessingError.FILE_NOT_FOUND,
+        )
+        raise
+    except json.JSONDecodeError as e:
+        logger.info(
+            f"Invalid JSON format in features file: {str(e)}",
+            error_code=DataProcessingError.FILE_CORRUPTED,
+        )
+        raise
+    except Exception as e:
+        logger.info(
+            f"Error loading selected features: {str(e)}",
+            error_code=DataProcessingError.FILE_CORRUPTED,
+        )
+        raise
+
 
 if __name__ == "__main__":
     # update_api_training_data_for_draws()
     # logger.info("Training data updated successfully")
     update_api_data_for_draws()
     logger.info("Prediction data updated successfully")
+    update_api_data_new_for_draws()
+    logger.info("New prediction data updated successfully")
 
-    # df, df2 = create_ensemble_evaluation_set()
-    # logger.info(f"Ensemble evaluation set created with columns: {df.columns.tolist()}")
+    df, df2 = create_evaluation_set_new()
+    logger.info(f"Ensemble evaluation set created with columns: {df.columns.tolist()}")

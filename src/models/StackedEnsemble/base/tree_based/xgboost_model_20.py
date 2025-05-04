@@ -31,10 +31,10 @@ logger = ExperimentLogger(experiment_name)
 
 # Import data at runtime to avoid global scope issues
 from src.models.ensemble.data_utils import prepare_data
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import (
-    import_selected_features_ensemble,
+    import_selected_features_ensemble_new,
     setup_mlflow_tracking,
 )
 
@@ -416,7 +416,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
         for metric_name, metric_value in metrics.items():
             trial.set_user_attr(metric_name, metric_value)
         
-        if score > 0.38 and score > best_score:
+        if score > 0.39 and score > best_score:
             log_to_mlflow(model, metrics, params, experiment_name, X_eval)
         return score
 
@@ -564,16 +564,16 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "early_stopping_rounds": 990,
-                "learning_rate": 0.078,
-                "max_depth": 10,
-                "min_child_weight": 540,
-                "colsample_bytree": 0.9450000000000001,
-                "subsample": 0.94,
-                "gamma": 2.2800000000000002,
-                "lambda": 10.41,
-                "alpha": 41.400000000000006,
-                "scale_pos_weight": 2.0700000000000003,
+                "early_stopping_rounds": 430,
+                "learning_rate": 0.153,
+                "max_depth": 5,
+                "min_child_weight": 430,
+                "colsample_bytree": 0.88,
+                "subsample": 0.905,
+                "gamma": 4.82,
+                "lambda": 11.72,
+                "alpha": 36.2,
+                "scale_pos_weight": 2.36,
                 "eval_metric": ['aucpr', 'error', 'logloss'],
             }
         )
@@ -596,8 +596,8 @@ def compute_permutation_importance(
     X_val: pd.DataFrame, 
     y_val: np.ndarray,
     threshold: float = 0.3,
-    n_repeats: int = 3,
-    number_of_features: int = 80,
+    n_repeats: int = 50,
+    number_of_features: int = 100,
 ) -> pd.DataFrame:
     """
     Compute permutation feature importance for a given metric and threshold.
@@ -644,6 +644,94 @@ def compute_permutation_importance(
     logger.info(df_importance.head(number_of_features).to_string(index=False))
     return df_importance
 
+def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+    """
+    Perform hyperparameter optimization with Optuna while tracking feature importances.
+    
+    Args:
+        X_train (pd.DataFrame): Training features
+        y_train (pd.Series): Training labels 
+        X_test (pd.DataFrame): Test features
+        y_test (pd.Series): Test labels
+        n_trials (int): Number of optimization trials
+        
+    Returns:
+        tuple: (best_params, feature_importance_df)
+    """
+    logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
+    
+    # Store feature importances across trials
+    feature_importances = []
+    hyperparameter_space = load_hyperparameter_space()
+    def objective(trial):
+        params = base_params.copy()
+        # Add hyperparameters from config with step size if provided
+        for param_name, param_config in hyperparameter_space.items():
+            if param_config["type"] == "float":
+                if "step" in param_config:
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        step=param_config["step"],
+                        log=param_config.get("log", False),
+                    )
+                else:
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        log=param_config.get("log", False),
+                    )
+            elif param_config["type"] == "int":
+                if "step" in param_config:
+                    params[param_name] = trial.suggest_int(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        step=param_config["step"],
+                    )
+                else:
+                    params[param_name] = trial.suggest_int(
+                        param_name, param_config["low"], param_config["high"]
+                    )
+
+        
+        # Train model
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
+        
+        # Store feature importances for this trial
+        importance_dict = dict(zip(X_train.columns, model.feature_importances_))
+        feature_importances.append(importance_dict)
+        
+        return metrics['precision']
+    
+    # Create and run study
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials)
+    
+    # Calculate average feature importance across all trials
+    avg_importances = {}
+    for feature in X_train.columns:
+        importance_values = [trial_imp[feature] for trial_imp in feature_importances]
+        avg_importances[feature] = np.mean(importance_values)
+    
+    # Create DataFrame and sort by importance
+    importance_df = pd.DataFrame({
+        'feature': list(avg_importances.keys()),
+        'importance': list(avg_importances.values())
+    })
+    importance_df = importance_df.sort_values('importance', ascending=False)
+    
+    # Get top 100 features
+    top_100_features = importance_df.head(100)
+    
+    logger.info("Top 100 features by average importance across trials:")
+    for idx, row in top_100_features.iterrows():
+        logger.info(f"{row['feature']}: {row['importance']:.4f}")
+    
+    return study.best_params, importance_df
+
 def main():
     """
     Main execution function.
@@ -655,12 +743,12 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
 
-        features = import_selected_features_ensemble(model_type="xgb")
+        features = import_selected_features_ensemble_new(model_type="xgb")
         logger.info(f"Features: {len(features)}")
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
-        # best_features, best_mask, best_score = select_best_feature_combination(X_train, y_train, X_test, y_test, X_eval, y_eval)
+
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
         logger.info(f"Testing data shape: {X_test.shape}")
@@ -669,23 +757,25 @@ def main():
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
 
+        # --- Hyperparameter Optimization with Feature Importance ---
+        # best_params, importance_df = hypertune_with_feature_importance(
+        #     X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=100
+        # )
+
         # Run Hyperparameter Optimization
         hypertune_xgboost(
             X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass DataFrames
             experiment_name
         )
-
-        # logger.info("Proceeding to train final model with precision target settings.")
         
-        best_model, best_metrics = train_with_precision_target(
-            X_train,
-            y_train,
-            X_test,
-            y_test,
-            X_eval,
-            y_eval,  # Pass DataFrames
-        )
-        logger.error("Hyperparameter optimization failed. Skipping precision target training.")
+        # best_model, best_metrics = train_with_precision_target(
+        #     X_train,
+        #     y_train,
+        #     X_test,
+        #     y_test,
+        #     X_eval,
+        #     y_eval,  # Pass DataFrames
+        # )
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")  # Add traceback

@@ -26,9 +26,12 @@ from src.utils.logger import ExperimentLogger
 experiment_name = "random_forest_soccer_prediction_30"
 logger = ExperimentLogger(experiment_name)
 
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
-from src.utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
+from src.utils.create_evaluation_set import (
+    import_selected_features_ensemble_new,
+    setup_mlflow_tracking,
+)
 
 mlrunds_dir = setup_mlflow_tracking(experiment_name)
 
@@ -500,7 +503,7 @@ def main():
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        features = import_selected_features_ensemble(model_type="rf")
+        features = import_selected_features_ensemble_new(model_type="rf")
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)

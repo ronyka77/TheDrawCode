@@ -8,6 +8,7 @@ import mlflow.sklearn
 import numpy as np
 import optuna
 import pandas as pd
+import shap
 
 # Use 80% of logical CPUs (32 threads * 0.8 = 25.6)
 NUM_THREADS = "25"  # Tailored for AMD 7950X3D, 64GB RAM, Windows 11
@@ -42,9 +43,9 @@ logger = ExperimentLogger(experiment_name=experiment_name)
 
 # Import shared utility functions
 from src.models.ensemble.data_utils import prepare_data
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
-from src.utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
+from src.utils.create_evaluation_set import import_selected_features_ensemble_new, setup_mlflow_tracking
 
 # Set random seeds for reproducibility
 random_seed = 19
@@ -527,17 +528,17 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()  # Inherits base MLP parameters
         # Specific parameters for this training run with advanced scheduling
         params.update({
-            "learning_rate": 0.0009354890710342875,
-            "hidden_layers": 6,
-            "neurons_per_layer": 652,
-            "dropout_rate": 0.626,
+            "learning_rate": 0.0020754457741266686,
+            "hidden_layers": 5,
+            "neurons_per_layer": 498,
+            "dropout_rate": 0.6769999999999999,
             "activation": "tanh",
-            "l1_regularization": 0.0016533944910447397,
-            "l2_regularization": 4.494691574496788e-05,
-            "batch_size": 878,
-            "epochs": 69,
-            "patience": 45,
-            "class_weight_multiplier": 2.5,
+            "l1_regularization": 4.1670396390433964e-06,
+            "l2_regularization": 0.0002820669492345647,
+            "batch_size": 4035,
+            "epochs": 159,
+            "patience": 18,
+            "class_weight_multiplier": 1.88,
         })
         X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(X_train, X_test, X_eval)
         # Train final model with best parameters
@@ -558,7 +559,7 @@ def compute_permutation_importance(
     X_val_scaled: np.ndarray,
     y_val: np.ndarray,
     threshold: float = 0.3,
-    n_repeats: int = 3,
+    n_repeats: int = 1,
     number_of_features: int = 100,
 ) -> pd.DataFrame:
     """
@@ -611,6 +612,108 @@ def compute_permutation_importance(
     logger.info(df_importance.head(number_of_features).to_string(index=False))
     return df_importance
 
+def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+    """
+    Perform hyperparameter optimization with Optuna while tracking feature importances.
+    After optimization, compute SHAP feature importances for the best model.
+    Args:
+        X_train (pd.DataFrame): Training features
+        y_train (pd.Series): Training labels 
+        X_test (pd.DataFrame): Test features
+        y_test (pd.Series): Test labels
+        n_trials (int): Number of optimization trials
+    Returns:
+        tuple: (best_params, permutation_importance_df, shap_importance_df)
+    """
+    logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
+    # Store feature importances across trials (for permutation importance)
+    feature_importances_trials = []
+    hyperparameter_space = load_hyperparameter_space()
+    X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(X_train, X_test, X_eval)
+    best_model = None
+    best_score = -float('inf')
+    best_metrics = None
+    best_wrapped_model = None
+    def objective(trial):
+        nonlocal best_model, best_score, best_metrics, best_wrapped_model
+        params = base_params.copy()
+        # Add hyperparameters from config with step size if provided
+        for param_name, param_config in hyperparameter_space.items():
+            if param_config["type"] == "float":
+                if "step" in param_config:
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        step=param_config["step"],
+                        log=param_config.get("log", False),
+                    )
+                else:
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        log=param_config.get("log", False),
+                    )
+            elif param_config["type"] == "int":
+                if "step" in param_config:
+                    params[param_name] = trial.suggest_int(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        step=param_config["step"],
+                    )
+                else:
+                    params[param_name] = trial.suggest_int(
+                        param_name, param_config["low"], param_config["high"]
+                    )
+        # Train model
+        model, metrics, wrapped_model = train_model(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, params)
+        # Track best model
+        precision = metrics.get('precision', 0.0)
+        recall = metrics.get('recall', 0.0)
+        score = precision if recall >= min_recall else 0.0
+        if score > best_score:
+            best_score = score
+            best_model = model
+            best_metrics = metrics
+            best_wrapped_model = wrapped_model
+        # Compute permutation importance for this trial
+        importances = []
+        feature_names = X_eval.columns.tolist()
+        y_val_np = y_eval.values if hasattr(y_eval, 'values') else y_eval
+        probs = wrapped_model.predict_proba(X_eval_scaled)[:, 1]
+        preds = (probs >= 0.5).astype(int)
+        baseline = np.sum((y_val_np == 1) & (preds == 1)) / (np.sum(preds == 1))
+        for idx, feat in enumerate(feature_names):
+            X_shuffled = X_eval_scaled.copy()
+            X_shuffled[:, idx] = np.random.permutation(X_shuffled[:, idx])
+            probs_shuffled = wrapped_model.predict_proba(X_shuffled)[:, 1]
+            preds_shuffled = (probs_shuffled >= 0.5).astype(int)
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            drop = baseline - precision
+            importances.append(drop)
+        feature_importances_trials.append(importances)
+        return score
+    # Create and run study
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials)
+    
+    # Aggregate importances
+    importances_array = np.array(feature_importances_trials)  # shape: (n_trials, n_features)
+    mean_importances = np.mean(importances_array, axis=0)
+    importance_df = pd.DataFrame({
+        'feature': X_eval.columns,
+        'mean_importance': mean_importances
+    }).sort_values('mean_importance', ascending=False)
+    logger.info('Top features by average permutation importance across trials:')
+    for idx, row in importance_df.head(100).iterrows():
+        logger.info(f'  {row.feature}: {row.mean_importance:.6f}')
+    # You can return this DataFrame or the top N features as a list:
+    top_features = importance_df.head(100)['feature'].tolist()
+    
+    return study.best_params, importance_df
+
 
 def main():
     """
@@ -621,7 +724,7 @@ def main():
         global X_train, y_train, X_test, y_test, X_eval, y_eval
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        features = import_selected_features_ensemble(model_type="mlp")
+        features = import_selected_features_ensemble_new(model_type="all")
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
@@ -630,12 +733,17 @@ def main():
         logger.info(f"Evaluation data shape: {X_eval.shape}")
         logger.info(f"Positive class ratio (Train): {np.mean(y_train):.3f}")
 
-        best_params, metrics = hypertune_mlp(experiment_name)
-        logger.info(f"Hypertuning completed with hyperparameters: {best_params}")
-        logger.info(f"Hypertuning metrics: {metrics}")
+        # --- Hyperparameter Optimization with Feature Importance ---
+        best_params, importance_df = hypertune_with_feature_importance(
+            X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50
+        )
 
-        # Optional seed-based fine-tuning for improved precision
-        train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        # best_params, metrics = hypertune_mlp(experiment_name)
+        # logger.info(f"Hypertuning completed with hyperparameters: {best_params}")
+        # logger.info(f"Hypertuning metrics: {metrics}")
+
+        # # Optional seed-based fine-tuning for improved precision
+        # train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

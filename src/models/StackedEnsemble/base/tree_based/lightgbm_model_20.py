@@ -18,6 +18,8 @@ import mlflow
 import numpy as np
 import optuna
 import pandas as pd
+from sklearn.feature_selection import RFECV
+from sklearn.model_selection import StratifiedKFold
 
 from src.utils.logger import ExperimentLogger
 
@@ -26,10 +28,10 @@ logger = ExperimentLogger(experiment_name)
 
 # Import shared utility functions
 from src.models.ensemble.data_utils import prepare_data
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import (
-    import_selected_features_ensemble,
+    import_selected_features_ensemble_new,
     setup_mlflow_tracking,
 )
 
@@ -226,7 +228,7 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
 
-            if score > 0.40 and score > best_score:
+            if score > 0.39 and score > best_score:
                 log_to_mlflow(model, metrics, params, experiment_name)
             return score
 
@@ -449,19 +451,19 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "learning_rate": 0.057499999999999996,
-                "num_leaves": 175,
-                "max_depth": 7,
-                "min_child_samples": 590,
-                "feature_fraction": 0.69,
-                "bagging_fraction": 0.64,
-                "bagging_freq": 10,
-                "reg_alpha": 15.4,
-                "reg_lambda": 11.4,
-                "min_split_gain": 0.16,
+                "learning_rate": 0.10250000000000001,
+                "num_leaves": 120,
+                "max_depth": 5,
+                "min_child_samples": 440,
+                "feature_fraction": 0.7,
+                "bagging_fraction": 0.625,
+                "bagging_freq": 15,
+                "reg_alpha": 12.0,
+                "reg_lambda": 9.5,
+                "min_split_gain": 0.13,
                 "path_smooth": 0.155,
-                "cat_smooth": 23.3,
-                "max_bin": 290,
+                "cat_smooth": 32.5,
+                "max_bin": 660,
                 "device": "cpu",
                 "metric": ["aucpr", "binary_logloss"],
                 "n_jobs": 8,
@@ -489,7 +491,7 @@ def compute_permutation_importance(
     X_val: pd.DataFrame, 
     y_val: np.ndarray,
     threshold: float = 0.3,
-    n_repeats: int = 3,
+    n_repeats: int = 50,
     number_of_features: int = 100,
 ) -> pd.DataFrame:
     """
@@ -537,6 +539,132 @@ def compute_permutation_importance(
     logger.info(df_importance.head(number_of_features).to_string(index=False))
     return df_importance
 
+def select_features_rfecv(X, y, logger, min_features=100, step=1, scoring='roc_auc', random_state=19):
+    """
+    Perform RFECV-based feature selection using LightGBM.
+    Args:
+        X (pd.DataFrame): Feature matrix
+        y (pd.Series or np.ndarray): Target vector
+        logger: Logger instance
+        min_features (int): Minimum number of features to select
+        step (int): Number of features to remove at each iteration
+        scoring (str): Scoring metric for cross-validation
+        random_state (int): Random seed for reproducibility
+    Returns:
+        tuple: (List[str], pd.DataFrame)
+    """
+    logger.info(f"Starting RFECV feature selection with min_features={min_features}, step={step}, scoring={scoring}")
+    estimator = lgb.LGBMClassifier(random_state=random_state, n_jobs=8, verbose=-1)
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    selector = RFECV(
+        estimator=estimator,
+        step=step,
+        cv=cv,
+        scoring=scoring,
+        min_features_to_select=min_features,
+        n_jobs=-1,
+        verbose=2
+    )
+    selector.fit(X, y)
+    selected_features = X.columns[selector.support_].tolist()
+    importances = selector.estimator_.feature_importances_
+    feature_importance_df = pd.DataFrame({
+        'feature': selected_features,
+        'importance': importances
+    }).sort_values('importance', ascending=False)
+    logger.info(f"RFECV selected {len(selected_features)} features:")
+    for feat, imp in zip(feature_importance_df['feature'], feature_importance_df['importance']):
+        logger.info(f"  - {feat}: {imp}")
+    return selected_features, feature_importance_df
+
+def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+    """
+    Perform hyperparameter optimization with Optuna while tracking feature importances.
+    
+    Args:
+        X_train (pd.DataFrame): Training features
+        y_train (pd.Series): Training labels 
+        X_test (pd.DataFrame): Test features
+        y_test (pd.Series): Test labels
+        n_trials (int): Number of optimization trials
+        
+    Returns:
+        tuple: (best_params, feature_importance_df)
+    """
+    logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
+    
+    # Store feature importances across trials
+    feature_importances = []
+    hyperparameter_space = load_hyperparameter_space()
+    def objective(trial):
+        params = base_params.copy()
+        # Add hyperparameters from config with step size if provided
+        for param_name, param_config in hyperparameter_space.items():
+            if param_config["type"] == "float":
+                if "step" in param_config:
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        step=param_config["step"],
+                        log=param_config.get("log", False),
+                    )
+                else:
+                    params[param_name] = trial.suggest_float(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        log=param_config.get("log", False),
+                    )
+            elif param_config["type"] == "int":
+                if "step" in param_config:
+                    params[param_name] = trial.suggest_int(
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        step=param_config["step"],
+                    )
+                else:
+                    params[param_name] = trial.suggest_int(
+                        param_name, param_config["low"], param_config["high"]
+                    )
+
+        
+        # Train model
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
+        
+        # Store feature importances for this trial
+        importance_dict = dict(zip(X_train.columns, model.feature_importances_))
+        feature_importances.append(importance_dict)
+        
+        return metrics['precision']
+    
+    # Create and run study
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials)
+    
+    # Calculate average feature importance across all trials
+    avg_importances = {}
+    for feature in X_train.columns:
+        importance_values = [trial_imp[feature] for trial_imp in feature_importances]
+        avg_importances[feature] = np.mean(importance_values)
+    
+    # Create DataFrame and sort by importance
+    importance_df = pd.DataFrame({
+        'feature': list(avg_importances.keys()),
+        'importance': list(avg_importances.values())
+    })
+    importance_df = importance_df.sort_values('importance', ascending=False)
+    
+    # Get top 100 features
+    top_100_features = importance_df.head(100)
+    
+    logger.info("Top 100 features by average importance across trials:")
+    for idx, row in top_100_features.iterrows():
+        logger.info(f"{row['feature']}: {row['importance']:.4f}")
+    
+    return study.best_params, importance_df
+
 
 def main():
     """
@@ -549,7 +677,7 @@ def main():
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        features = import_selected_features_ensemble(model_type="lgbm")
+        features = import_selected_features_ensemble_new(model_type="lgbm")
         
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
@@ -563,14 +691,23 @@ def main():
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
 
+        # --- Feature Selection with RFECV ---
+        # selected_features, feature_importance_df = select_features_rfecv(X_train, y_train, logger, min_features=100, step=1, scoring='roc_auc', random_state=SEED)
+        # print(feature_importance_df)
+
+        # --- Hyperparameter Optimization with Feature Importance ---
+        # best_params, importance_df = hypertune_with_feature_importance(
+        #     X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=100
+        # )
+
         logger.info("Starting hyperparameter optimization run")
         current_params, current_metrics = hypertune_lightgbm(experiment_name)
         logger.info(f"Run completed with parameters: {current_params}")
 
         # Train model with precision target
-        best_model, best_metrics = train_with_precision_target(
-            X_train, y_train, X_test, y_test, X_eval, y_eval
-        )
+        # best_model, best_metrics = train_with_precision_target(
+        #     X_train, y_train, X_test, y_test, X_eval, y_eval
+        # )
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

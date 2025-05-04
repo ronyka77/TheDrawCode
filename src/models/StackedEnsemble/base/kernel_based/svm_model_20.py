@@ -27,10 +27,10 @@ from sklearn.preprocessing import StandardScaler  # Or RobustScaler
 from sklearn.svm import SVC
 
 from src.models.ensemble.data_utils import prepare_data
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import (
-    import_selected_features_ensemble,
+    import_selected_features_ensemble_new,
     setup_mlflow_tracking,
 )
 
@@ -197,7 +197,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
             f"Trial {trial.number}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f}, Thresh={threshold:.3f}) Params={trial.params}"
         )
         # Log to MLflow
-        if score > 0.37 and score > best_score:
+        if score > 0.35 and score > best_score:
             input_example = X_eval[:5]
             log_to_mlflow_svm(model, metrics, params, scaler, input_example)
         return score
@@ -484,11 +484,6 @@ def train_with_precision_target_svm(
             compute_permutation_importance(
                 model, X_eval, X_eval_scaled, y_eval, threshold=best_threshold, n_repeats=3, number_of_features=100
             )
-            # --- Log to MLflow ---
-            input_example_data = X_eval_scaled[:5]
-            # log_to_mlflow_svm(
-            #     model, metrics, fixed_params, scaler, input_example_data
-            # )
             return model, metrics
 
     except Exception as e:
@@ -568,11 +563,11 @@ if __name__ == "__main__":
         # Select features
         try:
             # Attempt to load features specific to SVM if defined
-            features = import_selected_features_ensemble(model_type="svm")
+            features = import_selected_features_ensemble_new(model_type="svm")
             logger.info(f"Using 'svm' specific feature set with {len(features)} features.")
         except (KeyError, FileNotFoundError):
             logger.warning("SVM specific features not found. Falling back to 'all' features.")
-            features = import_selected_features_ensemble(model_type="all")
+            features = import_selected_features_ensemble_new(model_type="all")
             if not features:
                 logger.error("Failed to load any features. Exiting.")
                 sys.exit(1) # Or handle differently

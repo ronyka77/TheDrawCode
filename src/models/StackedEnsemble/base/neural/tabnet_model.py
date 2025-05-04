@@ -19,7 +19,7 @@ from sklearn.metrics import precision_score, recall_score
 # from sklearn.preprocessing import QuantileTransformer
 from sklearn.utils.multiclass import type_of_target
 from torch.amp import GradScaler
-from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
 
 # Logger and shared utilities
 from src.utils.logger import ExperimentLogger
@@ -28,9 +28,12 @@ experiment_name = "tabnet_soccer_prediction"
 logger = ExperimentLogger(experiment_name=experiment_name)
 
 # Import shared utility functions
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
-from src.utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
+from src.utils.create_evaluation_set import (
+    import_selected_features_ensemble_new,
+    setup_mlflow_tracking,
+)
 
 # Filter specific TabNet weight-related warnings
 warnings.filterwarnings(
@@ -61,11 +64,11 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "8"
-os.environ["MKL_NUM_THREADS"] = "8"
-os.environ["OPENBLAS_NUM_THREADS"] = "8"
-os.environ["NUMEXPR_NUM_THREADS"] = "8"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "8"
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["NUMEXPR_NUM_THREADS"] = "4"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 
 # PyTorch specific reproducibility settings and optimizations
 torch.manual_seed(SEED)
@@ -475,6 +478,7 @@ def optimize_hyperparameters(
     def objective(trial):
         nonlocal best_score, best_params
         current_params = {}
+        current_params.update(base_params)
         try:
             # --- Sample other parameters ---
             # Sample scheduler type needed for conditional params
@@ -486,7 +490,6 @@ def optimize_hyperparameters(
                 # Skip params already handled or handled conditionally
                 if param_name in ["fit_weights", "scheduler_type"]:
                     continue
-
                 # Conditional suggestion for scheduler params
                 is_relevant_scheduler_param = False
                 if scheduler_type == "plateau" and param_name in ["scheduler_patience", "scheduler_factor", "scheduler_min_lr"]:
@@ -498,7 +501,6 @@ def optimize_hyperparameters(
                 elif param_name not in ["scheduler_patience", "scheduler_factor", "scheduler_min_lr", "scheduler_t_max", "scheduler_div_factor"]:
                     # Not a scheduler-specific param, suggest normally
                     is_relevant_scheduler_param = True
-
                 if is_relevant_scheduler_param:
                     # Suggest parameter
                     if param_config["type"] == "float":
@@ -524,8 +526,19 @@ def optimize_hyperparameters(
             model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, current_params)
             # Store model reference for callback but don't try to serialize it
             setattr(trial, 'model', model)  # noqa: B010
-            trial.set_user_attr('metrics', metrics)
-            trial.set_user_attr('params', current_params)
+            # Log metrics to trial attributes
+            for metric_name, metric_value in metrics.items():
+                trial.set_user_attr(metric_name, metric_value)
+            # Convert params to JSON serializable format
+            serializable_params = {}
+            for k, v in current_params.items():
+                if isinstance(v, np.generic):
+                    serializable_params[k] = v.item()
+                elif isinstance(v, (int, float, str, bool)) or v is None:
+                    serializable_params[k] = v
+                else:
+                    serializable_params[k] = str(v)
+            trial.set_user_attr('params', serializable_params)
             # Scoring logic
             recall = metrics.get("recall", 0.0)
             precision = metrics.get("precision", 0.0)
@@ -548,7 +561,7 @@ def optimize_hyperparameters(
                 best_params = current_params.copy()
                 logger.info(f"  >>> New best score in this run: {best_score:.4f} (Trial {trial.number})")
 
-            if score >= 0.36:
+            if score >= 0.35:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
                 X_eval_orig_df = X_eval.copy()
                 log_to_mlflow(model, metrics, current_params, experiment_name, X_eval_orig_df)
@@ -614,7 +627,7 @@ def optimize_hyperparameters(
     )
     for _ in range(num_batches):
         try:
-            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)], n_jobs=3)
+            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)])
         except KeyboardInterrupt:
             logger.warning("Optimization interrupted by user.")
             break
@@ -897,6 +910,106 @@ def compute_permutation_importance(
         logger.error(traceback.format_exc())
         raise
 
+def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+    """
+    Perform hyperparameter optimization with Optuna while tracking feature importances.
+    
+    Args:
+        X_train (pd.DataFrame): Training features
+        y_train (pd.Series): Training labels 
+        X_test (pd.DataFrame): Test features
+        y_test (pd.Series): Test labels
+        n_trials (int): Number of optimization trials
+        
+    Returns:
+        tuple: (best_params, feature_importance_df)
+    """
+    logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
+    
+    # Store feature importances across trials
+    feature_importances = []
+    
+    hyperparameter_space = load_hyperparameter_space()
+    def objective(trial):
+        current_params = {}
+        current_params.update(base_params)
+        # Sample scheduler type needed for conditional params
+        scheduler_type = trial.suggest_categorical("scheduler_type", hyperparameter_space["scheduler_type"]["choices"])
+        current_params["scheduler_type"] = scheduler_type
+
+        # Iterate over the rest of the hyperparameter space
+        for param_name, param_config in hyperparameter_space.items():
+            # Skip params already handled or handled conditionally
+            if param_name in ["fit_weights", "scheduler_type"]:
+                continue
+            # Conditional suggestion for scheduler params
+            is_relevant_scheduler_param = False
+            if scheduler_type == "plateau" and param_name in ["scheduler_patience", "scheduler_factor", "scheduler_min_lr"]:
+                is_relevant_scheduler_param = True
+            elif scheduler_type == "cosine" and param_name in ["scheduler_t_max", "scheduler_min_lr"]:
+                is_relevant_scheduler_param = True
+            elif scheduler_type == "onecycle" and param_name == "scheduler_div_factor":
+                is_relevant_scheduler_param = True
+            elif param_name not in ["scheduler_patience", "scheduler_factor", "scheduler_min_lr", "scheduler_t_max", "scheduler_div_factor"]:
+                # Not a scheduler-specific param, suggest normally
+                is_relevant_scheduler_param = True
+
+            if is_relevant_scheduler_param:
+                # Suggest parameter
+                if param_config["type"] == "float":
+                    if "step" in param_config:
+                        current_params[param_name] = trial.suggest_float(param_name, param_config["low"], param_config["high"], step=param_config["step"], log=param_config.get("log", False))
+                    else:
+                        current_params[param_name] = trial.suggest_float(param_name, param_config["low"], param_config["high"], log=param_config.get("log", False))
+                elif param_config["type"] == "int":
+                    if "step" in param_config:
+                        current_params[param_name] = trial.suggest_int(param_name, param_config["low"], param_config["high"], step=param_config["step"])
+                    else:
+                        current_params[param_name] = trial.suggest_int(param_name, param_config["low"], param_config["high"])
+                elif param_config["type"] == "categorical":
+                    # Only suggest if not scheduler_type (already handled)
+                    if param_name != "scheduler_type":
+                        choices = param_config.get("choices", [])
+                        if isinstance(choices, list) and choices:
+                            current_params[param_name] = trial.suggest_categorical(param_name, choices)
+                        else:
+                            logger.warning(f"Skipping categorical param '{param_name}' due to invalid/empty choices.")
+
+        # Train model and get metrics
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, current_params)
+        
+        # Store feature importances for this trial
+        importance_dict = dict(zip(X_train.columns, model.feature_importances_))
+        feature_importances.append(importance_dict)
+        
+        return metrics['precision']
+    
+    # Create and run study
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials, n_jobs=4)
+    
+    # Calculate average feature importance across all trials
+    avg_importances = {}
+    for feature in X_train.columns:
+        importance_values = [trial_imp[feature] for trial_imp in feature_importances]
+        avg_importances[feature] = np.mean(importance_values)
+    
+    # Create DataFrame and sort by importance
+    importance_df = pd.DataFrame({
+        'feature': list(avg_importances.keys()),
+        'importance': list(avg_importances.values())
+    })
+    importance_df = importance_df.sort_values('importance', ascending=False)
+    
+    # Get top 100 features
+    top_100_features = importance_df.head(100)
+    
+    logger.info("Top 100 features by average importance across trials:")
+    for idx, row in top_100_features.iterrows():
+        logger.info(f"{row['feature']}: {row['importance']:.4f}")
+    
+    return study.best_params, importance_df
+
 
 def main():
     """
@@ -913,10 +1026,10 @@ def main():
         X_eval_orig_df = X_eval_orig_df.copy() # Store original for signature
 
         # Select features
-        features = import_selected_features_ensemble(model_type="tabnet")
+        features = import_selected_features_ensemble_new(model_type="tabnet")
         if not features:
             logger.warning("No features selected. Using all numeric features.")
-            features = import_selected_features_ensemble("all")
+            features = import_selected_features_ensemble_new("all")
 
         X_train = X_train_orig[features]
         X_test = X_test_orig[features]
@@ -935,6 +1048,11 @@ def main():
         logger.info(f"Data shapes: Train={X_train.shape}, Test={X_test.shape}, Eval={X_eval_df.shape}")
         logger.info(f"Positive ratios: Train={y_train.mean():.3f}, Test={y_test.mean():.3f}, Eval={y_eval.mean():.3f}")
 
+        # --- Hyperparameter Optimization with Feature Importance ---
+        # best_params, importance_df = hypertune_with_feature_importance(
+        #     X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50
+        # )
+
         # === Run Hypertuning ===
         best_params_final, best_metrics_final = hypertune_tabnet(
             experiment_name,
@@ -943,7 +1061,7 @@ def main():
             X_eval, y_eval 
         )
 
-        train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        # train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

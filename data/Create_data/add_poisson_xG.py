@@ -306,8 +306,9 @@ class PoissonXGCalculator:
             "prediction": ("./data_files/model_data_prediction_newPoisson.xlsx"),
             "merged": ("./data_files/merged_data_prediction_newPoisson.csv"),
             "api_prediction": ("./data_files/api_football_prediction_newPoisson.xlsx"),
+            "api_prediction_new": ("./data_files/api_football_prediction_new_newPoisson.xlsx"),
             "api_training": ("./data_files/api_football_training_newPoisson.xlsx"),
-            "api_future": ("./data_files/api_football_future_newPoisson.xlsx"),
+            "api_future": ("./data_files/api_football_future_newPoisson.xlsx")
         }
 
         output_path = datasets[type]
@@ -377,6 +378,7 @@ class PoissonXGCalculator:
             # prediction_path = './data_files/PowerBI/model_data_prediction.csv'
             # merged_path = './data_files/PowerBI/merged_data_prediction.csv'
             api_prediction_path = "./data_files/PowerBI/api_data_prediction.xlsx"
+            api_prediction_new_path = "./data_files/PowerBI/api_data_prediction_new.xlsx"
             api_training_path = "./data_files/PowerBI/api_data_training.xlsx"
             api_future_path = "./data_files/PowerBI/api_football_future.xlsx"
 
@@ -394,6 +396,9 @@ class PoissonXGCalculator:
 
             self.logger.info(f"Loading future data from {api_future_path}")
             api_future_data = load_excel_with_calamine(api_future_path, self.logger)
+
+            self.logger.info(f"Loading prediction data from {api_prediction_new_path}")
+            api_prediction_data_new = load_excel_with_calamine(api_prediction_new_path, self.logger)
 
             api_training_data = api_training_data.rename(
                 columns={
@@ -422,6 +427,16 @@ class PoissonXGCalculator:
                     "away_points_cum": "Away_points_cum",
                 }
             )
+            api_prediction_data_new = api_prediction_data_new.rename(
+                columns={
+                    "home_possession_mean": "Home_possession_mean",
+                    "home_shot_on_target_mean": "Home_shot_on_target_mean",
+                    "away_goal_difference_cum": "Away_goal_difference_cum",
+                    "home_points_cum": "Home_points_cum",
+                    "away_points_cum": "Away_points_cum",
+                }
+            )
+            
 
             # self.add_poisson_xG(training_data, 'training')
             # self.add_poisson_xG(training_data_new, 'training_new')
@@ -430,7 +445,7 @@ class PoissonXGCalculator:
             self.add_poisson_xG(api_training_data, api_training_data, "api_training")
             self.add_poisson_xG(api_prediction_data, api_prediction_data, "api_prediction")
             self.add_poisson_xG(api_future_data, api_future_data, "api_future")
-
+            self.add_poisson_xG(api_prediction_data_new, api_prediction_data_new, "api_prediction_new")
         except Exception as e:
             self.logger.error(f"Error in data processing: {str(e)}")
             raise

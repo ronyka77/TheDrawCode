@@ -26,6 +26,7 @@ class ELOCalculator:
         # self.training_data_path_new = './data_files/model_data_training_withPoisson.xlsx'
         # self.prediction_data_path = './data_files/model_data_prediction_newPoisson.xlsx'
         self.api_prediction_data_path = "./data_files/api_football_prediction_newPoisson.xlsx"
+        self.api_prediction_data_path_new = "./data_files/api_football_prediction_new_newPoisson.xlsx"
         self.api_training_data_path = "./data_files/api_football_training_newPoisson.xlsx"
 
         # Define export paths
@@ -33,6 +34,7 @@ class ELOCalculator:
         # self.training_export_path_new = './data_files/model_data_training_withPoisson.xlsx'
         # self.prediction_export_path = './data_files/model_data_prediction_newPoisson.xlsx'
         self.api_prediction_export_path = "./data_files/api_football_prediction_newPoisson.xlsx"
+        self.api_prediction_export_path_new = "./data_files/api_football_prediction_new_newPoisson.xlsx"
         self.api_training_export_path = "./data_files/api_football_training_newPoisson.xlsx"
 
         # ELO settings
@@ -298,6 +300,23 @@ class ELOCalculator:
             )
             self.save_data_to_excel(
                 api_prediction_copy, self.api_prediction_export_path, "API prediction data"
+            )
+            self.logger.info("API prediction data processed and saved")
+
+            # Process API new data
+            self.logger.info("Processing API prediction data...")
+            api_prediction_data_new = load_excel_with_calamine(self.api_prediction_data_path_new)
+            api_prediction_copy_new = api_prediction_data_new.copy()
+            api_prediction_data_new = convert_numeric_columns(api_prediction_data_new)
+            api_prediction_data_new = api_prediction_data_new.sort_values("Date")
+            api_prediction_data_new = self.add_elo_scores(api_prediction_data_new)
+            api_prediction_copy_new = api_prediction_copy_new.merge(
+                api_prediction_data_new[["fixture_id", "home_team_elo", "away_team_elo"]],
+                on="fixture_id",
+                how="left",
+            )
+            self.save_data_to_excel(
+                api_prediction_copy_new, self.api_prediction_export_path_new, "API prediction data"
             )
             self.logger.info("API prediction data processed and saved")
 

@@ -47,6 +47,7 @@ class ApiFootball:
         os.makedirs(self.data_dir, exist_ok=True)
         # MongoDB setup
         self.mongo_uri = os.getenv("MONGODB_URI")
+        print(f"MongoDB URI: {self.mongo_uri}")
         self.client = pymongo.MongoClient(self.mongo_uri)
         self.db = self.client["api-football"]  # Database name
         self.fixtures_collection = self.db["fixtures"]  # Collection name
@@ -1123,11 +1124,11 @@ def main():
 
     # api_football.get_teams_for_leagues()
 
-    # api_football.update_venues()
+    api_football.update_venues()
 
-    # api_football.process_and_save_venues()
+    api_football.process_and_save_venues()
 
-    api_football.get_team_stats_for_fixtures()
+    # api_football.get_team_stats_for_fixtures()
     # api_football.delete_team_stats_without_league()
 
 if __name__ == "__main__":
