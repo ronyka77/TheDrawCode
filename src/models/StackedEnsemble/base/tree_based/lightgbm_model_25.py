@@ -59,9 +59,9 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "8"
-os.environ["MKL_NUM_THREADS"] = "8"
-os.environ["OPENBLAS_NUM_THREADS"] = "8"
+os.environ["OMP_NUM_THREADS"] = "12"
+os.environ["MKL_NUM_THREADS"] = "12"
+os.environ["OPENBLAS_NUM_THREADS"] = "12"
 
 
 def load_hyperparameter_space():
@@ -228,7 +228,7 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
 
-            if score > 0.39 and score > best_score:
+            if score > 0.37 and score > best_score:
                 log_to_mlflow(model, metrics, params, experiment_name)
             return score
 
@@ -701,7 +701,7 @@ def main():
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        features = import_selected_features_ensemble_new(model_type="lgbm")
+        features = import_selected_features_ensemble_new(model_type="all")
         
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)

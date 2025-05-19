@@ -74,7 +74,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.target_precision = target_precision # For dynamic weights
 
         # --- MLflow Run IDs for Base Models ---
-        self.xgb_run_id = "63415f9a38fd4ee9bd8ae6f050b141a9"
+        self.xgb_run_id = "1baad3c108454a5e833ae4abbf54e4b5"
         self.lgb_run_id = "35a6569e5a4b4bef92e621f9e6ae15f7"  
         self.tabnet_run_id = "eb1a34d83d7142318c788dea983f8c48" 
         self.extra_run_id = "ecce146ecdaf41a08e14af277f06d304" 

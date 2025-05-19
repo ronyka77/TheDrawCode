@@ -133,3 +133,18 @@ prompt_requirement_refinement.txt
 prompt_refinement.txt
 The Prompt Stack That Changed How I Work.txt
 cursor_settings.md
+data/Create_data/api-football/api_test.py
+data/Create_data/api-football/api_test.json
+data/Create_data/postgre_table_create.py
+memory-bank/
+src/models/StackedEnsemble/base/kernel_based/svm_model_40.py
+src/models/StackedEnsemble/base/neural/tabnet_model_40.py
+src/models/StackedEnsemble/base/neural/mlp_model_40.py
+src/models/StackedEnsemble/base/neural/pytorch_hypertuner_40.py
+src/models/StackedEnsemble/base/neural/specialized_fnn_integration_40.py
+src/models/StackedEnsemble/base/tree_based/feature_selection/random_forest_boruta.py
+src/models/StackedEnsemble/base/tree_based/feature_selection/tabnet_boruta.py
+src/models/StackedEnsemble/base/tree_based/xgboost_model_40.py
+base_rule.txt
+feature_importance.csv
+prompt_implementation.txt

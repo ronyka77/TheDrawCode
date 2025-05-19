@@ -173,11 +173,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
                     param_name, param_config["choices"]
                 )
             # --- Preprocessing --- (Scale the data)
-        # X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(
-        #     X_train, X_test, X_eval
-        # )
         # Train model and get metrics
-        # Pass only the suggested params, train_model_svm combines with base_params
         model, metrics = train_model_svm(
             X_train_scaled, y_train, X_eval_scaled, y_eval, params
         )
@@ -197,7 +193,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
             f"Trial {trial.number}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f}, Thresh={threshold:.3f}) Params={trial.params}"
         )
         # Log to MLflow
-        if score > 0.35 and score > best_score:
+        if score > 0.34 and score > best_score:
             input_example = X_eval[:5]
             log_to_mlflow_svm(model, metrics, params, scaler, input_example)
         return score

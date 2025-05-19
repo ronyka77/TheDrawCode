@@ -551,7 +551,8 @@ class ApiFootball:
                     'goalkeeper_saves': f'{prefix}_goalkeeper_saves',
                     'total_passes': f'{prefix}_total_passes',
                     'passes_accurate': f'{prefix}_passes_accurate',
-                    'passes_%': f'{prefix}_passes_percent'
+                    'passes_%': f'{prefix}_passes_percent',
+                    'expected_goals': f'{prefix}_expected_goals'
                 }
                 result = {}
                 for k, v in mapping.items():
@@ -985,11 +986,11 @@ def main():
         return
     logger = ExperimentLogger("get_fixtures")
     api_football = ApiFootball(api_key, logger)
-    api_football.get_fixtures_for_leagues()
+    # api_football.get_fixtures_for_leagues()
     api_football.get_missing_statistics()
-    api_football.delete_old_unscored_fixtures()
-    api_football.get_fixture_ids_without_predictions()
-    api_football.get_team_stats_for_fixtures()
-    api_football.update_venues()
+    # api_football.delete_old_unscored_fixtures()
+    # api_football.get_fixture_ids_without_predictions()
+    # api_football.get_team_stats_for_fixtures()
+    # api_football.update_venues()
 if __name__ == "__main__":
     main()
