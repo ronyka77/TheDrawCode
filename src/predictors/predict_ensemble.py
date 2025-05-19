@@ -379,38 +379,26 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        "97207cdaab54477fa267d8cd29ce35e9",
         "39f18a98d0004d48afd4da01f89be180",
         "e837c4a1541844c0a5ab903198426694",
         "ec025d201348415bbb123974b7f1cc02",
         "c3a0c7957b6043b1a6f221fb0b00b4ec",
-        "d379cfd9d2214c238a44cf8a70f11676",
+        # "d379cfd9d2214c238a44cf8a70f11676",
         "d133e4c5c37c4847923ea6b844f4a80f",
-        "17134f409cd84a7e914551cc8e6826b6",
-        "fe7f17cdbf7e4713a2cb3669d835918c"
+        "611952a2924943c5b40e83eb632673e9",
+        "7020f8ecd9f24c18a28f2349f634b26c",
+        "19d1e9ab434144cd96d4f73e79d0e2f4",
+        "32cedfe3bc6f4dd0a3dc19e1df0688b6",
+        "56295ff0944a49afa958d9bea5ca8214"
     ]
     # Filter configuration to remove predictions near specific thresholds
     filter_config = {
         "8d80522037ae4a9790b72129c06851a4": {"remove_thresholds": [0.45, 0.47]},
-        "d3c066618b4d425fbb2ffff99a478238": {
-            "remove_thresholds": [0.59, 0.60, 0.64, 0.65, 0.66, 0.69]
-        },
-        "7c12f45bc2c442818cf09c497eef4176": {"remove_thresholds": [0.32, 0.33]},
-        "58f6a2c94ced4c1a9c724d19224cca8c": {
-            "remove_thresholds": [0.32, 0.35, 0.36, 0.40, 0.41, 0.42]
-        },
-        "835b997b8acd46f7a72ab5350451e427": {"remove_thresholds": [0.36, 0.31, 0.32]},
-        "01d70371af714f87b0b15393a5ce6853": {"remove_thresholds": [0.37, 0.41]},
     }
 
     # Keep configuration to only allow predictions near specific thresholds
     keep_config = {
         "97207cdaab54477fa267d8cd29ce35e9": {"keep_thresholds": [0.31, 0.32, 0.34, 0.37]},
-        "8d80522037ae4a9790b72129c06851a4": {"keep_thresholds": [0.47, 0.48]},
-        "d3c066618b4d425fbb2ffff99a478238": {"keep_thresholds": [0.66, 0.68, 0.71, 0.72, 0.73]},
-        "035abdf986654b1e8b551d0ce044c929": {"keep_thresholds": [0.61, 0.62, 0.65, 0.68, 0.72]},
-        "538f96a0c783429f9f2e6967cc4693a2": {"keep_thresholds": [0.33, 0.40, 0.41, 0.43, 0.48]},
-        "403c8c5eaaf442898594e45e6998cff4": {"keep_thresholds": [0.35, 0.37, 0.42]},
     }
 
     # Get preprocessed prediction data using standardized function

@@ -55,9 +55,9 @@ experiment_name = "ensemble_model_improved"
 logger = ExperimentLogger(experiment_name=experiment_name, log_dir="./logs/ensemble_model_improved")
 from src.models.ensemble.data_utils import prepare_data
 from src.models.ensemble.ensemble_model_20 import EnsembleModel
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.utils.create_evaluation_set import (
-    import_selected_features_ensemble,
+    import_selected_features_ensemble_new,
     setup_mlflow_tracking,
 )
 
@@ -133,7 +133,7 @@ def run_ensemble(
 
             # Feature selection
             logger.info("Selecting features...")
-            features = import_selected_features_ensemble("all")
+            features = import_selected_features_ensemble_new(model_type="all")
 
             # Filter features for all datasets
             X_train_filtered = prepare_data(X_train, features)

@@ -903,18 +903,6 @@ class MongoDBFeatures:
                 ),
                 axis=1,
             ).ffill()
-            # print('Rolling values: away_saves_rolling')
-            # dataframe['away_saves_rolling'] = dataframe.apply(lambda row:
-            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-            #                             row['league_encoded'],row['season_encoded'],
-            #                             row['year'],row['week_of_year'],
-            #                             'home_saves','away_saves'), axis=1).ffill()
-            # print('Rolling values: away_shots_on_target_rolling')
-            # dataframe['away_shots_on_target_rolling'] = dataframe.apply(lambda row:
-            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-            #                             row['league_encoded'],row['season_encoded'],
-            #                             row['year'],row['week_of_year'],
-            #                             'home_shots_on_goal','away_shots_on_goal'), axis=1).ffill()
             print("Rolling values: away_passes_accuracy_rolling")
             dataframe["away_passes_accuracy_rolling"] = dataframe.apply(
                 lambda row: self.calculate_rolling_values(
@@ -930,18 +918,6 @@ class MongoDBFeatures:
                 ),
                 axis=1,
             ).ffill()
-            # print('Rolling values: away_fouls_rolling')
-            # dataframe['away_fouls_rolling'] = dataframe.apply(lambda row:
-            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-            #                             row['league_encoded'],row['season_encoded'],
-            #                             row['year'],row['week_of_year'],
-            #                             'home_fouls','away_fouls'), axis=1).ffill()
-            # print('Rolling values: away_goal_difference_rolling')
-            # dataframe['away_goal_difference_rolling'] = dataframe.apply(lambda row:
-            #     self.calculate_rolling_values(row['away_encoded'], home_df,away_df,
-            #                             row['league_encoded'],row['season_encoded'],
-            #                             row['year'],row['week_of_year'],
-            #                             'home_goal_difference','away_goal_difference'), axis=1).ffill()
             print("Rolling values: away_win_rolling")
             dataframe["away_win_rolling"] = dataframe.apply(
                 lambda row: self.calculate_rolling_values(

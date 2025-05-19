@@ -28,16 +28,13 @@ from torch.utils.data import TensorDataset
 from src.models.ensemble.data_utils import prepare_data
 
 # Import custom utilities
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import (
-    import_selected_features_ensemble,
+    import_selected_features_ensemble_new,
     setup_mlflow_tracking,
 )
 from src.utils.logger import ExperimentLogger
-
-
-
 
 # Set fixed seed and hash seed for determinism
 SEED = 19
@@ -66,10 +63,8 @@ if torch.cuda.is_available():
     torch.backends.cudnn.allow_tf32 = True
     # Check if PyTorch version supports torch.compile
     if hasattr(torch, 'compile'):
-        print("torch.compile is available - will use it for performance optimization")
         USE_TORCH_COMPILE = True
     else:
-        print("torch.compile not available in this PyTorch version")
         USE_TORCH_COMPILE = False
 else:
     USE_TORCH_COMPILE = False
@@ -498,7 +493,7 @@ def objective(
 
         logger.info(f"Trial {trial.number}: Score: {score:.4f} (Precision: {precision:.4f}, Recall: {recall:.4f})")
         
-        if score > 0.38 :
+        if score > 0.37 :
             log_to_mlflow_pytorch(
                 model,
                 metrics,
@@ -953,13 +948,102 @@ def compute_permutation_importance(
     logger.info(df_importance.head(70).to_string(index=False))
     return df_importance
 
+def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+    """
+    Perform hyperparameter optimization with Optuna while tracking feature importances.
+    
+    Args:
+        X_train (pd.DataFrame): Training features
+        y_train (pd.Series): Training labels 
+        X_test (pd.DataFrame): Test features
+        y_test (pd.Series): Test labels
+        n_trials (int): Number of optimization trials
+        
+    Returns:
+        tuple: (best_params, feature_importance_df)
+    """
+    logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
+    
+    # Store feature importances across trials
+    feature_importances_trials = []
+
+    hyperparameter_space = load_hyperparameter_space()
+    def objective(trial):
+        params = {}
+        params.update(base_params)
+
+        # Iterate over the rest of the hyperparameter space
+        for param_name, config in hyperparameter_space.items():
+            if config["type"] == "float":
+                params[param_name] = trial.suggest_float(
+                    param_name, config["low"], config["high"], 
+                    log=config.get("log", False), step=config.get("step")
+                )
+            elif config["type"] == "int":
+                params[param_name] = trial.suggest_int(
+                    param_name, config["low"], config["high"], 
+                    step=config.get("step", 1)
+                )
+            elif config["type"] == "categorical":
+                choices = config["choices"]
+                if not isinstance(choices, (list, tuple)):
+                    logger.error(f"Invalid choices for {param_name}: {choices}")
+                    if param_name == "batch_size":
+                        choices = [128] # Default batch size
+                    else:
+                        choices = ["Adam"] # Default optimizer
+                params[param_name] = trial.suggest_categorical(param_name, choices)
+
+        # Train model and get metrics
+        # Create model
+        model = create_pytorch_model(params, input_dim, device, scaler)
+        model, metrics = train_pytorch_model(model, X_train, y_train, X_test, y_test, X_eval, y_eval, params, device, scaler)
+        
+        # Compute permutation importance for this trial
+        importances = []
+        feature_names = X_eval.columns.tolist()
+        threshold = metrics["threshold"]
+        y_val_np = y_eval.values if hasattr(y_eval, 'values') else y_eval
+        probs = model.predict_proba(X_eval)[:, 1]
+        preds = (probs >= threshold).astype(int)
+        baseline = np.sum((y_val_np == 1) & (preds == 1)) / (np.sum(preds == 1))
+        for feat in feature_names:
+            X_shuffled = X_eval.copy()
+            X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
+            probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
+            preds_shuffled = (probs_shuffled >= threshold).astype(int)
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            drop = baseline - precision
+            importances.append(drop)
+        feature_importances_trials.append(importances)
+        return metrics["precision"]
+    
+    # Create and run study
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials, n_jobs=4)
+    
+    # Aggregate importances
+    importances_array = np.array(feature_importances_trials)  # shape: (n_trials, n_features)
+    mean_importances = np.mean(importances_array, axis=0)
+    importance_df = pd.DataFrame({
+        'feature': X_eval.columns,
+        'mean_importance': mean_importances
+    }).sort_values('mean_importance', ascending=False)
+    logger.info('Top features by average permutation importance across trials:')
+    for idx, row in importance_df.head(100).iterrows():
+        logger.info(f'  {row.feature}: {row.mean_importance:.6f}')
+    # You can return this DataFrame or the top N features as a list:
+    top_features = importance_df.head(100)['feature'].tolist()
+    
+    return study.best_params, importance_df
+
 
 def main():
     """
     Main execution function: loads data, selects features, fits scaler,
     runs hyperparameter tuning, and handles final logging.
     """
-    global logger, experiment_name
+    global logger, experiment_name, input_dim, device, scaler
     experiment_name = "pytorch_optimization_20"
     logger = ExperimentLogger(experiment_name)
 
@@ -977,7 +1061,7 @@ def main():
             return
 
         # Select features (using a placeholder type for PyTorch)
-        features = import_selected_features_ensemble(model_type="pytorch") 
+        features = import_selected_features_ensemble_new(model_type="all") 
         if not features:
             logger.warning("No features selected for pytorch_model. Using all columns.")
             features = X_train.columns.tolist()
@@ -1009,21 +1093,27 @@ def main():
             with open(scaler_path, 'wb') as f:
                 pickle.dump(scaler, f)
 
-        # Run Hyperparameter Optimization and Final Model Training
-        best_params, final_metrics = hypertune_pytorch(
-            X_train, y_train, 
-            X_test, y_test, 
-            X_val, y_val,  
-            experiment_name, 
-            input_dim,
-            device,
-            scaler
+        
+        # --- Hyperparameter Optimization with Feature Importance ---
+        best_params, importance_df = hypertune_with_feature_importance(
+            X_train, y_train, X_test, y_test, X_val, y_val, n_trials=50
         )
 
-        train_with_precision_target_pytorch(
-                        X_train, y_train, X_test, y_test, X_val, y_val,
-                        experiment_name, input_dim, device, scaler
-                    )
+        # Run Hyperparameter Optimization and Final Model Training
+        # best_params, final_metrics = hypertune_pytorch(
+        #     X_train, y_train, 
+        #     X_test, y_test, 
+        #     X_val, y_val,  
+        #     experiment_name, 
+        #     input_dim,
+        #     device,
+        #     scaler
+        # )
+
+        # train_with_precision_target_pytorch(
+        #                 X_train, y_train, X_test, y_test, X_val, y_val,
+        #                 experiment_name, input_dim, device, scaler
+        #             )
         
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

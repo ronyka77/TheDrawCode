@@ -1378,19 +1378,12 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
     Excel file. It handles data validation and type conversion for match outcomes.
     Returns:
         pd.DataFrame: DataFrame containing match results with columns:
-            - fixture_id: Unique identifier for the match
-            - home_team: Name of the home team
-            - away_team: Name of the away team
-            - date: Match date
-            - league: League name
-            - match_outcome: Match result code (2 for draw)
-            - is_draw: Boolean indicating if match was a draw (1 or 0)
     Raises:
         FileNotFoundError: If the data file cannot be found
         ValueError: If data validation fails
         Exception: For other processing errors
     """
-    file_path = os.path.join(project_root, "data", "prediction", "api_prediction_eval.xlsx")
+    file_path = os.path.join(project_root, "data", "prediction", "new_api_prediction_eval.xlsx")
     logger.info(f"Loading match results from: {file_path}")
     try:
         # Load Excel file
@@ -1754,8 +1747,8 @@ def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> U
 if __name__ == "__main__":
     # update_api_training_data_for_draws()
     # logger.info("Training data updated successfully")
-    update_api_data_for_draws()
-    logger.info("Prediction data updated successfully")
+    # update_api_data_for_draws()
+    # logger.info("Prediction data updated successfully")
     update_api_data_new_for_draws()
     logger.info("New prediction data updated successfully")
 

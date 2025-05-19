@@ -34,7 +34,6 @@ def prepare_data(X: pd.DataFrame, selected_features: list[str]) -> pd.DataFrame:
     # Select only the required features
     X_selected = X[selected_features].copy()
     # Fill missing values with appropriate strategies
-    
     for col in X_selected.columns:
         try:
             # Use mean for numeric columns

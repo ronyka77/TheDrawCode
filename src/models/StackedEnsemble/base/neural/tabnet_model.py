@@ -70,16 +70,18 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 
-# PyTorch specific reproducibility settings and optimizations
-torch.manual_seed(SEED)
+# Create gradient scaler for mixed precision training
+scaler = GradScaler() if torch.cuda.is_available() else None
+
+# Verify CUDA availability
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
-    torch.backends.cudnn.benchmark = True  # Auto-optimizes for hardware if input sizes don't change
-    torch.backends.cudnn.deterministic = False  # Better performance, less deterministic
-    # Enable TF32 for better performance on Ampere GPUs (RTX 30xx and newer)
+    torch.backends.cudnn.benchmark = True  
+    torch.backends.cudnn.deterministic = False  
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-    
+    gpu_name = torch.cuda.get_device_name(0)
+    gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  
     # Check if PyTorch version supports torch.compile
     if hasattr(torch, 'compile'):
         logger.info("torch.compile is available - will use it for performance optimization")
@@ -87,23 +89,13 @@ if torch.cuda.is_available():
     else:
         logger.info("torch.compile not available in this PyTorch version")
         USE_TORCH_COMPILE = False
-else:
-    USE_TORCH_COMPILE = False
-
-# Create gradient scaler for mixed precision training
-scaler = GradScaler() if torch.cuda.is_available() else None
-
-# Verify CUDA availability
-if torch.cuda.is_available():
-    gpu_name = torch.cuda.get_device_name(0)
-    gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # Convert to GB
     logger.info(f"CUDA is available! Found {torch.cuda.device_count()} GPU(s).")
     logger.info(f"Using GPU: {gpu_name} with {gpu_memory:.2f} GB memory")
     logger.info(f"CUDA Version: {torch.version.cuda}")
     logger.info(f"PyTorch CUDA capabilities: TF32={torch.backends.cuda.matmul.allow_tf32}, cuDNN benchmark={torch.backends.cudnn.benchmark}")
 else:
     logger.warning("CUDA is NOT available. TabNet will run on CPU.")
-    # Force base_params to CPU if CUDA isn't found, to avoid potential errors
+    USE_TORCH_COMPILE = False
     base_params["device_name"] = "cpu"
 
 def load_hyperparameter_space():
@@ -561,7 +553,7 @@ def optimize_hyperparameters(
                 best_params = current_params.copy()
                 logger.info(f"  >>> New best score in this run: {best_score:.4f} (Trial {trial.number})")
 
-            if score >= 0.35:
+            if score >= 0.33:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
                 X_eval_orig_df = X_eval.copy()
                 log_to_mlflow(model, metrics, current_params, experiment_name, X_eval_orig_df)
@@ -627,7 +619,7 @@ def optimize_hyperparameters(
     )
     for _ in range(num_batches):
         try:
-            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)])
+            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)], n_jobs=4)
         except KeyboardInterrupt:
             logger.warning("Optimization interrupted by user.")
             break

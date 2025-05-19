@@ -30,10 +30,10 @@ logger = ExperimentLogger(experiment_name)
 
 # Import data at runtime to avoid global scope issues
 from src.models.ensemble.data_utils import prepare_data
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
 from src.utils.create_evaluation_set import (
-    import_selected_features_ensemble,
+    import_selected_features_ensemble_new,
     setup_mlflow_tracking,
 )
 
@@ -713,7 +713,7 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
 
-        features = import_selected_features_ensemble(model_type="xgb")
+        features = import_selected_features_ensemble_new(model_type="xgb")
         logger.info(f"Features: {len(features)}")
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)

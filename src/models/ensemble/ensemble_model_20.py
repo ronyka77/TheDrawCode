@@ -75,10 +75,10 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
         # --- MLflow Run IDs for Base Models ---
         self.xgb_run_id = "63415f9a38fd4ee9bd8ae6f050b141a9"
-        self.lgb_run_id = "34926ca11b234e81ae61cb857e0d0958"  
-        self.tabnet_run_id = "e7d72ec3cd5c48ecb129630a50ed311d" 
+        self.lgb_run_id = "35a6569e5a4b4bef92e621f9e6ae15f7"  
+        self.tabnet_run_id = "eb1a34d83d7142318c788dea983f8c48" 
         self.extra_run_id = "ecce146ecdaf41a08e14af277f06d304" 
-        self.mlp_run_id = "83055998ccc147f88186189a68801c39"
+        self.mlp_run_id = "b062927db00241649a6511b8012af0c2"
         self.pytorch_run_id = "e5182b96976d4729a7c4507a3faf13c8"
         self.svm_run_id = "548aba0a16ea41f5891d06b50229b0d7" 
         self.fnn_run_id = "69aa097754ac4ea586e4c43dcafd85e9"

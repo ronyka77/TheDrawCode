@@ -492,7 +492,7 @@ def hypertune_meta_learner(
     eval_meta_features: Optional[np.ndarray] = None,
     eval_meta_targets: Optional[np.ndarray] = None,
     meta_learner_type="tabnet",
-    n_trials=200,
+    n_trials=500,
     timeout=900000,
     target_precision=0.5,
     min_recall=0.25,

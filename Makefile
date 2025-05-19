@@ -28,4 +28,3 @@ clean:
 	-rm -rf *.egg-info/
 	-rm -rf .pytest_cache/
 	-rm -rf .mypy_cache/
-	-find . -type d -name "__pycache__" -exec rm -rf {} +

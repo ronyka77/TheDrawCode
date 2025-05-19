@@ -438,6 +438,20 @@ wheels = [
 ]
 
 [[package]]
+name = "boostaroota"
+version = "1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "xgboost" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/78/ed/b9a97eb226ed9e8712fb88185bbec3a5eaf09e829277b2c09a4f13d6c8d7/boostaroota-1.3-py2.py3-none-any.whl", hash = "sha256:c6b7a59475c3093caf6cc7a0ffb04499fb4434ad99b5a012a2b665e78a4eea40", size = 4767 },
+    { url = "https://files.pythonhosted.org/packages/6f/01/27e381e89667e596d115eb554d1143f3e13126404f70c8d4c725ade15670/boostaroota-1.3-py3-none-any.whl", hash = "sha256:e9a51f0f20cb76230c7452c4f1ba574bc26f9cd0302decf7e3bd2d255be8be9f", size = 4763 },
+]
+
+[[package]]
 name = "boruta"
 version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -449,6 +463,26 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/ab/103f819f83e9e2833f95f3dfb5e6d162ad1616b136b96c683ad4d7de224c/Boruta-0.4.3.tar.gz", hash = "sha256:abd67119bb88c7d1675b0dfc78072e50b5ba1d32b7cc7664258a640ad3a495a4", size = 57656 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/30/de/37bb80bba7fb7baa703b78fab37487b21b43fe4bb5d5a1ab09ecab9b76c6/Boruta-0.4.3-py3-none-any.whl", hash = "sha256:58cc1d7f180d0ee3aace5b171a25f00b7fd8e323a749954d899cc983b2924085", size = 57909 },
+]
+
+[[package]]
+name = "borutashap"
+version = "1.0.17"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "seaborn" },
+    { name = "shap" },
+    { name = "statsmodels" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/45/0a/084832698a63e07e0d37ec689ba1fb2097e584b046ed7b77757565f5994e/BorutaShap-1.0.17.tar.gz", hash = "sha256:6b19219614efd791069863571932a9d11dfffdaa22346ec19ae054794895f628", size = 14503 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/d0/9f21859e5a574e142ce574ffb22425019c34d4f7c9ded003b7d31c62a86f/BorutaShap-1.0.17-py3-none-any.whl", hash = "sha256:bed672e2178b9a78f43ebe7d9b63c0bf93179e56f38b50919e91899124b39100", size = 14958 },
 ]
 
 [[package]]
@@ -3672,6 +3706,16 @@ wheels = [
 ]
 
 [[package]]
+name = "psycopg2"
+version = "2.9.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/51/2007ea29e605957a17ac6357115d0c1a1b60c8c984951c19419b3474cdfd/psycopg2-2.9.10.tar.gz", hash = "sha256:12ec0b40b0273f95296233e8750441339298e6a572f7039da5b260e3c8b60e11", size = 385672 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/29/bc9639b9c50abd93a8274fd2deffbf70b2a65aa9e7881e63ea6bc4319e84/psycopg2-2.9.10-cp39-cp39-win32.whl", hash = "sha256:9d5b3b94b79a844a986d029eee38998232451119ad653aea42bb9220a8c5066b", size = 1025259 },
+    { url = "https://files.pythonhosted.org/packages/2c/f8/0be7d99d24656b689d83ac167240c3527efb0b161d814fb1dd58329ddf75/psycopg2-2.9.10-cp39-cp39-win_amd64.whl", hash = "sha256:88138c8dedcbfa96408023ea2b0c369eda40fe5d75002c0964c78f46f11fa442", size = 1163878 },
+]
+
+[[package]]
 name = "ptyprocess"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5235,7 +5279,9 @@ dependencies = [
     { name = "bayesian-optimization" },
     { name = "black" },
     { name = "blinker" },
+    { name = "boostaroota" },
     { name = "boruta" },
+    { name = "borutashap" },
     { name = "boto3" },
     { name = "botocore" },
     { name = "bottleneck" },
@@ -5376,6 +5422,7 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
     { name = "psutil" },
+    { name = "psycopg2" },
     { name = "py-spy" },
     { name = "py4j" },
     { name = "pyaml" },
@@ -5455,7 +5502,6 @@ dependencies = [
     { name = "tomli" },
     { name = "tomlkit" },
     { name = "torch" },
-    { name = "torch-geometric" },
     { name = "torchaudio" },
     { name = "torchvision" },
     { name = "tqdm" },
@@ -5531,7 +5577,9 @@ requires-dist = [
     { name = "bayesian-optimization", specifier = "==1.4.3" },
     { name = "black", specifier = "==25.1.0" },
     { name = "blinker", specifier = "==1.9.0" },
+    { name = "boostaroota", specifier = ">=1.3" },
     { name = "boruta", specifier = ">=0.4.3" },
+    { name = "borutashap", specifier = ">=1.0.17" },
     { name = "boto3", specifier = "==1.37.2" },
     { name = "botocore", specifier = "==1.37.27" },
     { name = "bottleneck", specifier = "==1.4.2" },
@@ -5672,6 +5720,7 @@ requires-dist = [
     { name = "proto-plus", specifier = "==1.26.0" },
     { name = "protobuf", specifier = "==3.20.3" },
     { name = "psutil", specifier = "==7.0.0" },
+    { name = "psycopg2", specifier = ">=2.9.10" },
     { name = "py-spy", specifier = "==0.4.0" },
     { name = "py4j", specifier = "==0.10.9.9" },
     { name = "pyaml", specifier = "==25.1.0" },
@@ -5750,10 +5799,9 @@ requires-dist = [
     { name = "tokenizers", specifier = "==0.21.0" },
     { name = "tomli", specifier = "==2.2.1" },
     { name = "tomlkit", specifier = "==0.12.0" },
-    { name = "torch" },
-    { name = "torch-geometric", specifier = "==2.6.1" },
-    { name = "torchaudio", specifier = "==2.6.0" },
-    { name = "torchvision" },
+    { name = "torch", specifier = ">=2.6.0" },
+    { name = "torchaudio", specifier = ">=2.6.0" },
+    { name = "torchvision", specifier = ">=0.21.0" },
     { name = "tqdm", specifier = "==4.67.1" },
     { name = "transformers", specifier = "==4.49.0" },
     { name = "triad", specifier = "==0.9.8" },
@@ -5895,25 +5943,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ee/11/08774a8198a33263947c59e04b8a0bf85a61a44e82100c46cf833bbce35e/torch-2.6.0-cp39-cp39-manylinux_2_28_aarch64.whl", hash = "sha256:bb2c6c3e65049f081940f5ab15c9136c7de40d3f01192541c920a07c7c585b7e", size = 95782656 },
     { url = "https://files.pythonhosted.org/packages/c1/0d/56fb07032accbfebb4555638b6002ec5678d0942da85497e40f9405ab756/torch-2.6.0-cp39-cp39-win_amd64.whl", hash = "sha256:683410f97984103148e31b38a8631acf31c3034c020c0f4d26171e7626d8317a", size = 204061417 },
     { url = "https://files.pythonhosted.org/packages/b3/17/41f681b87290a1d2f1394f943e470f8b0b3c2987b7df8dc078d8831fce5b/torch-2.6.0-cp39-none-macosx_11_0_arm64.whl", hash = "sha256:265f70de5fd45b864d924b64be1797f86e76c8e48a02c2a3a6fc7ec247d2226c", size = 66520446 },
-]
-
-[[package]]
-name = "torch-geometric"
-version = "2.6.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "fsspec" },
-    { name = "jinja2" },
-    { name = "numpy" },
-    { name = "psutil" },
-    { name = "pyparsing" },
-    { name = "requests" },
-    { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/81/e1b015494cb9e0bf4c47cc8426e49736120248733be0e22072a5628ae9ed/torch_geometric-2.6.1.tar.gz", hash = "sha256:1f18f9d0fc4d2239d526221e4f22606a4a3895b5d965a9856d27610a3df662c6", size = 771490 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/9f/157e913626c1acfb3b19ce000b1a6e4e4fb177c0bc0ea0c67ca5bd714b5a/torch_geometric-2.6.1-py3-none-any.whl", hash = "sha256:8faeb353f9655f7dbec44c5e0b44c721773bdfb279994da96b9b8b12fd30f427", size = 1135632 },
 ]
 
 [[package]]

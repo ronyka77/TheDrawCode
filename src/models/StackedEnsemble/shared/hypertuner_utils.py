@@ -36,14 +36,12 @@ except Exception as e:
     # Fallback to current directory if path resolution fails
     sys.path.append(os.getcwd())
 
+# Default settings
+DEFAULT_MIN_RECALL = 0.20  # Minimum acceptable recall
 # Import logger
 from utils.logger import ExperimentLogger
 
 logger = ExperimentLogger(experiment_name="hypertuner_utils")
-
-# Default settings
-DEFAULT_MIN_RECALL = 0.20  # Minimum acceptable recall
-
 
 def predict(model: Any, X: Union[pd.DataFrame, np.ndarray], threshold: float = 0.5) -> np.ndarray:
     """
@@ -286,3 +284,5 @@ def calculate_feature_importance(
     except Exception as e:
         logger.error(f"Error extracting feature importance: {str(e)}")
         return pd.DataFrame(columns=["Feature", "Importance"])
+
+
