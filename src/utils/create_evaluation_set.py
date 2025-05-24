@@ -9,6 +9,7 @@ from typing import Optional, Union
 import numpy as np
 import pandas as pd
 from openpyxl import Workbook
+from pyexcelerate import Workbook
 from sklearn.model_selection import train_test_split
 
 # Add project root to Python path
@@ -1253,55 +1254,11 @@ def import_training_data_ensemble():
 
 
 def save_data_to_excel(df, output_path, type):
-    """
-    Save DataFrame to Excel using a memory-efficient approach.
-    Args:
-        df: DataFrame to save
-        output_path: Path to save the Excel file
-        type: Type of data being saved (for logging purposes)
-    Returns:
-        The original DataFrame
-    """
-    try:
-        # Create a write-only workbook and worksheet
-        wb = Workbook(write_only=True)
-        ws = wb.create_sheet("Sheet1")
-
-        # Convert DataFrame to dictionary of records
-        records = df.to_dict("records")
-
-        # Initialize the prediction generator
-        prediction_generator = iter(records)
-
-        # Retrieve the first row to determine headers
-        try:
-            first_row = next(prediction_generator)
-        except StopIteration:
-            logger.warning(f"No data to export for {type}")
-            return df
-
-        headers = list(first_row.keys())
-        ws.append(headers)
-        ws.append([first_row.get(header) for header in headers])
-        row_count = 1  # Counting first data row already written
-
-        # Process remaining rows
-        for row_dict in prediction_generator:
-            ws.append([row_dict.get(header) for header in headers])
-            row_count += 1
-            if row_count % 5000 == 0:
-                logger.info(f"Processed {row_count} rows")
-
-        wb.save(output_path)
-        logger.info(f"Successfully exported {row_count} rows to {output_path}")
-    except Exception as e:
-        logger.error(f"Failed to export {type} data: {str(e)}")
-        # Try alternative format if Excel export fails
-        if output_path.endswith(".xlsx"):
-            alt_path = output_path.replace(".xlsx", ".csv")
-            df.to_csv(alt_path, index=False)
-            logger.info(f"Exported {type} data to alternative format: {alt_path}")
-
+        # Replace NaN/None with empty string
+    df = df.fillna('')
+    wb = Workbook()
+    wb.new_sheet("Sheet1", data=[df.columns.tolist()] + df.values.tolist())
+    wb.save(output_path)
     return df
 
 
@@ -1370,7 +1327,7 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
         logger.info(f"Critical error: {str(e)}", error_code=DataProcessingError.EMPTY_DATASET)
         raise
 
-# OTHER FUNCTIONS
+
 @retry_on_error(max_retries=3, delay=1.0)
 def get_real_api_scores_from_excel() -> pd.DataFrame:
     """Get all real match scores from an Excel file.
@@ -1437,6 +1394,7 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
         )
         raise
 
+
 def update_api_data_new_for_draws():
     """
     Update prediction data for draws by adding advanced goal features and saving to api_prediction_data_new.xlsx
@@ -1453,17 +1411,17 @@ def update_api_data_new_for_draws():
         logger.info(updated_data.shape)
 
         # Filter data for dates before 2024-11-01
-        api_training_data = updated_data[updated_data["Date"] < "2025-03-01"]
+        api_training_data = updated_data[updated_data["Date"] < "2025-01-01"]
         # Add is_draw column for training data
         api_training_data.loc[:, "is_draw"] = (api_training_data["match_outcome"] == 2).astype(int)
         logger.info("Added is_draw column to training data")
         # Filter data for dates after 2024-11-01 where match_outcome is not blank
         api_prediction_eval = updated_data[
-            (updated_data["Date"] >= "2025-03-01") & (updated_data["match_outcome"].notna())
+            (updated_data["Date"] >= "2025-01-01") & (updated_data["match_outcome"].notna())
         ]
         # Filter data for dates after 2024-11-01 where match_outcome is blank
         api_prediction_data = updated_data[
-            (updated_data["Date"] >= "2025-03-01") & (updated_data["match_outcome"].isna())
+            (updated_data["Date"] >= "2025-01-01") & (updated_data["match_outcome"].isna())
         ]
 
         logger.info(f"api_prediction_data.shape: {api_prediction_data.shape}")
@@ -1494,6 +1452,7 @@ def update_api_data_new_for_draws():
         updated_data.to_excel(data_path_new, index=False)
     except Exception as e:
         logger.info(f"Error updating training data for draws: {str(e)}")
+
 
 def import_training_data_ensemble_new():
     """Import training data for draw predictions."""
@@ -1540,7 +1499,6 @@ def import_training_data_ensemble_new():
             "referee_draws",
             "referee_match_count",
             "referee_foul_rate",
-            "referee_match_count",
             "referee_encoded",
             "ref_goal_tendency",
             "mid_season_factor",
@@ -1585,6 +1543,7 @@ def import_training_data_ensemble_new():
     X_test = test_data.drop(columns="is_draw", errors="ignore")
     y_test = test_data["is_draw"]
     return X_train, y_train, X_test, y_test
+
 
 def create_evaluation_set_new() -> pd.DataFrame:
     """Create evaluation set for ensemble training with selected features and evaluation columns.
@@ -1679,6 +1638,7 @@ def create_evaluation_set_new() -> pd.DataFrame:
         )
         raise
 
+
 def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> Union[dict, list]:
     """Import selected features for XGBoost, CatBoost, and LightGBM models from JSON file.
     This function loads the pre-selected features for each model type from the
@@ -1744,13 +1704,204 @@ def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> U
         raise
 
 
+@retry_on_error(max_retries=3, delay=1.0)
+def import_training_data_ensemble_date_stratified():
+    """
+    This function creates a validation strategy where 15% of matches for each date_encoded
+    are selected as the validation set, ensuring temporal consistency and preventing
+    data leakage while maintaining representative samples across all dates.
+    """
+    parquet_path = os.path.join(project_root, "data", "new_api_training_final.parquet")
+    parquet_path_new = os.path.join(project_root, "data", "prediction", "new_api_prediction_eval.parquet")
+    data_path = os.path.join(project_root, "data", "new_api_training_final.xlsx")
+    data_path_new = os.path.join(project_root, "data", "prediction", "new_api_prediction_eval.xlsx")
+
+    logger.info("Starting date-stratified training data import")
+    
+    # Check if parquet file exists and is valid
+    if os.path.exists(parquet_path):
+        try:
+            data = pd.read_parquet(parquet_path)
+            data_val = pd.read_parquet(parquet_path_new)
+            logger.info(f"Loaded training data from parquet: {parquet_path}")
+            if "is_draw" not in data.columns:
+                logger.info("is_draw column not found in parquet file, creating target variable")
+                data["is_draw"] = (data["match_outcome"] == 2).astype(int)
+            if "is_draw" not in data_val.columns:
+                logger.info("is_draw column not found in parquet file, creating target variable")
+                data_val["is_draw"] = (data_val["match_outcome"] == 2).astype(int)
+        except Exception as e:
+            logger.info(f"Failed to load parquet file, falling back to Excel: {str(e)}")
+            data = pd.read_excel(data_path)
+    else:
+        data = pd.read_excel(data_path)
+        data_val = pd.read_excel(data_path_new)
+        logger.info(f"Loaded training data from Excel: {data_path}")
+        
+        # Create target variable
+        data["is_draw"] = (data["match_outcome"] == 2).astype(int)
+        
+        # Select features and target
+        columns_to_drop = [
+            "match_outcome",
+            "home_goals", 
+            "away_goals",
+            "total_goals",
+            "score",
+            "Referee",
+            "draw",
+            "venue_name",
+            "Home",
+            "Away", 
+            "away_win",
+            "Date",
+            "date",
+            "referee",
+            "league_name",
+            "referee_draw_rate",
+            "referee_draws",
+            "referee_match_count",
+            "referee_foul_rate",
+            "referee_encoded",
+            "ref_goal_tendency",
+            "mid_season_factor",
+        ]
+        data = data.drop(columns=columns_to_drop, errors="ignore")
+        
+        # Convert all numeric-like columns
+        data = convert_numeric_columns(
+            data=data,
+            columns=data.columns.tolist(),
+            drop_errors=False,
+            fill_value=0.0,
+            verbose=True,
+        )
+        # Define integer columns that should remain as int64
+        int_columns = [
+            "h2h_draws",
+            "home_h2h_wins", 
+            "h2h_matches",
+            "Away_points_cum",
+            "Home_points_cum",
+            "Home_team_matches",
+            "Home_draws",
+            "venue_encoded",
+            "date_encoded",
+        ]
+        
+        # Convert integer columns back to int64
+        for col in int_columns:
+            data[col] = data[col].astype("int64")
+
+    common_columns = list(set(data.columns) & set(data_val.columns))
+    data = data[common_columns]
+    data_val = data_val[common_columns]
+    
+    data = pd.concat([data, data_val], ignore_index=True)
+    logger.info(f"Merged training and validation data, total shape: {data.shape}")
+    # Validate date_encoded column exists
+    if "date_encoded" not in data.columns:
+        logger.info(
+            "date_encoded column not found in data",
+            error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+        )
+        raise ValueError("date_encoded column is required for date-stratified splitting")
+    
+    # Analyze date distribution
+    date_counts = data['date_encoded'].value_counts().sort_index()
+    logger.info(f"Found {len(date_counts)} unique dates in dataset")
+    logger.info(f"Date range: {date_counts.index.min()} to {date_counts.index.max()}")
+    logger.info(f"Average matches per date: {date_counts.mean():.1f}")
+    
+    # Check for dates with insufficient samples
+    min_samples_per_date = 7  # Minimum to ensure at least 1 validation sample (15% of 7 = 1.05)
+    insufficient_dates = date_counts[date_counts < min_samples_per_date]
+    if len(insufficient_dates) > 0:
+        logger.info(f"Warning: {len(insufficient_dates)} dates have fewer than {min_samples_per_date} samples")
+    
+    # Perform date-stratified split
+    train_indices = []
+    val_indices = []
+    error_date_count = 0
+    for date_encoded in date_counts.index:
+        # Get all samples for this date
+        date_mask = data['date_encoded'] == date_encoded
+        date_data = data[date_mask]
+        
+        if len(date_data) < min_samples_per_date:
+            # If too few samples, put all in training set
+            train_indices.extend(date_data.index.tolist())
+            continue
+        
+        # Stratified split within this date to maintain draw rate
+        try:
+            date_train_idx, date_val_idx = train_test_split(
+                date_data.index,
+                test_size=0.15,  # 15% for validation
+                random_state=42,
+                stratify=date_data['is_draw']
+            )
+            train_indices.extend(date_train_idx.tolist())
+            val_indices.extend(date_val_idx.tolist())
+            
+        except ValueError as e:
+            # logger.info(f"Stratification failed for date {date_encoded}")
+            error_date_count += 1
+            data_train_idx = date_data.index
+            train_indices.extend(data_train_idx.tolist())
+
+    logger.info(f"Error date count: {error_date_count}")
+    # Create train and validation sets
+    train_data = data.loc[train_indices]
+    val_data = data.loc[val_indices]
+    
+    # Split training data further to create test set (20% of training data)
+    X_train, X_test, y_train, y_test = train_test_split(
+        train_data.drop(columns="is_draw", errors="ignore"),
+        train_data["is_draw"],
+        test_size=0.2,
+        random_state=42,
+        stratify=train_data["is_draw"]
+    )
+    
+    # Update train_data to be the reduced training set
+    train_data = pd.concat([X_train, y_train], axis=1)
+    test_data = pd.concat([X_test, y_test], axis=1)
+    # Prepare features and targets
+    X_train = train_data.drop(columns="is_draw", errors="ignore")
+    y_train = train_data["is_draw"]
+    X_test = test_data.drop(columns="is_draw", errors="ignore")
+    y_test = test_data["is_draw"]
+    X_val = val_data.drop(columns="is_draw", errors="ignore")
+    y_val = val_data["is_draw"]
+    
+    # Log split statistics
+    logger.info("Date-stratified split completed:")
+    logger.info(f"Training set: {len(X_train)} samples ({len(X_train)/len(data)*100:.1f}%)")
+    logger.info(f"Validation set: {len(X_val)} samples ({len(X_val)/len(data)*100:.1f}%)")
+    logger.info(f"Training draw rate: {y_train.mean():.2%}")
+    logger.info(f"Validation draw rate: {y_val.mean():.2%}")
+    
+    # Final validation
+    if len(X_val) == 0:
+        logger.info(
+            "Validation set is empty after date-stratified split",
+            error_code=DataProcessingError.INSUFFICIENT_SAMPLES
+        )
+        raise ValueError("Validation set is empty - check date distribution and minimum sample requirements")
+    
+    return X_train, y_train, X_test, y_test, X_val, y_val
+
+
 if __name__ == "__main__":
     # update_api_training_data_for_draws()
     # logger.info("Training data updated successfully")
     # update_api_data_for_draws()
     # logger.info("Prediction data updated successfully")
-    update_api_data_new_for_draws()
-    logger.info("New prediction data updated successfully")
+    # update_api_data_new_for_draws()
+    # logger.info("New prediction data updated successfully")
 
-    df, df2 = create_evaluation_set_new()
-    logger.info(f"Ensemble evaluation set created with columns: {df.columns.tolist()}")
+    X_train, y_train, X_test, y_test, X_val, y_val = import_training_data_ensemble_date_stratified()
+    logger.info(f"Ensemble evaluation set created with columns: {X_train.shape} and {y_train.shape}")
+    logger.info(f"Ensemble evaluation set created with columns: {X_test.shape} and {y_test.shape}")
+    logger.info(f"Ensemble evaluation set created with columns: {X_val.shape} and {y_val.shape}")

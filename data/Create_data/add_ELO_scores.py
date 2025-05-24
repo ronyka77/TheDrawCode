@@ -4,6 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 import python_calamine as calamine
+from api_football.add_current_features_postgre import export_to_xlsx_fast
 from openpyxl import Workbook
 
 
@@ -354,37 +355,38 @@ class ELOCalculator:
             The original DataFrame
         """
         try:
-            # Create a write-only workbook and worksheet
-            wb = Workbook(write_only=True)
-            ws = wb.create_sheet("Sheet1")
+            # # Create a write-only workbook and worksheet
+            # wb = Workbook(write_only=True)
+            # ws = wb.create_sheet("Sheet1")
 
-            # Convert DataFrame to dictionary of records
-            records = df.to_dict("records")
+            # # Convert DataFrame to dictionary of records
+            # records = df.to_dict("records")
 
-            # Initialize the prediction generator
-            prediction_generator = iter(records)
+            # # Initialize the prediction generator
+            # prediction_generator = iter(records)
 
-            # Retrieve the first row to determine headers
-            try:
-                first_row = next(prediction_generator)
-            except StopIteration:
-                self.logger.warning(f"No data to export for {type}")
-                return df
+            # # Retrieve the first row to determine headers
+            # try:
+            #     first_row = next(prediction_generator)
+            # except StopIteration:
+            #     self.logger.warning(f"No data to export for {type}")
+            #     return df
 
-            headers = list(first_row.keys())
-            ws.append(headers)
-            ws.append([first_row.get(header) for header in headers])
-            row_count = 1  # Counting first data row already written
+            # headers = list(first_row.keys())
+            # ws.append(headers)
+            # ws.append([first_row.get(header) for header in headers])
+            # row_count = 1  # Counting first data row already written
 
-            # Process remaining rows
-            for row_dict in prediction_generator:
-                ws.append([row_dict.get(header) for header in headers])
-                row_count += 1
-                if row_count % 5000 == 0:
-                    self.logger.info(f"Processed {row_count} rows")
+            # # Process remaining rows
+            # for row_dict in prediction_generator:
+            #     ws.append([row_dict.get(header) for header in headers])
+            #     row_count += 1
+            #     if row_count % 5000 == 0:
+            #         self.logger.info(f"Processed {row_count} rows")
 
-            wb.save(output_path)
-            self.logger.info(f"Successfully exported {row_count} rows to {output_path}")
+            # wb.save(output_path)
+            export_to_xlsx_fast(df, output_path)
+            self.logger.info(f"Successfully exported {len(df)} rows to {output_path}")
         except Exception as e:
             self.logger.error(f"Failed to export {type} data: {str(e)}")
             # Try alternative format if Excel export fails

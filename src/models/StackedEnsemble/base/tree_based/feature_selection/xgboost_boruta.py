@@ -52,16 +52,16 @@ try:
 
     # Define your XGBoost model
     params = {
-        "learning_rate": 0.153,
-        "max_depth": 5,
-        "min_child_weight": 430,
-        "colsample_bytree": 0.88,
-        "subsample": 0.905,
-        "gamma": 4.82,
-        "lambda": 11.72,
-        "alpha": 36.2,
-        "scale_pos_weight": 2.36,
+        "alpha": 55.8,
+        "colsample_bytree": 0.885, 
         "eval_metric": ['aucpr', 'error', 'logloss'],
+        "gamma": 4.43,
+        "lambda": 6.94,
+        "learning_rate": 0.15,
+        "max_depth": 10,
+        "min_child_weight": 635,
+        "scale_pos_weight": 2.7,
+        "subsample": 0.795
     }
     xgb_clf = xgb.XGBClassifier(**params)
 
@@ -75,7 +75,7 @@ try:
     feature_selector.fit(
         X=X_train,
         y=y_train,
-        n_trials=100,  # Number of Boruta iterations
+        n_trials=500,  # Number of Boruta iterations
         sample=False,  # Set to True for large datasets
         train_or_test='train',  # Use test set for SHAP values
         verbose=True

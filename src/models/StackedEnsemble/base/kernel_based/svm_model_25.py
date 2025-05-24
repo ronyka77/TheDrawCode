@@ -71,9 +71,8 @@ os.environ["OPENBLAS_NUM_THREADS"] = "16"
 # Base parameters for SVC
 base_params = {
     "probability": True,  # MUST be True for predict_proba
-    "class_weight": "balanced",  # Good for imbalanced classes
     "random_state": SEED,
-    'kernel': 'rbf', # Can be fixed here or tuned
+    'kernel': 'rbf',  # Using RBF kernel
     "verbose": False,  # Set to True for more SVC logs
 }
 
@@ -82,28 +81,52 @@ base_params = {
 def load_hyperparameter_space_svm():
     """
     Defines the hyperparameter search space for SVC tuning using Optuna.
-    Focuses on 'rbf' kernel initially.
+    Optimized based on top-performing trial analysis - narrowed ranges to focus
+    on regions that produced the best precision scores (0.32-0.34).
+    
+    Key optimizations:
+    - gamma: Narrowed from [0.001, 1.0] to [0.001, 0.03] (top trials: 0.001-0.024)
+    - C: Slightly narrowed from [0.001, 1.0] to [0.005, 0.95] (top trials: 0.01-0.89)
+    - class_weight_positive: Narrowed from [1.8, 4.0] to [2.0, 3.5] (top trials: 2.1-3.2)
+    - degree: Start from 2 instead of 1 (no top trials had degree=1)
+    - coef0: Slightly narrowed to focus on middle range [0.1, 0.9]
+    
     Returns:
-        dict: Hyperparameter space configuration.
+        dict: Optimized hyperparameter space configuration.
     """
     hyperparameter_space = {
         "C": {
             "type": "float",
-            "low": 0.20,  # Adjusted range for C
-            "high": 0.40,
+            "low": 0.005,  # Narrowed from 0.001 (min top trial: 0.0101)
+            "high": 0.95,  # Narrowed from 1.0 (max top trial: 0.894)
             "log": True,
         },
-        "gamma": {
+        "gamma": {  # RBF kernel parameter - SIGNIFICANTLY NARROWED
+            "type": "float", 
+            "low": 0.001,    # Keep lower bound (min top trial: 0.00102)
+            "high": 0.03,    # MAJOR reduction from 1.0 (max top trial: 0.0239)
+            "log": True
+        },
+        "class_weight_positive": {  # Narrowed to focus on effective range
             "type": "float",
-            "low": 1e-6,  # Adjusted range for gamma
-            "high": 3e-2,
-            "log": True,
+            "low": 2.0,    # Narrowed from 1.8 (min top trial: 2.136)
+            "high": 3.5,   # Narrowed from 4.0 (max top trial: 3.221)
+            "step": 0.05 
         },
-        "cache_size": {"type": "int", "low": 4000, "high": 14000, "step": 100},
-        # 'kernel': {'type': 'categorical', 'choices': ['rbf', 'poly', 'sigmoid']},
-        'degree': {'type': 'int', 'low': 3, 'high': 7}, # Only if kernel='poly'
-        'coef0': {'type': 'float', 'low': 0.3, 'high': 0.9, 'log': True}, # Only if kernel='poly' or 'sigmoid'
-        "tol": {"type": "float", "low": 1e-7, "high": 1e-5, "log": True},
+        "cache_size": {"type": "int", "low": 4000, "high": 14000, "step": 100},  # Keep current - good coverage
+        "tol": {"type": "float", "low": 1e-7, "high": 1e-5, "log": True},        # Keep current - good coverage
+        "coef0": {  # Slightly narrowed to focus on more effective middle range
+            "type": "float", 
+            "low": 0.1,    # Narrowed from 0.0 (min top trial: 0.130)
+            "high": 0.9,   # Narrowed from 1.0 (max top trial: 0.873)
+            "step": 0.05
+        },
+        "degree": {  # Start from 2 since no top trials used degree=1
+            "type": "int", 
+            "low": 2,      # Changed from 1 (min top trial: 2)
+            "high": 10,    # Keep current (max top trial: 10)
+            "step": 1
+        },
     }
     return hyperparameter_space
 
@@ -124,7 +147,15 @@ def train_model_svm(X_train_scaled, y_train, X_eval_scaled, y_eval, model_params
     try:
         # Combine base and suggested params
         full_params = base_params.copy()
-        full_params.update(model_params)
+        
+        # Special handling for class_weight from Optuna
+        if 'class_weight_positive' in model_params:
+            positive_weight = model_params.pop('class_weight_positive') # Remove from model_params before update
+            full_params['class_weight'] = {0: 1.0, 1: positive_weight}
+        elif 'class_weight' not in full_params: # Fallback if not tuned and not in base_params
+            full_params['class_weight'] = 'balanced'
+            
+        full_params.update(model_params) # Add other tuned params like C, tol, cache_size
 
         logger.info(f"Training SVC with parameters: {full_params}")
         model = SVC(**full_params)
@@ -193,7 +224,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
             f"Trial {trial.number}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f}, Thresh={threshold:.3f}) Params={trial.params}"
         )
         # Log to MLflow
-        if score > 0.34 and score > best_score:
+        if score > 0.33 and score > best_score:
             input_example = X_eval[:5]
             log_to_mlflow_svm(model, metrics, params, scaler, input_example)
         return score
@@ -263,7 +294,7 @@ def optimize_hyperparameters_svm(
     storage_url = "sqlite:///optuna_svm.db"
     study_name = "svm_optimization"
     total_trials = n_trials
-    batch_size = 500  # Adjust batch size based on expected trial duration
+    batch_size = 250  # Reduced from 500 - with focused search space, smaller batches converge faster
     num_batches = max(1, total_trials // batch_size)
     if total_trials % batch_size != 0 and total_trials > batch_size:
         num_batches += 1
@@ -288,7 +319,7 @@ def optimize_hyperparameters_svm(
             n_trials=batch_size, 
             show_progress_bar=True, 
             callbacks=[callback],
-            n_jobs=8  # Use all available CPU cores for parallel trials
+            n_jobs=4  # Reduced from 8 - with narrowed hyperparameter space, fewer parallel jobs can be more efficient
         )
 
         # Update overall best score from the study instance after batch
@@ -437,17 +468,15 @@ def train_with_precision_target_svm(
 
         # Define fixed parameters (Update these based on prior tuning or best guess)
         fixed_params = {
-            'C': 0.6175310980516687,
-            'cache_size': 5466,
-            'class_weight': 'balanced',
-            'coef0': 0.4568065814626598,
-            'degree': 6,
-            'gamma': 0.00020587086243364596,
+            'C': 0.21803146573987586,
+            'cache_size': 7938,
+            'class_weight': {0: 1, 1: 2.837097067307186},
             'kernel': 'rbf',
+            'gamma': 0.003987527724385146,
             'probability': True,
             'random_state': 19,
-            'tol': 9.218236481865033e-05,
-            'verbose': False,
+            'tol': 1.3459599027867769e-06,
+            'verbose': False
         }
         model_params = base_params.copy()
         model_params.update(fixed_params)

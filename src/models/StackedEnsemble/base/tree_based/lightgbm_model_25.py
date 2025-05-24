@@ -73,17 +73,18 @@ def load_hyperparameter_space():
         dict: Hyperparameter space configuration with narrowed ranges and steps.
     """
     hyperparameter_space = {
+        "n_estimators": {"type": "int", "low": 200, "high": 6000, "log": False, "step": 10},
         "learning_rate": {"type": "float", "low": 0.060, "high": 0.20, "log": False, "step": 0.001},
         "num_leaves": {"type": "int", "low": 55, "high": 200, "log": False, "step": 5},
         "max_depth": {"type": "int", "low": 5, "high": 12, "log": False, "step": 1},
         "min_child_samples": {"type": "int", "low": 200, "high": 600, "log": False, "step": 10},
         "feature_fraction": {"type": "float", "low": 0.58, "high": 0.75, "log": False, "step": 0.01},
-        "bagging_fraction": {"type": "float", "low": 0.56, "high": 0.75, "log": False, "step": 0.005},
-        "bagging_freq": {"type": "int", "low": 10, "high": 25, "log": False, "step": 1},
+        "bagging_fraction": {"type": "float", "low": 0.50, "high": 0.75, "log": False, "step": 0.005},
+        "bagging_freq": {"type": "int", "low": 10, "high": 35, "log": False, "step": 1},
         "reg_alpha": {"type": "float", "low": 8.0, "high": 20.0, "log": False, "step": 0.1},
         "reg_lambda": {"type": "float", "low": 6.0, "high": 20.0, "log": False, "step": 0.1},
         "min_split_gain": {"type": "float", "low": 0.12, "high": 0.30, "log": False, "step": 0.005},
-        "early_stopping_rounds": {"type": "int", "low": 500, "high": 1200, "log": False, "step": 10},
+        "early_stopping_rounds": {"type": "int", "low": 50, "high": 2000, "log": False, "step": 10},
         "path_smooth": {"type": "float", "low": 0.10, "high": 0.60, "log": False, "step": 0.005},
         "cat_smooth": {"type": "float", "low": 20.0, "high": 40.0, "log": False, "step": 0.1},
         "max_bin": {"type": "int", "low": 200, "high": 700, "log": False, "step": 10},
@@ -228,7 +229,7 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
 
-            if score > 0.37 and score > best_score:
+            if score > 0.36 and score > best_score:
                 log_to_mlflow(model, metrics, params, experiment_name)
             return score
 
@@ -451,19 +452,19 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "learning_rate": 0.10250000000000001,
-                "num_leaves": 120,
-                "max_depth": 5,
-                "min_child_samples": 440,
-                "feature_fraction": 0.7,
-                "bagging_fraction": 0.625,
-                "bagging_freq": 15,
-                "reg_alpha": 12.0,
-                "reg_lambda": 9.5,
-                "min_split_gain": 0.13,
-                "path_smooth": 0.155,
-                "cat_smooth": 32.5,
-                "max_bin": 660,
+                "learning_rate": 0.156,
+                "num_leaves": 180,
+                "max_depth": 7,
+                "min_child_samples": 400,
+                "feature_fraction": 0.6699999999999999,
+                "bagging_fraction": 0.7300000000000001,
+                "bagging_freq": 24,
+                "reg_alpha": 10.4,
+                "reg_lambda": 10.9,
+                "min_split_gain": 0.22999999999999998,
+                "path_smooth": 0.335,
+                "cat_smooth": 28.0,
+                "max_bin": 310,
                 "device": "cpu",
                 "metric": ["aucpr", "binary_logloss"],
                 "n_jobs": 8,
@@ -477,8 +478,6 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training final model with best parameters")
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
         compute_permutation_importance(model, X_eval, y_eval, metrics['threshold'])
-        # Log to MLflow
-        # log_to_mlflow(model, metrics, params, experiment_name)
 
         return model, metrics
 
@@ -520,7 +519,8 @@ def compute_permutation_importance(
     for feat in feature_names:
         drops = []
         for i in range(n_repeats):
-            logger.info(f"Shuffling feature: {feat} - Repeat: {i+1}")
+            feat_idx = feature_names.index(feat) + 1
+            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i+1}")
             X_shuffled = X_val.copy()
             X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
             probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
@@ -685,7 +685,7 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
     
     logger.info("Top 100 features by average importance across trials:")
     for idx, row in top_100_features.iterrows():
-        logger.info(f"{row['feature']}: {row['importance']:.4f}")
+        logger.info(f"{row['feature']}: {row['importance']:.4f} id: {idx}")
     
     return study.best_params, importance_df
 
@@ -701,8 +701,9 @@ def main():
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        features = import_selected_features_ensemble_new(model_type="all")
-        
+        model_type = "lgbm"
+        features = import_selected_features_ensemble_new(model_type=model_type)
+
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
@@ -729,9 +730,9 @@ def main():
         logger.info(f"Run completed with parameters: {current_params}")
 
         # Train model with precision target
-        # best_model, best_metrics = train_with_precision_target(
-        #     X_train, y_train, X_test, y_test, X_eval, y_eval
-        # )
+        best_model, best_metrics = train_with_precision_target(
+            X_train, y_train, X_test, y_test, X_eval, y_eval
+        )
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

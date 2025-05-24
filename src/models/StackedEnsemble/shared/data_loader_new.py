@@ -5,6 +5,7 @@ import pandas as pd
 from src.utils.create_evaluation_set import (
     create_evaluation_set_new,
     import_selected_features_ensemble_new,
+    import_training_data_ensemble_date_stratified,
     import_training_data_ensemble_new,
 )
 from src.utils.logger import ExperimentLogger
@@ -28,19 +29,7 @@ class DataLoader:
         The data is split according to the following strategy:
         - Training data (X_train): Used for model training and nested CV
         - Test data (X_test): Used for evaluation during training (early stopping)
-        - Validation data (X_val): Held-out set for:
-            - Final model evaluation
-            - Threshold optimization
-            - Meta-feature generation
-            - Meta-learner training
-        Returns:
-            Tuple containing:
-            - X_train: Training features
-            - y_train: Training labels
-            - X_test: Test features for early stopping
-            - y_test: Test labels for early stopping
-            - X_val: Validation features
-            - y_val: Validation labels
+        - Validation data (X_val):
         """
         self.logger.info("Loading data splits according to ensemble strategy")
 
@@ -50,16 +39,18 @@ class DataLoader:
             self.logger.info(f"Loaded {len(self._cached_features)} selected features")
 
         # Load training and test data
-        X_train, y_train, X_test, y_test = import_training_data_ensemble_new()
-        self.logger.info(
-            "Loaded training/test data:"
-            f"\n - Training samples: {len(X_train)}"
-            f"\n - Test samples: {len(X_test)}"
-        )
+        # X_train, y_train, X_test, y_test = import_training_data_ensemble_new()
+        # self.logger.info(
+        #     "Loaded training/test data:"
+        #     f"\n - Training samples: {len(X_train)}"
+        #     f"\n - Test samples: {len(X_test)}"
+        # )
 
-        # Load validation data (completely held-out set)
-        X_val, y_val = create_evaluation_set_new()
-        self.logger.info(f"Loaded validation data: {len(X_val)} samples")
+        # # Load validation data (completely held-out set)
+        # X_val, y_val = create_evaluation_set_new()
+        # self.logger.info(f"Loaded validation data: {len(X_val)} samples")
+
+        X_train, y_train, X_test, y_test, X_val, y_val = import_training_data_ensemble_date_stratified()
 
         # Apply feature selection to all splits and ensure consistent column order
         self.logger.info("Applying feature selection with consistent column ordering")
@@ -110,6 +101,14 @@ class DataLoader:
             f"\n - Train: {X_train.shape} (for model training and nested CV)"
             f"\n - Test: {X_test.shape} (for early stopping during training)"
             f"\n - Validation: {X_val.shape} (held-out for evaluation and meta-features)"
+        )
+        # Log draw count in validation set
+        val_draw_count = y_val.sum()
+        val_total_count = len(y_val)
+        val_draw_rate = val_draw_count / val_total_count if val_total_count > 0 else 0
+        self.logger.info(
+            f"Validation set draw statistics: {val_draw_count} draws out of {val_total_count} matches "
+            f"(draw rate: {val_draw_rate:.2%})"
         )
 
         return X_train, y_train, X_test, y_test, X_val, y_val

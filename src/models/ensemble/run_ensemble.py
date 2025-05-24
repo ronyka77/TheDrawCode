@@ -48,6 +48,8 @@ os.environ["MKL_NUM_THREADS"] = "16"
 os.environ["OPENBLAS_NUM_THREADS"] = "16"
 os.environ["NUMEXPR_NUM_THREADS"] = "16"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "16"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 # Local imports
 from src.utils.logger import ExperimentLogger
 

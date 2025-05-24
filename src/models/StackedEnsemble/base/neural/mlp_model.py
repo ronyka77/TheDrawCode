@@ -42,9 +42,12 @@ logger = ExperimentLogger(experiment_name=experiment_name)
 
 # Import shared utility functions
 from src.models.ensemble.data_utils import prepare_data
-from src.models.StackedEnsemble.shared.data_loader import DataLoader
+from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
-from src.utils.create_evaluation_set import import_selected_features_ensemble, setup_mlflow_tracking
+from src.utils.create_evaluation_set import (
+    import_selected_features_ensemble_new,
+    setup_mlflow_tracking,
+)
 
 experiment_name = "mlp_soccer_prediction"
 logger = ExperimentLogger(experiment_name=experiment_name)
@@ -530,17 +533,17 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()  # Inherits base MLP parameters
         # Specific parameters for this training run with advanced scheduling
         params.update({
-            "learning_rate": 0.00022557466935731258,
-            "hidden_layers": 5,
-            "neurons_per_layer": 123,
-            "dropout_rate": 0.213,
-            "activation": "relu",
-            "l1_regularization": 0.0033497010595414604,
-            "l2_regularization": 0.0012056260409240693,
-            "batch_size": 126,
-            "epochs": 76,
-            "patience": 24,
-            "class_weight_multiplier": 1.5,
+            "learning_rate": 2.291034155900042e-05,
+            "hidden_layers": 1,
+            "neurons_per_layer": 778,
+            "dropout_rate": 0.69,
+            "activation": "elu",
+            "l1_regularization": 1.2245823592413548e-06,
+            "l2_regularization": 7.52365321620833e-05,
+            "batch_size": 3621,
+            "epochs": 112,
+            "patience": 30,
+            "class_weight_multiplier": 2.42,
         })
         X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(X_train, X_test, X_eval)
         # Train final model with best parameters
@@ -548,7 +551,7 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         model, metrics = train_model(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, params)
         # Log to MLflow
         # log_to_mlflow(model, metrics, params, experiment_name, scaler)
-        top_features = select_top_features_mlp(model, X_eval)
+        top_features = compute_permutation_importance(model, X_eval, y_eval)
         logger.info(f"Top features: {top_features}")
         return model, metrics, params
     except Exception as e:
@@ -575,6 +578,92 @@ def select_top_features_mlp(model: keras.Sequential, X: pd.DataFrame, n_features
     df = df.sort_values('Importance', ascending=False)
     return df['Feature'].head(n_features).tolist()
 
+def compute_permutation_importance(
+    model,
+    X_val: pd.DataFrame, 
+    y_val: np.ndarray,
+    threshold: float = 0.3,
+    n_repeats: int = 10,
+    number_of_features: int = 100,
+) -> pd.DataFrame:
+    """
+    Compute permutation feature importance for MLP model.
+    Args:
+        model: Trained MLP model with predict_proba(X) method
+        X_val: Validation features (DataFrame)
+        y_val: Validation labels (array-like)
+        threshold: Threshold for positive class prediction
+        n_repeats: Number of shuffles per feature
+        number_of_features: Number of top features to display in logs
+    Returns:
+        DataFrame with columns: ['feature', 'importance'] sorted by importance descending
+    """
+    try:
+        # Store feature names before converting to numpy
+        if isinstance(X_val, pd.DataFrame):
+            feature_names = X_val.columns.tolist()
+            X_val_scaled = X_val.copy()
+        else:
+            # If X_val is already numpy array, we need feature names from somewhere else
+            raise ValueError("X_val must be a pandas DataFrame to extract feature names")
+            
+        y_val_np = y_val.values if hasattr(y_val, 'values') else y_val
+        wrapped_model = KerasMLPWrapper(model)
+        # Convert to numpy and ensure correct shape
+        if y_val_np.ndim == 2 and y_val_np.shape[1] == 1:
+            y_val_np = y_val_np.ravel()
+            
+        # Compute baseline metric
+        probs = wrapped_model.predict_proba(X_val)[:, 1]
+        preds = (probs >= threshold).astype(int)
+        
+        # Calculate baseline precision
+        baseline = np.sum((y_val_np == 1) & (preds == 1)) / (np.sum(preds == 1))
+        logger.info(f"Baseline precision: {baseline:.4f}")
+        
+        importances = []
+        for feat_idx, feat in enumerate(feature_names):
+            drops = []
+            for i in range(n_repeats):
+                logger.info(f"Shuffling feature: {feat} - Repeat: {i+1}")
+                X_shuffled = X_val_scaled.copy()
+                # Use column name since X_val_scaled is a DataFrame
+                X_shuffled[feat] = np.random.permutation(X_shuffled[feat])
+                
+                # Get predictions with shuffled feature
+                probs_shuffled = wrapped_model.predict_proba(X_shuffled)[:, 1]
+                preds_shuffled = (probs_shuffled >= threshold).astype(int)
+                
+                # Calculate precision with shuffled feature - handle division by zero
+                true_positives = np.sum((y_val_np == 1) & (preds_shuffled == 1))
+                predicted_positives = np.sum(preds_shuffled == 1)
+                
+                if predicted_positives > 0:
+                    precision = true_positives / predicted_positives
+                else:
+                    precision = 0.0  # No positive predictions means precision is 0
+                    
+                drop = baseline - precision
+                drops.append(drop)
+                
+            mean_drop = np.mean(drops)
+            importances.append((feat, mean_drop))
+            logger.debug(f"Feature: {feat}, Mean importance drop: {mean_drop:.4f}")
+            
+        # Sort by importance descending
+        importances.sort(key=lambda x: x[1], reverse=True)
+        df_importance = pd.DataFrame(importances, columns=["feature", "importance"])
+        
+        # Log top features
+        logger.info("Top features by permutation importance:")
+        logger.info(df_importance.head(number_of_features).to_string(index=False))
+        
+        return df_importance
+        
+    except Exception as e:
+        logger.error(f"Error computing permutation importance: {str(e)}")
+        raise
+
 
 def main():
     """
@@ -585,7 +674,7 @@ def main():
         global X_train, y_train, X_test, y_test, X_eval, y_eval
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        features = import_selected_features_ensemble(model_type="mlp")
+        features = import_selected_features_ensemble_new(model_type="mlp")
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)

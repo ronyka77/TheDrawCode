@@ -14,7 +14,9 @@ import torch.optim as optim
 from pytorch_tabnet.metrics import Metric
 from pytorch_tabnet.tab_model import TabNetClassifier
 from sklearn.base import BaseEstimator
-from sklearn.metrics import precision_score, recall_score
+from sklearn.feature_selection import f_classif, mutual_info_classif
+from sklearn.metrics import precision_score, recall_score, roc_auc_score
+from sklearn.model_selection import StratifiedKFold, cross_val_score
 
 # from sklearn.preprocessing import QuantileTransformer
 from sklearn.utils.multiclass import type_of_target
@@ -47,6 +49,7 @@ min_recall = 0.30
 n_trials = 20000
 
 # Then modify your base_params to include the custom metrics
+device = "cuda" if torch.cuda.is_available() else "cpu"
 base_params = {
     "optimizer_fn": optim.Adam,  # Use Adam as default optimizer
     # "mask_type": "sparsemax",
@@ -54,7 +57,7 @@ base_params = {
     "fit_weights": 1,
     "verbose": 0,
     "seed": 19,
-    "device_name": "cuda",
+    "device_name": device,
 }
 
 # Set fixed seed and hash seed for determinism
@@ -791,27 +794,30 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params.update(
             {
                 "batch_size": 128,
-                "eps": 3.364173308706195e-06,
+                "device_name": "cuda",
+                "eps": 9.848795981241588e-06,
+                "eval_metric": ['auc', 'logloss'],
                 "fit_weights": 1,
-                "gamma": 1.6,
-                "lambda_sparse": 0.009889443656051256,
-                "learning_rate": 0.0038334747996737117,
-                "max_epochs": 135,
-                "momentum": 0.7949999999999999,
-                "n_a": 45,
-                "n_d": 81,
+                "gamma": 1.8,
+                "lambda_sparse": 1.483050364931367e-06,
+                "learning_rate": 0.006693216892855157,
+                "mask_type": "entmax",
+                "max_epochs": 130,
+                "momentum": 0.895,
+                "n_a": 69,
+                "n_d": 91,
                 "n_independent": 3,
-                "n_shared": 3,
-                "n_steps": 7,
-                "patience": 19,
-                "scheduler_factor": 0.21834593629990895,
-                "scheduler_final_div_factor": 7100.0,
-                "scheduler_min_lr": 7.839143819235056e-05,
-                "scheduler_patience": 8,
-                "scheduler_pct_start": 0.1,
-                "scheduler_type": "plateau",
-                "virtual_batch_size": 1856,
-                "weight_decay": 2.8797977154497002e-05,
+                "n_shared": 5,
+                "n_steps": 4,
+                "optimizer_fn": torch.optim.Adam,
+                "patience": 28,
+                "scheduler_final_div_factor": 5200.0,
+                "scheduler_pct_start": 0.30000000000000004,
+                "scheduler_type": "none",
+                "seed": 19,
+                "verbose": 0,
+                "virtual_batch_size": 896,
+                "weight_decay": 0.000166528804138707,
             }
         )
         # Train final model with best parameters
@@ -832,7 +838,7 @@ def compute_permutation_importance(
     X_val: pd.DataFrame, 
     y_val: np.ndarray,
     threshold: float = 0.3,
-    n_repeats: int = 3,
+    n_repeats: int = 10,
     number_of_features: int = 100,
 ) -> pd.DataFrame:
     """
@@ -869,7 +875,7 @@ def compute_permutation_importance(
         for feat_idx, feat in enumerate(feature_names):
             drops = []
             for i in range(n_repeats):
-                logger.info(f"Shuffling feature: {feat} - Repeat: {i+1}")
+                logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i+1}")
                 X_shuffled = X_val.copy()
                 # Use column index since X_val is numpy array
                 X_shuffled[:, feat_idx] = np.random.permutation(X_val[:, feat_idx])
@@ -998,10 +1004,345 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
     
     logger.info("Top 100 features by average importance across trials:")
     for idx, row in top_100_features.iterrows():
-        logger.info(f"{row['feature']}: {row['importance']:.4f}")
+        logger.info(f"{row['feature']}: {row['importance']:.4f} id: {idx}")
     
     return study.best_params, importance_df
 
+def tabnet_feature_selection_pipeline(X, y, X_eval, y_eval, target_range=(50, 70)):
+    """Complete feature selection pipeline optimized for TabNet"""
+    logger.info(f"Starting TabNet feature selection pipeline with {X.shape[1]} initial features")
+    
+    # Stage 1: Quick filter methods (260 -> ~100)
+    logger.info("Stage 1: Applying mutual information and F-test filters")
+    
+    # Mutual information for non-linear relationships
+    mi_scores = mutual_info_classif(X, y, random_state=42)
+    mi_top = np.argsort(mi_scores)[-100:]
+
+    # F-test for linear relationships
+    f_scores, _ = f_classif(X, y)
+    f_top = np.argsort(f_scores)[-100:]
+
+    # Union of top features from both methods
+    initial_features = list(set(X.columns[mi_top]) | set(X.columns[f_top]))
+    X_filtered = X[initial_features]
+    X_eval_filtered = X_eval[initial_features]
+    logger.info(f"Stage 1: Reduced to {len(initial_features)} features")
+
+    # Stage 2: TabNet-based importance (100 -> ~80)
+    logger.info("Stage 2: Using TabNet for feature importance ranking")
+    
+    tabnet_selector = TabNetClassifier(
+        n_d=64, n_a=64, n_steps=5,
+        lambda_sparse=1e-3,
+        optimizer_params=dict(lr=2e-2),
+        verbose=0,
+        device_name=device
+    )
+
+    X_train, X_val = X_filtered, X_eval_filtered
+    y_train, y_val = y, y_eval
+
+    # Convert to numpy arrays for TabNet
+    X_train_np = X_train.values if hasattr(X_train, 'values') else X_train
+    X_val_np = X_val.values if hasattr(X_val, 'values') else X_val
+    y_train_np = y_train.values.ravel() if hasattr(y_train, 'values') else np.array(y_train).ravel()
+    y_val_np = y_val.values.ravel() if hasattr(y_val, 'values') else np.array(y_val).ravel()
+
+    tabnet_selector.fit(
+        X_train_np, y_train_np, 
+        eval_set=[(X_val_np, y_val_np)],
+        eval_metric=['auc'],
+        max_epochs=100, patience=15,
+    )
+
+    # Get importance and select top features
+    importance = tabnet_selector.feature_importances_
+    importance_idx = np.argsort(importance)[-80:]
+    stage2_features = [initial_features[i] for i in importance_idx]
+
+    logger.info(f"Stage 2: Reduced to {len(stage2_features)} features: {stage2_features}")
+
+    # Stage 3: Fine-tuned sequential selection (80 -> 50-70)
+    logger.info("Stage 3: Sequential feature selection for optimal subset")
+    
+    X_stage2 = X[stage2_features]
+    final_features, scores = tabnet_sequential_selection(
+        X_stage2, y, target_features=target_range[1]
+    )
+
+    # Select optimal number based on score plateau
+    score_diffs = np.diff(scores)
+    plateau_point = np.where(score_diffs < np.percentile(score_diffs, 20))[0]
+
+    if len(plateau_point) > 0 and plateau_point[0] >= target_range[0]:
+        optimal_count = min(plateau_point[0] + 1, target_range[1])
+    else:
+        optimal_count = target_range[1]
+
+    final_selected = final_features[:optimal_count]
+
+    logger.info(f"Stage 3: Final selection of {len(final_selected)} features")
+    logger.info("Feature selection pipeline completed successfully")
+
+    return final_selected, scores[:optimal_count]
+
+def tabnet_sequential_selection(X, y, target_features=70):
+    """Sequential forward selection using TabNet for feature evaluation"""
+    
+    
+    logger.info(f"Starting sequential selection to find top {target_features} features")
+    
+    selected_features = []
+    remaining_features = list(X.columns)
+    scores = []
+    
+    for i in range(min(target_features, len(remaining_features))):
+        best_score = -1
+        best_feature = None
+        
+        logger.info(f"Sequential selection iteration {i+1}/{target_features}")
+        
+        for feature in remaining_features:
+            current_features = selected_features + [feature]
+            X_subset = X[current_features]
+            
+            # Quick TabNet evaluation
+            tabnet_eval = TabNetClassifier(
+                n_d=32, n_a=32, n_steps=3,
+                lambda_sparse=1e-3,
+                optimizer_params=dict(lr=2e-2),
+                verbose=0,
+                device_name=device
+            )
+            
+            try:
+                # Use cross-validation for robust evaluation
+                # fit_params = {
+                #     "max_epochs": 50,
+                #     "patience": 10,
+                #     "eval_metric": ['auc']
+                # }
+                cv_scores = cross_val_score(
+                    tabnet_eval, X_subset.values, y, 
+                    cv=3, scoring='precision', n_jobs=3
+                )
+                score = np.mean(cv_scores)
+                
+                if score > best_score:
+                    best_score = score
+                    best_feature = feature
+                    
+            except Exception as e:
+                logger.warning(f"Error evaluating feature {feature}: {str(e)}")
+                continue
+        
+        if best_feature is not None:
+            selected_features.append(best_feature)
+            remaining_features.remove(best_feature)
+            scores.append(best_score)
+            logger.info(f"Selected feature {i+1}: {best_feature} (score: {best_score:.4f})")
+        else:
+            logger.warning(f"No valid feature found in iteration {i+1}")
+            break
+    
+    logger.info(f"Sequential selection completed with {len(selected_features)} features")
+    return selected_features, scores
+
+def tabnet_staged_selection(X, y, X_test, y_test, X_eval, y_eval, target_features=100):
+    """Multi-stage TabNet feature selection with different objectives"""
+    
+    logger.info(f"Starting TabNet staged selection with {X.shape[1]} initial features")
+    
+    # Stage 1: Quick filter with simplified TabNet
+    logger.info("Stage 1: Quick filter with simplified TabNet")
+    tabnet_fast = TabNetClassifier(
+        n_d=16, n_a=16, n_steps=2,
+        lambda_sparse=1e-3,
+        optimizer_params=dict(lr=5e-2),
+        verbose=0,
+        device_name=device
+    )
+
+    # Fit with early stopping
+    tabnet_fast.fit(
+        X.values, y,
+        eval_set=[(X_test.values, y_test)],
+        max_epochs=50,
+        patience=10,
+        eval_metric=['auc']
+    )
+    
+    # Get feature importances
+    stage1_importance = tabnet_fast.feature_importances_
+    stage1_features = X.columns[np.argsort(stage1_importance)[-200:]].tolist()
+
+    logger.info(f"Stage 1: Selected {len(stage1_features)} features")
+
+    # Stage 2: Refined selection with cross-validation
+    logger.info("Stage 2: Refined selection with cross-validation")
+    X_stage1 = X[stage1_features]
+    X_eval_stage1 = X_eval[stage1_features]
+
+    tabnet_refined = TabNetClassifier(
+        n_d=32, n_a=32, n_steps=3,
+        lambda_sparse=1e-3,
+        optimizer_params=dict(lr=2e-2),
+        verbose=0,
+        device_name=device
+    )
+
+    # Cross-validation feature importance
+    cv_scores = []
+    cv_importances = []
+
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    for train_idx, val_idx in skf.split(X_stage1, y):
+        X_train_cv, X_val_cv = X_stage1.iloc[train_idx], X_stage1.iloc[val_idx]
+        y_train_cv, y_val_cv = y[train_idx], y[val_idx]
+
+        try:
+            tabnet_refined.fit(
+                X_train_cv.values, y_train_cv,
+                eval_set=[(X_val_cv.values, y_val_cv)],
+                max_epochs=100,
+                patience=15,
+                eval_metric=['auc']
+            )
+            cv_importances.append(tabnet_refined.feature_importances_)
+
+            # Evaluate on eval set
+            y_pred_proba = tabnet_refined.predict_proba(X_eval_stage1.values)[:, 1]
+            val_score = roc_auc_score(y_eval, y_pred_proba)
+            cv_scores.append(val_score)
+            
+        except Exception as e:
+            logger.warning(f"Error in CV fold: {str(e)}")
+            continue
+
+    if not cv_importances:
+        logger.error("No successful CV folds, falling back to stage 1 features")
+        return stage1_features[:target_features], stage1_importance
+
+    # Average importance across folds
+    avg_importance = np.mean(cv_importances, axis=0)
+    stage2_features = [stage1_features[i] for i in np.argsort(avg_importance)[-target_features:]]
+
+    logger.info(f"Stage 2: Selected {len(stage2_features)} features: {stage2_features}")
+    logger.info(f"CV Score: {np.mean(cv_scores):.4f} ± {np.std(cv_scores):.4f}")
+
+    return stage2_features, avg_importance
+
+def improved_tabnet_staged_selection(X, y, X_test, y_test, X_eval, y_eval, target_features=120):
+    """Enhanced TabNet feature selection with optimized hyperparameters"""
+    
+    logger.info(f"Starting IMPROVED TabNet staged selection with {X.shape[1]} initial features")
+    
+    # IMPROVEMENT 1: Better Stage 1 configuration
+    logger.info("Stage 1: Enhanced quick filter with optimized TabNet")
+    tabnet_fast = TabNetClassifier(
+        n_d=32, n_a=32, n_steps=4,  # Increased capacity
+        gamma=1.5,  # Feature selection strength
+        lambda_sparse=1e-4,  # Reduced sparsity for more features
+        optimizer_params=dict(lr=2e-2, weight_decay=1e-5),
+        scheduler_params=dict(step_size=20, gamma=0.8),  # Learning rate scheduling
+        mask_type='entmax',  # Better feature selection
+        verbose=0,
+        device_name=device,
+        seed=42  # Reproducibility
+    )
+
+    # IMPROVEMENT 2: Better training configuration
+    tabnet_fast.fit(
+        X.values, y,
+        eval_set=[(X_test.values, y_test)],
+        max_epochs=100,  # Increased epochs
+        patience=20,     # More patience
+        batch_size=1024, # Larger batch size
+        virtual_batch_size=256,
+        eval_metric=["auc", "logloss"],
+        drop_last=False
+    )
+    
+    # Select more features in stage 1
+    stage1_importance = tabnet_fast.feature_importances_
+    stage1_features = X.columns[np.argsort(stage1_importance)[-250:]].tolist()  # Increased from 200
+
+    logger.info(f"Stage 1: Selected {len(stage1_features)} features")
+
+    # IMPROVEMENT 3: Enhanced Stage 2 with better architecture
+    logger.info("Stage 2: Enhanced refined selection with optimized cross-validation")
+    X_stage1 = X[stage1_features]
+    X_eval_stage1 = X_eval[stage1_features]
+
+    # IMPROVEMENT 4: Enhanced cross-validation with better evaluation
+    cv_scores = []
+    cv_importances = []
+    successful_folds = 0
+
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X_stage1, y)):
+        logger.info(f"Processing fold {fold + 1}/5")
+        
+        X_train_cv, X_val_cv = X_stage1.iloc[train_idx], X_stage1.iloc[val_idx]
+        y_train_cv, y_val_cv = y[train_idx], y[val_idx]
+
+        try:
+            # Reset model for each fold
+            tabnet_fold = TabNetClassifier(
+                n_d=64, n_a=64, n_steps=5,
+                gamma=1.3,
+                lambda_sparse=5e-5,
+                optimizer_params=dict(lr=1e-2, weight_decay=1e-5),
+                scheduler_params=dict(step_size=30, gamma=0.9),
+                mask_type='entmax',
+                verbose=0,
+                device_name=device,
+                seed=42 + fold  # Different seed per fold
+            )
+            
+            tabnet_fold.fit(
+                X_train_cv.values, y_train_cv,
+                eval_set=[(X_val_cv.values, y_val_cv)],
+                max_epochs=150,  # More epochs for refined training
+                patience=25,
+                batch_size=512,
+                virtual_batch_size=128,
+                eval_metric=['auc', 'logloss'],
+                drop_last=False
+            )
+            
+            cv_importances.append(tabnet_fold.feature_importances_)
+
+            # Evaluate on validation fold
+            y_pred_proba = tabnet_fold.predict_proba(X_eval_stage1.values)[:, 1]
+            fold_score = roc_auc_score(y_eval, y_pred_proba)
+            cv_scores.append(fold_score)
+            successful_folds += 1
+            
+            logger.info(f"Fold {fold + 1} AUC: {fold_score:.4f}")
+            
+        except Exception as e:
+            logger.warning(f"Error in CV fold {fold + 1}: {str(e)}")
+            continue
+
+    if successful_folds < 3:
+        logger.error(f"Only {successful_folds} successful CV folds, falling back to stage 1 features")
+        return stage1_features[:target_features], stage1_importance
+
+    # Average importance across successful folds
+    avg_importance = np.mean(cv_importances, axis=0)
+    stage2_features = [stage1_features[i] for i in np.argsort(avg_importance)[-target_features:]]
+    CV_score = np.mean(cv_scores)
+    selected_indices = np.argsort(avg_importance)[-target_features:]
+    selected_importances = avg_importance[selected_indices]
+    feature_importance_pairs = list(zip(stage2_features, selected_importances))
+    
+    logger.info(f"Stage 2: Selected {len(stage2_features)} features: {stage2_features}")
+    logger.info(f"Feature-importance pairs: {feature_importance_pairs}")
+    logger.info(f"CV Score: {CV_score:.4f}")
+
+    return stage2_features, avg_importance
 
 def main():
     """
@@ -1018,10 +1359,10 @@ def main():
         X_eval_orig_df = X_eval_orig_df.copy() # Store original for signature
 
         # Select features
-        features = import_selected_features_ensemble_new(model_type="tabnet")
+        features = import_selected_features_ensemble_new(model_type="all")
         if not features:
             logger.warning("No features selected. Using all numeric features.")
-            features = import_selected_features_ensemble_new("all")
+            features = import_selected_features_ensemble_new("tabnet")
 
         X_train = X_train_orig[features]
         X_test = X_test_orig[features]
@@ -1037,9 +1378,6 @@ def main():
         X_test = X_test.astype("float64")
         X_eval = X_eval_df.astype("float64")
 
-        logger.info(f"Data shapes: Train={X_train.shape}, Test={X_test.shape}, Eval={X_eval_df.shape}")
-        logger.info(f"Positive ratios: Train={y_train.mean():.3f}, Test={y_test.mean():.3f}, Eval={y_eval.mean():.3f}")
-
         # --- Hyperparameter Optimization with Feature Importance ---
         # best_params, importance_df = hypertune_with_feature_importance(
         #     X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50
@@ -1052,6 +1390,11 @@ def main():
             X_test, y_test,
             X_eval, y_eval 
         )
+
+        # === Run Feature Selection ===
+        # final_selected, scores = improved_tabnet_staged_selection(X_train, y_train, X_test, y_test, X_eval, y_eval, target_features=80)
+        # final_selected, scores = tabnet_feature_selection_pipeline(X_train, y_train, X_eval, y_eval)
+
 
         # train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 

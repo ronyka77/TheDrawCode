@@ -379,17 +379,7 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        "39f18a98d0004d48afd4da01f89be180",
-        "e837c4a1541844c0a5ab903198426694",
-        "ec025d201348415bbb123974b7f1cc02",
-        "c3a0c7957b6043b1a6f221fb0b00b4ec",
-        # "d379cfd9d2214c238a44cf8a70f11676",
-        "d133e4c5c37c4847923ea6b844f4a80f",
-        "611952a2924943c5b40e83eb632673e9",
-        "7020f8ecd9f24c18a28f2349f634b26c",
-        "19d1e9ab434144cd96d4f73e79d0e2f4",
-        "32cedfe3bc6f4dd0a3dc19e1df0688b6",
-        "56295ff0944a49afa958d9bea5ca8214"
+        "58f20c29490f4b539d0c4efbc7b9a406"
     ]
     # Filter configuration to remove predictions near specific thresholds
     filter_config = {

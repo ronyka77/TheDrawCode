@@ -371,7 +371,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
                 else:
                     trial.set_user_attr(metric_name, str(metric_value))
             
-            if score > 0.36 and score > best_score:
+            if score > 0.34 and score > best_score:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
                 log_to_mlflow(model, metrics, params, experiment_name, scaler)
             return score
@@ -528,17 +528,17 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()  # Inherits base MLP parameters
         # Specific parameters for this training run with advanced scheduling
         params.update({
-            "learning_rate": 0.0020754457741266686,
-            "hidden_layers": 5,
-            "neurons_per_layer": 498,
-            "dropout_rate": 0.6769999999999999,
-            "activation": "tanh",
-            "l1_regularization": 4.1670396390433964e-06,
-            "l2_regularization": 0.0002820669492345647,
-            "batch_size": 4035,
-            "epochs": 159,
-            "patience": 18,
-            "class_weight_multiplier": 1.88,
+            "learning_rate": 2.291034155900042e-05,
+            "hidden_layers": 1,
+            "neurons_per_layer": 778,
+            "dropout_rate": 0.69,
+            "activation": "elu",
+            "l1_regularization": 1.2245823592413548e-06,
+            "l2_regularization": 7.52365321620833e-05,
+            "batch_size": 3621,
+            "epochs": 112,
+            "patience": 30,
+            "class_weight_multiplier": 2.42,
         })
         X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(X_train, X_test, X_eval)
         # Train final model with best parameters
@@ -559,8 +559,8 @@ def compute_permutation_importance(
     X_val_scaled: np.ndarray,
     y_val: np.ndarray,
     threshold: float = 0.3,
-    n_repeats: int = 1,
-    number_of_features: int = 100,
+    n_repeats: int = 20,
+    number_of_features: int = 150,
 ) -> pd.DataFrame:
     """
     Compute permutation feature importance for a given metric and threshold.
@@ -590,7 +590,7 @@ def compute_permutation_importance(
     for idx, feat in enumerate(feature_names):
         drops = []
         for i in range(n_repeats):
-            logger.info(f"Shuffling feature: {feat} - Repeat: {i+1}")
+            logger.info(f"Shuffling feature: {feat} ({idx}) - Repeat: {i+1}")
             X_shuffled = X_val_scaled.copy()
             X_shuffled[:, idx] = np.random.permutation(X_shuffled[:, idx])
             probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
@@ -725,7 +725,7 @@ def main():
         global X_train, y_train, X_test, y_test, X_eval, y_eval
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
-        features = import_selected_features_ensemble_new(model_type="all")
+        features = import_selected_features_ensemble_new(model_type="mlp")
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
@@ -743,7 +743,7 @@ def main():
         logger.info(f"Hypertuning completed with hyperparameters: {best_params}")
 
         # # Optional seed-based fine-tuning for improved precision
-        # train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

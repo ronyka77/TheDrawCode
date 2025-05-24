@@ -63,16 +63,16 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 # Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "4"
-os.environ["MKL_NUM_THREADS"] = "4"
-os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "12"
+os.environ["MKL_NUM_THREADS"] = "12"
+os.environ["OPENBLAS_NUM_THREADS"] = "12"
 
 # Base parameters as in the notebook
 base_params = {
     "objective": "binary:logistic",
     "verbosity": 0,
     "eval_metric": ["aucpr", "error", "logloss"],
-    "nthread": 8,
+    "nthread": 12,
     "seed": 19,
     "device": "cuda",
     "tree_method": "hist",
@@ -89,10 +89,16 @@ def load_hyperparameter_space():
         dict: Hyperparameter space configuration with narrowed ranges and steps.
     """
     hyperparameter_space = {
+        "n_estimators": {
+            "type": "int",
+            "low": 100,
+            "high": 3000,
+            "step": 10,
+        },
         "early_stopping_rounds": {
             "type": "int",
-            "low": 400,   # Slightly below min
-            "high": 2000, # Slightly above max
+            "low": 100,   # Slightly below min
+            "high": 700, # Slightly above max
             "step": 10,
         },
         "learning_rate": {
@@ -122,13 +128,13 @@ def load_hyperparameter_space():
         "subsample": {
             "type": "float",
             "low": 0.60,   # Slightly below min
-            "high": 0.94,  # Slightly above max
+            "high": 0.97,  # Slightly above max
             "step": 0.005,
         },
         "gamma": {
             "type": "float",
             "low": 0.20,   # Slightly below min
-            "high": 7.5,   # Slightly above max
+            "high": 9.0,   # Slightly above max
             "step": 0.01,
         },
         "lambda": {
@@ -145,8 +151,8 @@ def load_hyperparameter_space():
         },
         "scale_pos_weight": {
             "type": "float",
-            "low": 1.5,    # Slightly below min
-            "high": 3.2,   # Slightly above max
+            "low": 1.7,    # Slightly below min
+            "high": 3.5,   # Slightly above max
             "step": 0.01,
         },
     }
@@ -193,14 +199,22 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         # Create model - Pass the full model_params including early_stopping_rounds
         model = create_model(model_params)
 
+        # Combine training and validation data while preserving indexes
+        X_combined = pd.concat([X_train, X_test], axis=0)
+        y_combined = pd.concat([y_train, y_test], axis=0)
+
+        # Reset indexes to ensure proper alignment
+        X_combined.reset_index(drop=True, inplace=True)
+        y_combined.reset_index(drop=True, inplace=True)
+
         # Create eval set for early stopping using DMatrix
         # Use DataFrame/Array for eval_set as required by fit when using wrapper
-        eval_set = [(X_test, y_test)]
+        eval_set = [(X_eval, y_eval)]
 
         # Fit model with early stopping
         model.fit(
-            X=X_train,
-            y=y_train,
+            X=X_combined,
+            y=y_combined,
             eval_set=eval_set,
             verbose=False,
             # early_stopping_rounds is now part of the model's parameters
@@ -564,16 +578,16 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "early_stopping_rounds": 430,
-                "learning_rate": 0.153,
-                "max_depth": 5,
-                "min_child_weight": 430,
-                "colsample_bytree": 0.88,
-                "subsample": 0.905,
-                "gamma": 4.82,
-                "lambda": 11.72,
-                "alpha": 36.2,
-                "scale_pos_weight": 2.36,
+                "early_stopping_rounds": 410,
+                "learning_rate": 0.152,
+                "max_depth": 12,
+                "min_child_weight": 380,
+                "colsample_bytree": 0.745,
+                "subsample": 0.635,
+                "gamma": 6.38,
+                "lambda": 11.69,
+                "alpha": 31.5,
+                "scale_pos_weight": 1.84,
                 "eval_metric": ['aucpr', 'error', 'logloss'],
             }
         )
@@ -625,7 +639,8 @@ def compute_permutation_importance(
     for feat in feature_names:
         drops = []
         for i in range(n_repeats):
-            logger.info(f"Shuffling feature: {feat} - Repeat: {i+1}")
+            feat_idx = feature_names.index(feat) + 1
+            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i+1}")
             X_shuffled = X_val.copy()
             X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
             probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
@@ -728,7 +743,7 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
     
     logger.info("Top 100 features by average importance across trials:")
     for idx, row in top_100_features.iterrows():
-        logger.info(f"{row['feature']}: {row['importance']:.4f}")
+        logger.info(f"{row['feature']}: {row['importance']:.4f} id: {idx}")
     
     return study.best_params, importance_df
 
@@ -743,7 +758,9 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
 
-        features = import_selected_features_ensemble_new(model_type="xgb")
+        model_type = "xgb"
+        features = import_selected_features_ensemble_new(model_type=model_type)
+
         logger.info(f"Features: {len(features)}")
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
@@ -768,14 +785,11 @@ def main():
             experiment_name
         )
         
-        # best_model, best_metrics = train_with_precision_target(
-        #     X_train,
-        #     y_train,
-        #     X_test,
-        #     y_test,
-        #     X_eval,
-        #     y_eval,  # Pass DataFrames
-        # )
+        best_model, best_metrics = train_with_precision_target(
+            X_train, y_train,
+            X_test, y_test,
+            X_eval, y_eval
+        )
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")  # Add traceback

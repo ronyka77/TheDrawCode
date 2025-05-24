@@ -45,7 +45,7 @@ sklearn_version = sklearn.__version__
 pip_requirements = [f"scikit-learn=={sklearn_version}", f"mlflow=={mlflow.__version__}"]
 
 # Update base parameters for RandomForest
-base_params = {"random_state": 19, "n_jobs": 6, "verbose": 0, "criterion": "entropy"}
+base_params = {"random_state": 19, "n_jobs": 2, "verbose": 0, "criterion": "entropy", "max_features": "log2"}
 # Set fixed seed and hash seed for determinism
 SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
@@ -65,35 +65,37 @@ def load_hyperparameter_space_for_hpo():
     hyperparameter_space = {
         "n_estimators": {
             "type": "int",
-            "low": 800,    # Focus on range of top performers
+            "low": 500,    # Focus on range of top performers
             "high": 1300,  # Cover the successful range
             "step": 10,    # Larger step to save computation
         },
         "max_depth": {
-            "type": "categorical",  # Change to categorical to focus on two successful regions
-            "choices": [6, 7, 8, 9, 18, 19, 20, 21],  # Target both shallow and deep trees
+            "type": "int", 
+            "low": 5,
+            "high": 20,
+            "step": 1,
         },
         "min_samples_split": {
             "type": "int",
-            "low": 30,  # Allow splitting slightly easier
-            "high": 80,  # Allow slightly more constrained splitting too
-            "step": 2,  # Can increase step slightly if range is wider
+            "low": 5,  
+            "high": 30,  
+            "step": 1,  
         },
         "min_samples_leaf": {
             "type": "int",
-            "low": 16,  # Allow smaller leaf nodes
-            "high": 70,  # Allow slightly larger leaf nodes too
-            "step": 2,  # Can increase step slightly
+            "low": 5,  
+            "high": 40,  
+            "step": 1,  
         },
-        "max_features": {
-            "type": "categorical",  # Change to categorical to focus on two successful regions
-            "choices": [0.22, 0.24, 0.26, 0.52, 0.70, 0.74, 0.84, 0.88, 0.98, 1.0],  # Target both low and high values
-        },
+        # "max_features": {
+        #     "type": "categorical",  
+        #     "choices": [0.22, 0.24, 0.26, 0.52, 0.70, 0.74, 0.84, 0.88, 0.98, 1.0],  
+        # },
         "class_weight": {
             "type": "float",
-            "low": 1.6,   # Slightly under lowest successful value
-            "high": 3.5,  # Maximum from successful trials
-            "step": 0.05, # Keep fine-grained control
+            "low": 1.6,   
+            "high": 3.5,  
+            "step": 0.05, 
         },
     }
     return hyperparameter_space
@@ -206,7 +208,10 @@ def optimize_hyperparameters(
                         params[param_name] = trial.suggest_int(
                             param_name, param_config["low"], param_config["high"]
                         )
-
+                elif param_config["type"] == "categorical":
+                    params[param_name] = trial.suggest_categorical(
+                        param_name, param_config["choices"]
+                    )
             # Train model and get metrics
             model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
 
@@ -224,7 +229,7 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
             # Log to MLflow
-            if score > 0.35 and score > best_score:
+            if score > 0.33 and score > best_score:
                 log_to_mlflow(model, metrics, params, experiment_name)
             return score
 
@@ -434,14 +439,11 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "bootstrap": True,
-                "class_weight": 3.55,
-                "criterion": "entropy", 
-                "max_depth": 21,
-                "max_features": 0.58,
-                "min_samples_leaf": 54,
-                "min_samples_split": 36,
-                "n_estimators": 960,
+                "class_weight": 2.5,
+                "criterion": "entropy",
+                "min_samples_leaf": 26,
+                "min_samples_split": 42,
+                "n_estimators": 1180,
                 "n_jobs": 6,
                 "random_state": 19,
                 "verbose": 0,
@@ -452,8 +454,9 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
         # Log to MLflow
         # log_to_mlflow(model, metrics, params, experiment_name)
-        top_features = select_top_features_rf(model, X_train)
-        logger.info(f"Top features: {top_features}")
+        # top_features = select_top_features_rf(model, X_train)
+        compute_permutation_importance(model, X_eval, y_eval)
+        # logger.info(f"Top features: {top_features}")
         return model, metrics
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
@@ -489,6 +492,60 @@ def select_top_features_rf(model: RandomForestClassifier, X_features: pd.DataFra
     logger.info(f"Top features: {top_features}") # Log the selected features for visibility
 
     return top_features
+
+def compute_permutation_importance(
+    model,
+    X_val: pd.DataFrame, 
+    y_val: np.ndarray,
+    threshold: float = 0.3,
+    n_repeats: int = 20,
+    number_of_features: int = 100,
+) -> pd.DataFrame:
+    """
+    Compute permutation feature importance for a given metric and threshold.
+    Args:
+        model: Trained model with predict_proba(X) method.
+        X_val: Validation features (DataFrame).
+        y_val: Validation labels (array-like).
+        metric: Metric function (e.g., sklearn.metrics.precision_score).
+        threshold: Threshold for positive class prediction.
+        n_repeats: Number of shuffles per feature.
+        random_state: Seed for reproducibility.
+    Returns:
+        DataFrame with columns: ['feature', 'importance'] (mean drop in metric), sorted descending.
+    """
+    feature_names = X_val.columns.tolist()
+    y_val_np = y_val.values
+    # Compute baseline metric
+    probs = model.predict_proba(X_val)[:, 1]
+    preds = (probs >= threshold).astype(int)
+    # Fix: metric is being passed as a float value instead of a function
+    # We'll calculate precision directly since that's what was passed in
+    baseline = np.sum((y_val_np == 1) & (preds == 1)) / (np.sum(preds == 1))
+    logger.info(f"Baseline metric: {baseline:.4f}")
+    importances = []
+    for feat in feature_names:
+        drops = []
+        for i in range(n_repeats):
+            feat_idx = feature_names.index(feat) + 1
+            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i+1}")
+            X_shuffled = X_val.copy()
+            X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
+            probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
+            preds_shuffled = (probs_shuffled >= threshold).astype(int)
+            # Calculate precision directly instead of using metric parameter
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            drop = baseline - precision
+            drops.append(drop)
+        mean_drop = np.mean(drops)
+        importances.append((feat, mean_drop))
+        logger.debug(f"Feature: {feat}, Mean drop: {mean_drop:.4f}")
+    # Sort by importance descending
+    importances.sort(key=lambda x: x[1], reverse=True)
+    df_importance = pd.DataFrame(importances, columns=["feature", "importance"])
+    logger.info("Top features by permutation importance:")
+    logger.info(df_importance.head(number_of_features).to_string(index=False))
+    return df_importance
 
 
 def main():

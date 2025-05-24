@@ -148,3 +148,15 @@ src/models/StackedEnsemble/base/tree_based/xgboost_model_40.py
 base_rule.txt
 feature_importance.csv
 prompt_implementation.txt
+agentic-project-management-main/*
+*archieve
+*backup
+*/logs/*
+*.log
+*.parquet
+*combo*
+data/Create_data/api_football/venues.xlsx
+data/Create_data/api_football/api_test.py
+data/Create_data/api_football/api_test.json
+*ensemble_40
+*prompts

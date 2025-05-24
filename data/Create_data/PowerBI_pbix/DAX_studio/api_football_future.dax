@@ -3,25 +3,25 @@ EVALUATE
 SELECTCOLUMNS(
     FILTER(
         SUMMARIZECOLUMNS(
-            future_matches[home_encoded],
+            future_matches[home_encoded], 
             future_matches[away_encoded], 
-            future_matches[Datum], 
-            future_matches[Home], 
-            future_matches[Away],  
+            future_matches[Datum],   
+            future_matches[Home],   
+            future_matches[Away],     
             future_matches[venue_encoded],  
             future_matches[venue_capacity],  
-            future_matches[venue_grass],    
-            future_matches[venue_name],     
-            future_matches[league_name],    
-            future_matches[league_encoded],  
-            future_matches[referee],  
-            future_matches[referee_encoded],  
+            future_matches[venue_grass],        
+            future_matches[venue_name],              
+            future_matches[league_name],      
+            future_matches[league_encoded],      
+            future_matches[referee],   
+            future_matches[referee_encoded],    
             future_matches[Last_home_match],  
             future_matches[Last_away_match],  
             future_matches[away_attack_strength],
             future_matches[away_average_points],
             future_matches[away_corners_mean],
-            future_matches[away_corners_rollingaverage], 
+            future_matches[away_corners_rollingaverage],  
             future_matches[away_defense_weakness],
             future_matches[away_draw_rate],
             future_matches[Away_draws],
@@ -29,7 +29,7 @@ SELECTCOLUMNS(
             future_matches[Away_fouls_mean],
             future_matches[away_fouls_rollingaverage],
             future_matches[Away_goal_difference_cum],
-            future_matches[away_goal_difference_rollingaverage],
+            future_matches[away_goal_difference_rollingaverage], 
             future_matches[away_goal_rollingaverage],
             future_matches[away_h2h_dominance],
             future_matches[away_h2h_wins],
@@ -222,11 +222,11 @@ SELECTCOLUMNS(
     "comparison_home_poisson_distribution",ROUNDUP(future_matches[comparison_home_poisson_distribution], 0),
     "comparison_home_total",ROUNDUP(future_matches[comparison_home_total], 2),
     "draw_percent",ROUNDUP(future_matches[draw_percent], 0),
-    "away_win_percent",ROUNDUP(future_matches[away_win_percent], 0),
-    "home_win_percent",ROUNDUP(future_matches[home_win_percent], 0),
-    "goals_home_prediction",ROUNDUP(future_matches[goals_home_prediction], 0),
-    "goals_away_prediction",ROUNDUP(future_matches[goals_away_prediction], 0), 
-    "total_goals_prediction",ROUNDUP(future_matches[total_goals_prediction], 0)
-) 
+    "away_win_percent",ROUNDUP(future_matches[away_win_percent], 0), 
+    "home_win_percent",ROUNDUP(future_matches[home_win_percent], 0), 
+    "goals_home_prediction",ROUNDUP(future_matches[goals_home_prediction], 0), 
+    "goals_away_prediction",ROUNDUP(future_matches[goals_away_prediction], 0),   
+    "total_goals_prediction",ROUNDUP(future_matches[total_goals_prediction], 0) 
+)  
 
 /* END QUERY BUILDER */

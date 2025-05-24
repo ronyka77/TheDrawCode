@@ -3,21 +3,21 @@ EVALUATE
 SELECTCOLUMNS(
     FILTER(
         SUMMARIZECOLUMNS(
-            Model_data[home_encoded],
+            Model_data[home_encoded], 
             Model_data[away_encoded],  
-            Model_data[Date],
-            Model_data[home_team_name],
-            Model_data[away_team_name],  
-            Model_data[venue_encoded], 
-            Model_data[venue_capacity],    
-            Model_data[venue_grass],   
-            Model_data[venue_name],    
-            Model_data[league_encoded],     
-            Model_data[league_id],  
-            Model_data[league_name],  
-            Model_data[league_season],    
-            Model_data[match_outcome],
-            Model_data[referee],  
+            Model_data[Date], 
+            Model_data[home_team_name],  
+            Model_data[away_team_name],    
+            Model_data[venue_encoded],    
+            Model_data[venue_capacity],       
+            Model_data[venue_grass],       
+            Model_data[venue_name],     
+            Model_data[league_encoded],         
+            Model_data[league_id],    
+            Model_data[league_name],      
+            Model_data[league_season],     
+            Model_data[match_outcome],  
+            Model_data[referee],   
             Model_data[referee_encoded], 
             Model_data[away_attack_strength],  
             Model_data[away_average_points],
@@ -208,12 +208,12 @@ SELECTCOLUMNS(
     "home_yellow_cards_mean", ROUNDUP(Model_data[home_yellow_cards_mean], 2),
     "home_yellow_cards_rollingaverage", ROUNDUP(Model_data[home_yellow_cards_rollingaverage], 2),
     "HomeTeam_last_away_match", ROUNDUP(Model_data[HomeTeam_last_away_match], 2),
-    "referee_foul_rate", ROUNDUP(Model_data[referee_foul_rate], 2),
+    "referee_foul_rate", ROUNDUP(Model_data[referee_foul_rate], 2),   
     "home_founded_year", ROUNDUP(Model_data[home_founded_year], 2),
     "away_founded_year", ROUNDUP(Model_data[away_founded_year], 2), 
     "season_encoded", ROUNDUP(Model_data[season_encoded], 2),
-    "Season_league", Model_data[Season_league],
+    "Season_league", Model_data[Season_league], 
     "venue_id", ROUNDUP(Model_data[venue_id], 2)
-) 
+)  
 
 /* END QUERY BUILDER */
