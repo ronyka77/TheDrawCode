@@ -492,7 +492,7 @@ def hypertune_meta_learner(
     eval_meta_features: Optional[np.ndarray] = None,
     eval_meta_targets: Optional[np.ndarray] = None,
     meta_learner_type="tabnet",
-    n_trials=500,
+    n_trials=100,
     timeout=900000,
     target_precision=0.5,
     min_recall=0.25,
@@ -622,12 +622,17 @@ def hypertune_meta_learner(
                 "n_shared": trial.suggest_int("n_shared", 1, 7),
             }
             params.update(base_params)
-            # Suggest fit parameters
+            # Suggest fit parameters with proper batch size relationship
+            batch_size = trial.suggest_int("batch_size", 1024, 24576)  # Fit param
+            # Ensure virtual_batch_size is always <= batch_size to prevent CUDA errors
+            max_virtual_batch_size = min(4096, batch_size)
+            virtual_batch_size = trial.suggest_int("virtual_batch_size", 128, max_virtual_batch_size)  # Fit param
+            
             fit_params = {
                 "max_epochs": trial.suggest_int("max_epochs", 50, 250, step=5),  # Fit param
                 "patience": trial.suggest_int("patience", 4, 40, step=2),  # Fit param
-                "batch_size": trial.suggest_int("batch_size", 1024, 24576),  # Fit param
-                "virtual_batch_size": trial.suggest_int("virtual_batch_size", 128, 4096),  # Fit param
+                "batch_size": batch_size,
+                "virtual_batch_size": virtual_batch_size,
                 "eval_metric": params.get("eval_metric", ["logloss", "auc"]),
             }
             # params.update(fit_params)
@@ -776,6 +781,18 @@ def hypertune_meta_learner(
         # Train meta-learner
         try:
             if meta_learner_type == "tabnet":
+                # Clear GPU cache before training to prevent memory issues
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                # Validate batch size relationship
+                batch_size = params["batch_size"]
+                virtual_batch_size = params["virtual_batch_size"]
+                if virtual_batch_size > batch_size:
+                    logger.warning(f"Invalid batch size relationship: virtual_batch_size ({virtual_batch_size}) > batch_size ({batch_size}). Adjusting virtual_batch_size.")
+                    virtual_batch_size = min(virtual_batch_size, batch_size)
+                    params["virtual_batch_size"] = virtual_batch_size
+                
                 # Special handling for TabNet's training
                 meta_learner.fit(
                     meta_features_np,
@@ -783,8 +800,8 @@ def hypertune_meta_learner(
                     eval_set=[(eval_features_np, eval_targets_np)],
                     max_epochs=params["max_epochs"],
                     patience=params["patience"],
-                    batch_size=params["batch_size"],
-                    virtual_batch_size=params["virtual_batch_size"],
+                    batch_size=batch_size,
+                    virtual_batch_size=virtual_batch_size,
                     eval_metric=params.get("eval_metric", ["logloss", "auc"]),
                     weights=1,  # Use automatic class weighting
                     drop_last=False,
@@ -798,9 +815,13 @@ def hypertune_meta_learner(
                     target_precision,
                     min_recall,  # Use numpy targets here
                 )
-                if metrics["recall"] < min_recall:
+                recall = metrics["recall"]
+                precision = metrics["precision"]
+                trial.set_user_attr("best_threshold", best_threshold)
+                trial.set_user_attr("recall", recall)
+                if recall < min_recall:
                     return -1.0
-                return metrics["precision"]
+                return precision
             elif meta_learner_type == "resnet":
                 # Special handling for ResNet meta-learner
                 meta_learner.fit(
@@ -863,11 +884,23 @@ def hypertune_meta_learner(
             return metrics["precision"]
 
         except Exception as e:
-            logger.error(f"Error in trial {trial.number}: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error in trial {trial.number}: {error_msg}")
+            
+            # Handle CUDA-specific errors
+            if "CUDA" in error_msg or "device-side assert" in error_msg:
+                logger.error(f"CUDA error detected in trial {trial.number}. Clearing GPU cache and continuing.")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    # Force garbage collection
+                    import gc
+                    gc.collect()
+            
             return -1.0
 
     # Initialize variables for batch training
     best_score = -float("inf")
+    best_recall = -float("inf")
     best_params = {}
     global_top_trials = []
     top_trials = []
@@ -879,26 +912,36 @@ def hypertune_meta_learner(
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
+    else:
+        num_batches = 1
+        batch_size = total_trials
 
     # Callback function for tracking top trials
     def callback(study, trial):
-        nonlocal best_score, best_params, top_trials, best_model
+        nonlocal best_score, best_recall, best_params, top_trials, best_model
         if trial.value > best_score:
             best_score = trial.value
+            best_recall = trial.user_attrs["recall"]
+            best_params = trial.params
+            best_model = trial.user_attrs["model"]
+            logger.info(f"Best params: {best_params}")
+        if trial.value == best_score and trial.user_attrs["recall"] > best_recall:
+            best_recall = trial.user_attrs["recall"]
             best_params = trial.params
             best_model = trial.user_attrs["model"]
             logger.info(f"Best params: {best_params}")
         # Create a record for the current trial
-        current_run = (trial.value, trial.params, trial.number)
+        trial_recall = trial.user_attrs.get("recall", 0)
+        current_run = (trial.value, trial_recall, trial.params, trial.number)
         top_trials.append(current_run)
         # Sort and keep only top 10 for this batch
-        top_trials.sort(key=lambda x: x[0], reverse=True)
+        top_trials.sort(key=lambda x: (x[0], x[1]), reverse=True)
         top_trials[:] = top_trials[:10]
         if trial.number % 9 == 0:
-            table_header = "| Rank | Trial # | Score | Parameters |"
+            table_header = "| Rank | Trial # | Score | Recall | Parameters |"
             table_separator = "|------|---------|-------|------------|"
             table_rows = [
-                f"| {i + 1} | {rec[2]} | {rec[0]:.4f} | {rec[1]} |"
+                f"| {i + 1} | {rec[3]} | {rec[0]:.4f} | {rec[1]:.4f} | {rec[2]} |"
                 for i, rec in enumerate(top_trials)
             ]
             logger.info("Top trials in current batch:")
@@ -940,7 +983,7 @@ def hypertune_meta_learner(
 
     # Get best parameters from global top trials
     if global_top_trials:
-        best_score, best_params, best_trial_number = global_top_trials[0]
+        best_score, best_recall, best_params, best_trial_number = global_top_trials[0]
         logger.info(f"Best params: {best_params}")
 
     best_meta_learner = best_model

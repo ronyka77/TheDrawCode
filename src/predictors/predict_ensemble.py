@@ -281,7 +281,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                 if "Date" in matches_with_results.columns:
                     matches_with_results["Date"] = pd.to_datetime(matches_with_results["Date"])
                     matches_with_results = matches_with_results[
-                        matches_with_results["Date"] >= "2025-04-01"
+                        matches_with_results["Date"] >= "2025-05-01"
                     ]
                     matches_with_results = matches_with_results.sort_values(by="Date", ascending=False)
                 
@@ -379,7 +379,8 @@ def main():
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
     model_uris = [
-        "58f20c29490f4b539d0c4efbc7b9a406"
+        "7b3d6490c26e499f99e999a7a86975f8",
+        "cc5ff9dcc34a4f1aab2f0e270bb920b6"
     ]
     # Filter configuration to remove predictions near specific thresholds
     filter_config = {
@@ -415,6 +416,19 @@ def main():
                 print(f"Skipping invalid predictions from model {uri}")
                 continue
 
+            # Reorder columns to place draw_predicted and draw_probability last
+            cols = [
+                col
+                for col in predicted_df.columns
+                if col not in ["draw_predicted", "draw_probability"]
+            ]
+            cols.extend(["draw_predicted", "draw_probability"])
+            predicted_df = predicted_df[cols]
+            # Save individual model predictions
+            # model_output_path = Path(f"./data/prediction/ensemble/predictions_{uri}.xlsx")
+            # predicted_df.to_excel(model_output_path, index=False)
+            # print(f"Predictions for model {uri} saved to: {model_output_path}")
+
             # --- Apply remove threshold filtering if configured for this model ---
             config = filter_config.get(uri, None)
             if config is not None:
@@ -438,14 +452,7 @@ def main():
             print(f"Filtered to {len(predicted_df)} rows where draw_predicted = 1")
             # Save individual model predictions
             model_output_path = Path(f"./data/prediction/ensemble/predictions_model_{uri}.xlsx")
-            # Reorder columns to place draw_predicted and draw_probability last
-            cols = [
-                col
-                for col in predicted_df.columns
-                if col not in ["draw_predicted", "draw_probability"]
-            ]
-            cols.extend(["draw_predicted", "draw_probability"])
-            predicted_df = predicted_df[cols]
+            
             predicted_df.to_excel(model_output_path, index=False)
             print(f"Predictions for model {uri} saved to: {model_output_path}")
 

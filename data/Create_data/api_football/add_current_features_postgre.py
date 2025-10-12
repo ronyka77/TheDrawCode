@@ -32,7 +32,6 @@ class PostgreSQLFeatures:
 
         self.conn = None
         self._connect_db()
-        self.events_df = self.export_events() # Load events data on initialization
 
         # Placeholder for other collections/tables until schemas are provided
         self.predictions_table_name = "api_football.predictions" 
@@ -241,6 +240,7 @@ class PostgreSQLFeatures:
             data["venue_encoded"] = data["venue_id"]
             data["season_encoded"] = data["league_season"]
             data["league_encoded"] = data["league_id"]
+            data["league_country_encoded"] = le.fit_transform(data["league_country"])
             data["home_encoded"] = data["home_team_id"]
             data["away_encoded"] = data["away_team_id"]
 
@@ -471,7 +471,8 @@ class PostgreSQLFeatures:
                         df[col] = df[col].fillna(0)
                     elif col.startswith("venue_"):
                         df[col] = df[col].fillna("Unknown")
-            
+            le = LabelEncoder()
+            df["venue_city_encoded"] = le.fit_transform(df["venue_city"])
             export_path = "data/Create_data/data_files/base/api_venues.xlsx"
             df.to_excel(export_path, index=False)
             print(f"Normalized venues data exported to Excel: {export_path}")

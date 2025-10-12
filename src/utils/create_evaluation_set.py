@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from pyexcelerate import Workbook
+from sklearn.calibration import LabelEncoder
 from sklearn.model_selection import train_test_split
 
 # Add project root to Python path
@@ -27,6 +28,7 @@ except Exception as e:
     print(f"Fallback to current directory: {os.getcwd().parent}")
 
 from src.utils.advanced_goal_features import AdvancedGoalFeatureEngineer
+from src.utils.K_factor_calculation import calculate_draw_k_factor
 from src.utils.logger import ExperimentLogger
 from src.utils.mlflow_utils import MLFlowManager
 
@@ -1397,61 +1399,104 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
 
 def update_api_data_new_for_draws():
     """
-    Update prediction data for draws by adding advanced goal features and saving to api_prediction_data_new.xlsx
+    Update prediction data for draws by adding advanced goal features, featuretools automated features,
+    and saving to api_prediction_data_new.xlsx
     """
     try:
         # Load existing training data
         data_path = "data/prediction/new_api_prediction_data.xlsx"
         data_path_new = "data/prediction/new_api_prediction_data.xlsx"
         data = pd.read_excel(data_path)
+        
+        logger.info(f"Loaded initial data with shape: {data.shape}")
+        
+        # Extract year and month from Date column
+        data['Date'] = pd.to_datetime(data['Date'])
+        data['year'] = data['Date'].dt.year.astype(int)
+        data['month'] = data['Date'].dt.month.astype(int)
+        logger.info("Added year and month columns from Date")
+        
         # Initialize the feature engineer
         feature_engineer = AdvancedGoalFeatureEngineer()
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
-        logger.info(updated_data.shape)
+        updated_data = create_enhanced_categorical_features(updated_data)
+        logger.info(f"After advanced goal features: {updated_data.shape}")
 
-        # Filter data for dates before 2024-11-01
-        api_training_data = updated_data[updated_data["Date"] < "2025-01-01"]
+        updated_data = calculate_league_draw_k_factors(updated_data)
+        logger.info(f"League draw K-factors: {updated_data['k_factor'].unique()}")
+
+        # Add featuretools features
+        updated_data = add_featuretools_features(updated_data)
+
+        # Filter data for dates before 2025-04-15 (training data)
+        api_training_data = updated_data[updated_data["Date"] < "2025-04-15"]
         # Add is_draw column for training data
-        api_training_data.loc[:, "is_draw"] = (api_training_data["match_outcome"] == 2).astype(int)
+        api_training_data = api_training_data.copy()
+        api_training_data["is_draw"] = (api_training_data["match_outcome"] == 2).astype(int)
         logger.info("Added is_draw column to training data")
-        # Filter data for dates after 2024-11-01 where match_outcome is not blank
+        
+        # Filter data for dates after 2025-04-15 where match_outcome is not blank (evaluation data)
         api_prediction_eval = updated_data[
-            (updated_data["Date"] >= "2025-01-01") & (updated_data["match_outcome"].notna())
+            (updated_data["Date"] >= "2025-04-15") & (updated_data["match_outcome"].notna())
         ]
-        # Filter data for dates after 2024-11-01 where match_outcome is blank
+        
+        # Filter data for dates after 2025-04-15 where match_outcome is blank (prediction data)
         api_prediction_data = updated_data[
-            (updated_data["Date"] >= "2025-01-01") & (updated_data["match_outcome"].isna())
+            (updated_data["Date"] >= "2025-04-15") & (updated_data["match_outcome"].isna())
         ]
 
-        logger.info(f"api_prediction_data.shape: {api_prediction_data.shape}")
-        logger.info(f"api_prediction_eval.shape: {api_prediction_eval.shape}")
-        logger.info(f"api_training_data.shape: {api_training_data.shape}")
-        # Concatenate the filtered dataframes
+        logger.info("Data split summary:")
+        logger.info(f"  - Training data shape: {api_training_data.shape}")
+        logger.info(f"  - Evaluation data shape: {api_prediction_eval.shape}")
+        logger.info(f"  - Prediction data shape: {api_prediction_data.shape}")
+        
+        # Check if featuretools features are present in the splits
+        ft_features_in_data = [col for col in updated_data.columns if col.startswith('ft_')]
+        if ft_features_in_data:
+            for dataset_name, dataset in [("Training", api_training_data), ("Evaluation", api_prediction_eval), ("Prediction", api_prediction_data)]:
+                ft_features_present = [f for f in ft_features_in_data if f in dataset.columns]
+                logger.info(f"  - {dataset_name} data has {len(ft_features_present)} featuretools features")
+        
+        # Concatenate the filtered dataframes for final output
         updated_data = pd.concat([api_prediction_eval, api_prediction_data], ignore_index=True)
 
-        # Export df_before_2024_11_01 to data/api_training_final.xlsx and .parquet
+        # Export training data
         save_data_to_excel(api_training_data, "data/new_api_training_final.xlsx", "api_training_final")
         create_parquet_files(api_training_data, "data/new_api_training_final.parquet")
-        logger.info("api_training_final.xlsx and .parquet updated")
+        logger.info("api_training_final.xlsx and .parquet updated with featuretools features")
 
-        # Export df_after_2024_11_01_not_blank to data/prediction/api_predictions_eval.xlsx and .parquet
+        # Export evaluation data
         save_data_to_excel(
             api_prediction_eval, "data/prediction/new_api_prediction_eval.xlsx", "api_prediction_eval"
         )
         create_parquet_files(api_prediction_eval, "data/prediction/new_api_prediction_eval.parquet")
-        logger.info("api_prediction_eval.xlsx and .parquet updated")
+        logger.info("api_prediction_eval.xlsx and .parquet updated with featuretools features")
 
-        # Export df_after_2024_11_01_blank to data/prediction/api_predictions_data.xlsx and .parquet
+        # Export prediction data
         save_data_to_excel(
             api_prediction_data, "data/prediction/new_api_predictions_data.xlsx", "api_prediction_data"
         )
         create_parquet_files(api_prediction_data, "data/prediction/new_api_predictions_data.parquet")
-        logger.info("api_predictions_data.xlsx and .parquet updated")
+        logger.info("api_predictions_data.xlsx and .parquet updated with featuretools features")
+        
         # Save updated data back to Excel
         updated_data.to_excel(data_path_new, index=False)
+        
+        logger.info("=== Data Update Complete ===")
+        logger.info(f"Final data shape: {updated_data.shape}")
+        
+        # Feature summary
+        if ft_features_in_data:
+            logger.info(f"Successfully integrated {len(ft_features_in_data)} automated features from featuretools")
+            logger.info("Your ensemble models can now use these enhanced features for better performance")
+        else:
+            logger.info("Data updated with existing feature engineering (featuretools features not added)")
+            
     except Exception as e:
-        logger.info(f"Error updating training data for draws: {str(e)}")
+        logger.error(f"Error updating training data for draws: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 
 def import_training_data_ensemble_new():
@@ -1504,11 +1549,7 @@ def import_training_data_ensemble_new():
             "mid_season_factor",
         ]
         data = data.drop(columns=columns_to_drop, errors="ignore")
-        # Drop rows where home_failed_to_score_away is NA
-        # data = data.dropna(subset=['home_failed_to_score_away'])
-        # logger.info(f"Dropped rows with NA in home_failed_to_score_away, shape: {data.shape}")
-        # Convert all numeric-like columns (excluding problematic_cols that have
-        # already been handled)
+        # Convert all numeric-like columns
         data = convert_numeric_columns(
             data=data,
             columns=data.columns.tolist(),
@@ -1536,7 +1577,7 @@ def import_training_data_ensemble_new():
         logger.info("Exported processed training data to parquet format")
     # Split into train and test sets
     train_data, test_data = train_test_split(
-        data, test_size=0.3, random_state=42, stratify=data["is_draw"]
+        data, test_size=0.2, random_state=42, stratify=data["is_draw"]
     )
     X_train = train_data.drop(columns="is_draw", errors="ignore")
     y_train = train_data["is_draw"]
@@ -1668,7 +1709,7 @@ def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> U
         with open(json_path) as f:
             features = json.load(f)
         # Validate loaded data structure
-        if not all(key in features for key in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm"]):
+        if not all(key in features for key in ["xgb", "catboost", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm"]):
             raise ValueError("JSON file missing required model keys")
         # Return specific model type if requested
         if model_type is not None:
@@ -1676,9 +1717,9 @@ def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> U
                 common_features = features["all"]
                 logger.info("Returning features common to all models")
                 return common_features
-            elif model_type not in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm", "all"]:
+            elif model_type not in ["xgb", "catboost", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm", "all"]:
                 raise ValueError(
-                    f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'mlp', 'pytorch', 'svm', 'all'"
+                    f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'catboost', 'lgbm', 'rf', 'tabnet', 'mlp', 'pytorch', 'svm', 'all'"
                 )
             logger.info(f"Returning selected features for model type: {model_type}")
             return features[model_type]
@@ -1703,6 +1744,130 @@ def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> U
         )
         raise
 
+
+def create_enhanced_categorical_features(data):
+    """
+    Create enhanced categorical features that leverage team, league, and temporal interactions.
+    
+    Args:
+        X_train (pd.DataFrame): Training features
+        X_test (pd.DataFrame): Test features
+        X_eval (pd.DataFrame): Evaluation features
+        
+    Returns:
+        tuple: (X_train_enhanced, X_test_enhanced, X_eval_enhanced)
+    """
+    logger.info("Creating enhanced categorical features for better model performance")
+    
+    # Create copies to avoid modifying original data
+    data_enh = data.copy()
+
+    # Handle NaN, inf, and -inf values in base encoded columns
+    base_encoded_columns = [
+        'home_encoded', 'away_encoded', 'venue_encoded', 'league_encoded', 
+        'season_encoded', 'referee_encoded','away_league_position','home_league_position'
+    ]
+    
+    for col in base_encoded_columns:
+        if col in data_enh.columns:
+            # Replace NaN, inf, and -inf with 0
+            data_enh[col] = data_enh[col].replace([np.inf, -np.inf], np.nan).fillna(0)
+            # Ensure integer type for encoded columns
+            data_enh[col] = data_enh[col].astype(int)
+    
+    logger.info("Replaced NaN, inf, and -inf values in base encoded columns with 0")
+    encoder = LabelEncoder()
+    
+    for df in [data_enh]:
+        # 1. Team-League Interaction Features
+        if 'home_encoded' in df.columns and 'league_encoded' in df.columns:
+            df['home_team_league'] = df['home_encoded'].astype(str) + '_' + df['league_encoded'].astype(str)
+            df['away_team_league'] = df['away_encoded'].astype(str) + '_' + df['league_encoded'].astype(str)
+            df['home_team_league_encoded'] = encoder.fit_transform(df['home_team_league'])
+            df['away_team_league_encoded'] = encoder.fit_transform(df['away_team_league'])
+        
+        # 2. Team Matchup Feature (captures historical team dynamics)
+        if 'home_encoded' in df.columns and 'away_encoded' in df.columns:
+            # Create consistent team pair identifier (smaller ID first)
+            df['team_pair'] = df.apply(
+                lambda row: f"{min(row['home_encoded'], row['away_encoded'])}_{max(row['home_encoded'], row['away_encoded'])}", 
+                axis=1
+            )
+            df['team_pair_encoded'] = encoder.fit_transform(df['team_pair'])
+        
+        # 3. Season-League Context
+        if 'season_encoded' in df.columns and 'league_encoded' in df.columns:
+            df['season_league'] = df['season_encoded'].astype(str) + '_' + df['league_encoded'].astype(str)
+            df['season_league_encoded'] = encoder.fit_transform(df['season_league'])
+        
+        # 4. Venue-League Context (captures venue effects within leagues)
+        if 'venue_encoded' in df.columns and 'league_encoded' in df.columns:
+            df['venue_league'] = df['venue_encoded'].astype(str) + '_' + df['league_encoded'].astype(str)
+            df['venue_league_encoded'] = encoder.fit_transform(df['venue_league'])
+        
+        # 5. Temporal Features for Seasonality
+        if 'year' in df.columns and 'month' in df.columns:
+            df['year_month'] = df['year'].astype(str) + '_' + df['month'].astype(str)
+            df['year_month_encoded'] = encoder.fit_transform(df['year_month'])
+        
+        # 6. Team Strength Tier (based on actual league positions)
+        if 'home_league_position' in df.columns and 'away_league_position' in df.columns:
+            # Create team strength tiers based on league positions
+            # 1-4: tier 1 (elite), 5-8: tier 2 (strong), 9-12: tier 3 (medium), 13+: tier 4 (weak)
+            def get_strength_tier(position):
+                if pd.isna(position):
+                    return 0  # Unknown/missing position
+                elif position <= 4:
+                    return 1  # Elite (top 4)
+                elif position <= 8:
+                    return 2  # Strong (5-8)
+                elif position <= 12:
+                    return 3  # Medium (9-12)
+                else:
+                    return 4  # Weak (13+)
+            
+            df['home_strength_tier'] = df['home_league_position'].apply(get_strength_tier)
+            df['away_strength_tier'] = df['away_league_position'].apply(get_strength_tier)
+            
+            # Create strength difference feature (useful for predicting outcomes)
+            df['strength_tier_difference'] = abs(df['home_strength_tier'] - df['away_strength_tier'])
+            
+            logger.info(f"Home strength tier distribution: {df['home_strength_tier'].value_counts().sort_index().to_dict()}")
+            logger.info(f"Away strength tier distribution: {df['away_strength_tier'].value_counts().sort_index().to_dict()}")
+            logger.info(f"Strength difference distribution: {df['strength_tier_difference'].value_counts().sort_index().to_dict()}")
+        
+        # 7. Match Competitiveness Level (average match quality)
+        if 'home_strength_tier' in df.columns and 'away_strength_tier' in df.columns:
+            # Create competitiveness as average of both team tiers: (home_tier + away_tier) / 2
+            df['match_competitiveness'] = (df['home_strength_tier'] + df['away_strength_tier']) / 2
+    
+    logger.info("Enhanced categorical features created:")
+    new_features = ['home_team_league_encoded', 'away_team_league_encoded', 'team_pair_encoded', 'season_league_encoded', 
+                    'venue_league_encoded', 'year_month_encoded', 'home_strength_tier', 'away_strength_tier', 
+                    'match_competitiveness']
+    
+    for feature in new_features:
+        if feature in data_enh.columns:
+            logger.info(f"  - {feature}: {data_enh[feature].nunique()} unique values")
+    
+    return data_enh
+
+def calculate_league_draw_k_factors(data):
+    """Calculate draw-specific K-factors for all leagues and add to data."""
+    league_draw_k_factors = {}
+    
+    unique_leagues = data["league_encoded"].unique()
+    for league in unique_leagues:
+        league_data = data[data["league_encoded"] == league]
+        draw_k_factor = calculate_draw_k_factor(league_data, logger)
+        league_draw_k_factors[league] = draw_k_factor
+        
+        logger.info(f"League {league} - Draw K-factor: {draw_k_factor}")
+    
+    # Add k_factor column to data based on league_encoded
+    data['k_factor'] = data['league_encoded'].map(league_draw_k_factors)
+    
+    return data
 
 @retry_on_error(max_retries=3, delay=1.0)
 def import_training_data_ensemble_date_stratified():
@@ -1812,9 +1977,23 @@ def import_training_data_ensemble_date_stratified():
     logger.info(f"Found {len(date_counts)} unique dates in dataset")
     logger.info(f"Date range: {date_counts.index.min()} to {date_counts.index.max()}")
     logger.info(f"Average matches per date: {date_counts.mean():.1f}")
+
+    # Drop last 3 dates to prevent data leakage
+    sorted_dates = sorted(date_counts.index)
+    dates_to_drop = sorted_dates[-7:]  # Get the last 7 dates
+    
+    if dates_to_drop:
+        logger.info(f"Dropping last 3 dates to prevent data leakage: {dates_to_drop}")
+        data = data[~data['date_encoded'].isin(dates_to_drop)]
+        
+        # Update date counts after dropping
+        date_counts = data['date_encoded'].value_counts().sort_index()
+        logger.info(f"After dropping last 3 dates: {len(date_counts)} unique dates remaining")
+        logger.info(f"New date range: {date_counts.index.min()} to {date_counts.index.max()}")
+        logger.info(f"Dropped {len(data) - data.shape[0] if 'original_shape' in locals() else 'unknown'} samples")
     
     # Check for dates with insufficient samples
-    min_samples_per_date = 7  # Minimum to ensure at least 1 validation sample (15% of 7 = 1.05)
+    min_samples_per_date = 10  # Minimum to ensure at least 1 validation sample (15% of 7 = 1.05)
     insufficient_dates = date_counts[date_counts < min_samples_per_date]
     if len(insufficient_dates) > 0:
         logger.info(f"Warning: {len(insufficient_dates)} dates have fewer than {min_samples_per_date} samples")
@@ -1837,7 +2016,7 @@ def import_training_data_ensemble_date_stratified():
         try:
             date_train_idx, date_val_idx = train_test_split(
                 date_data.index,
-                test_size=0.15,  # 15% for validation
+                test_size=0.30,  # 15% for validation
                 random_state=42,
                 stratify=date_data['is_draw']
             )
@@ -1893,13 +2072,235 @@ def import_training_data_ensemble_date_stratified():
     return X_train, y_train, X_test, y_test, X_val, y_val
 
 
+def integrate_featuretools_features_to_selection():
+    """
+    Integrate featuretools-generated features into the existing feature selection JSON files.
+    This function loads existing feature selections and adds the best featuretools features
+    using intelligent evaluation methods.
+    """
+    try:
+        from src.utils.featuretools_automated_features import SoccerFeaturetoolsEngineer
+        
+        logger.info("=== Integrating Featuretools Features to Selection ===")
+        
+        # Load training data to evaluate featuretools features
+        logger.info("Loading training data for feature evaluation...")
+        X_train, y_train, _, _, _, _ = import_training_data_ensemble_date_stratified()
+        
+        # Check if featuretools features are present
+        ft_features = [col for col in X_train.columns if col.startswith('ft_')]
+        
+        if not ft_features:
+            logger.warning("No featuretools features found in training data")
+            logger.info("Run update_api_data_new_for_draws() first to generate featuretools features")
+            return
+        
+        logger.info(f"Found {len(ft_features)} featuretools features in training data")
+        
+        # Initialize featuretools engineer for feature evaluation
+        ft_engineer = SoccerFeaturetoolsEngineer(logger=logger, mlflow_tracking=False)
+        
+        # Evaluate featuretools features using multiple methods
+        logger.info("Evaluating featuretools features using multiple methods...")
+        
+        # Get top features using different evaluation methods
+        top_features_mi = ft_engineer.evaluate_feature_importance(
+            X=X_train, 
+            y=y_train, 
+            new_feature_names=ft_features,
+            method='mutual_info',
+            top_k=50
+        )
+        
+        top_features_corr = ft_engineer.evaluate_feature_importance(
+            X=X_train, 
+            y=y_train, 
+            new_feature_names=ft_features,
+            method='correlation',
+            top_k=50
+        )
+        
+        top_features_combined = ft_engineer.evaluate_feature_importance(
+            X=X_train, 
+            y=y_train, 
+            new_feature_names=ft_features,
+            method='combined',
+            top_k=100
+        )
+        
+        logger.info("Evaluation complete:")
+        logger.info(f"  - Top features by mutual info: {len(top_features_mi)}")
+        logger.info(f"  - Top features by correlation: {len(top_features_corr)}")
+        logger.info(f"  - Top features by combined score: {len(top_features_combined)}")
+        
+        # Load existing feature selections
+        json_path = project_root / "src" / "utils" / "selected_features_ensemble_new.json"
+        
+        if not json_path.exists():
+            logger.error(f"Feature selection file not found: {json_path}")
+            return
+        
+        with open(json_path) as f:
+            existing_selections = json.load(f)
+        
+        logger.info("Loaded existing feature selections")
+        
+        # Model-specific feature selection strategy for featuretools features
+        model_feature_strategies = {
+            'xgb': top_features_combined[:25],        # XGBoost handles many features well
+            'catboost': top_features_mi[:20],         # CatBoost + mutual info for categorical handling
+            'lgbm': top_features_combined[:20],       # LightGBM similar to XGBoost
+            'rf': top_features_corr[:15],             # Random Forest + correlation
+            'tabnet': top_features_combined[:30],     # TabNet can handle complex interactions
+            'mlp': top_features_corr[:15],            # Neural networks + correlation for linear relationships
+            'pytorch': top_features_combined[:25],    # PyTorch can handle complex interactions
+            'svm': top_features_corr[:10]             # SVM + correlation for linear relationships
+        }
+        
+        # Create updated feature selections
+        updated_selections = existing_selections.copy()
+        
+        # Add strategically selected featuretools features to each model
+        for model_name, selected_ft_features in model_feature_strategies.items():
+            if model_name in updated_selections:
+                # Remove duplicates while preserving order
+                new_model_features = []
+                existing_model_features = set(updated_selections[model_name])
+                
+                for feature in selected_ft_features:
+                    if feature not in existing_model_features:
+                        new_model_features.append(feature)
+                        existing_model_features.add(feature)
+                
+                # Add new featuretools features to existing selection
+                updated_selections[model_name].extend(new_model_features)
+                logger.info(f"Added {len(new_model_features)} featuretools features to {model_name}")
+                
+                if new_model_features:
+                    logger.info(f"   {model_name} examples: {new_model_features[:3]}")
+        
+        # Update 'all' selection with all top featuretools features
+        all_top_ft_features = list(dict.fromkeys(top_features_combined))  # Remove duplicates
+        existing_all_features = set(updated_selections.get('all', []))
+        new_all_features = [f for f in all_top_ft_features if f not in existing_all_features]
+        
+        if 'all' not in updated_selections:
+            updated_selections['all'] = []
+        updated_selections['all'].extend(new_all_features)
+        
+        # Save updated selections with metadata
+        output_data = {
+            'feature_selections': updated_selections,
+            'metadata': {
+                'last_updated': pd.Timestamp.now().isoformat(),
+                'featuretools_integration': {
+                    'total_ft_features_available': len(ft_features),
+                    'ft_features_selected': len(new_all_features),
+                    'selection_methods': ['mutual_info', 'correlation', 'combined'],
+                    'model_strategies': {
+                        'xgb': 'Combined score (handles many features)',
+                        'catboost': 'Mutual information (categorical handling)',
+                        'lgbm': 'Combined score (tree-based)',
+                        'rf': 'Correlation (ensemble method)',
+                        'tabnet': 'Combined score (deep tabular)',
+                        'mlp': 'Correlation (linear relationships)',
+                        'pytorch': 'Combined score (complex interactions)',
+                        'svm': 'Correlation (linear classifier)'
+                    }
+                }
+            }
+        }
+        
+        # Backup original file
+        backup_path = json_path.with_suffix('.backup.json')
+        with open(backup_path, 'w') as f:
+            json.dump(existing_selections, f, indent=2)
+        logger.info(f"Backed up original selections to: {backup_path}")
+        
+        # Save updated selections
+        with open(json_path, 'w') as f:
+            json.dump(output_data, f, indent=2)
+        
+        logger.info(f"Updated feature selections saved to: {json_path}")
+        logger.info("Integration summary:")
+        logger.info(f"  - Total featuretools features available: {len(ft_features)}")
+        logger.info(f"  - Featuretools features selected for 'all': {len(new_all_features)}")
+        logger.info(f"  - Selection efficiency: {len(new_all_features)}/{len(ft_features)} = {len(new_all_features)/len(ft_features)*100:.1f}%")
+        
+        # Create feature analysis report
+        feature_analysis = {
+            'temporal_features': [f for f in ft_features if 'ft_temporal_' in f],
+            'relational_features': [f for f in ft_features if 'ft_relational_' in f],
+            'interaction_features': [f for f in ft_features if f.startswith('ft_') and 'temporal' not in f and 'relational' not in f],
+            'selected_temporal': [f for f in new_all_features if 'ft_temporal_' in f],
+            'selected_relational': [f for f in new_all_features if 'ft_relational_' in f],
+            'selected_interaction': [f for f in new_all_features if f.startswith('ft_') and 'temporal' not in f and 'relational' not in f]
+        }
+        
+        logger.info("Feature type analysis:")
+        for feature_type, features in feature_analysis.items():
+            if 'selected_' in feature_type:
+                original_type = feature_type.replace('selected_', '')
+                if original_type in feature_analysis:
+                    original_count = len(feature_analysis[original_type])
+                    selected_count = len(features)
+                    if original_count > 0:
+                        logger.info(f"   {feature_type}: {selected_count}/{original_count} ({selected_count/original_count*100:.1f}%)")
+        
+        logger.info("=== Featuretools Integration Complete ===")
+        
+    except Exception as e:
+        logger.error(f"Error integrating featuretools features: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+
+def add_featuretools_features(updated_data):
+    """
+    Add featuretools automated features to the dataset.
+    
+    Args:
+        updated_data (pd.DataFrame): Input data to enhance with featuretools features
+        
+    Returns:
+        pd.DataFrame: Data enhanced with featuretools features
+    """
+    # Import the featuretools engineer
+    from src.utils.featuretools_automated_features import SoccerFeaturetoolsEngineer
+    
+    
+    
+    # Initialize with central logger
+    logger = ExperimentLogger("soccer_features")
+    # FEATURETOOLS INTEGRATION - Add automated feature engineering
+    logger.info("=== Starting Featuretools Automated Feature Engineering ===")
+    engineer = SoccerFeaturetoolsEngineer(
+        experiment_logger=logger,
+        max_depth=2,
+        chunk_size=5000,  # Automatically calculated if None
+        memory_limit_gb=4.0
+    )
+
+    # Run optimized feature engineering
+    enhanced_df, feature_defs = engineer.run_hybrid_feature_engineering(
+        df=updated_data,
+        include_temporal=True,
+        include_relational=True,
+        include_interactions=True
+    )
+
+    # Get performance statistics
+    stats = engineer.get_performance_stats()
+    logger.info("Feature engineering stats", extra=stats)
+    return enhanced_df
+
 if __name__ == "__main__":
     # update_api_training_data_for_draws()
     # logger.info("Training data updated successfully")
     # update_api_data_for_draws()
     # logger.info("Prediction data updated successfully")
-    # update_api_data_new_for_draws()
-    # logger.info("New prediction data updated successfully")
+    update_api_data_new_for_draws()
+    logger.info("New prediction data updated successfully")
 
     X_train, y_train, X_test, y_test, X_val, y_val = import_training_data_ensemble_date_stratified()
     logger.info(f"Ensemble evaluation set created with columns: {X_train.shape} and {y_train.shape}")

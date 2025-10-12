@@ -704,7 +704,7 @@ def optimal_feature_selection_pipeline(X, y, target_range=(50, 70)):
         'final_selector': rfe
     }
 
-def random_forest_staged_selection(X, y, X_eval, y_eval, target_features=80):
+def random_forest_staged_selection(X, y, X_eval, y_eval, target_features=150):
     """Multi-stage Random Forest feature selection with different objectives"""
     
     logger.info(f"Starting Random Forest staged selection with {X.shape[1]} initial features")
@@ -795,25 +795,10 @@ def main():
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
 
-        # current_params, current_metrics = hypertune_random_forest(experiment_name)
-        # logger.info(f"Run completed with parameters: {current_params}")
-        # logger.info(f"Run metrics: {current_metrics}")
-
-        # Train model with precision target
-        # X_train_optimal, selectors_info = optimal_feature_selection_pipeline(X_train, y_train)
-        # final_feature_names = selectors_info['final_feature_names']
-        # logger.info(f"Feature selection completed. Selected {len(final_feature_names)} features:")
-        # for i, feature_name in enumerate(final_feature_names, 1):
-        #     logger.info(f"  {i:2d}. {feature_name}")
         X_combined = pd.concat([X_train, X_test], axis=0, ignore_index=True)
         y_combined = pd.concat([y_train, y_test], axis=0, ignore_index=True)
-        stage2_features, avg_importance = random_forest_staged_selection(X_combined, y_combined, X_eval, y_eval, target_features=80)
+        stage2_features, avg_importance = random_forest_staged_selection(X_combined, y_combined, X_eval, y_eval, target_features=150)
         
-
-        
-        # best_model, best_metrics = train_with_precision_target(
-        #     X_train, y_train, X_test, y_test, X_eval, y_eval
-        # )
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
 

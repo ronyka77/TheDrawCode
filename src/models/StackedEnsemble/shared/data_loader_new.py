@@ -5,7 +5,6 @@ import pandas as pd
 from src.utils.create_evaluation_set import (
     create_evaluation_set_new,
     import_selected_features_ensemble_new,
-    import_training_data_ensemble_date_stratified,
     import_training_data_ensemble_new,
 )
 from src.utils.logger import ExperimentLogger
@@ -38,19 +37,8 @@ class DataLoader:
             self._cached_features = import_selected_features_ensemble_new("all")
             self.logger.info(f"Loaded {len(self._cached_features)} selected features")
 
-        # Load training and test data
-        # X_train, y_train, X_test, y_test = import_training_data_ensemble_new()
-        # self.logger.info(
-        #     "Loaded training/test data:"
-        #     f"\n - Training samples: {len(X_train)}"
-        #     f"\n - Test samples: {len(X_test)}"
-        # )
-
-        # # Load validation data (completely held-out set)
-        # X_val, y_val = create_evaluation_set_new()
-        # self.logger.info(f"Loaded validation data: {len(X_val)} samples")
-
-        X_train, y_train, X_test, y_test, X_val, y_val = import_training_data_ensemble_date_stratified()
+        X_train, y_train, X_test, y_test = import_training_data_ensemble_new()
+        X_val, y_val = create_evaluation_set_new()
 
         # Apply feature selection to all splits and ensure consistent column order
         self.logger.info("Applying feature selection with consistent column ordering")
@@ -82,18 +70,6 @@ class DataLoader:
         X_train = X_train.replace([np.inf, -np.inf], 0)
         X_test = X_test.replace([np.inf, -np.inf], 0)
         X_val = X_val.replace([np.inf, -np.inf], 0)
-
-        # Log NaN replacement statistics
-        train_nan_count_before = X_train.isna().sum().sum()
-        test_nan_count_before = X_test.isna().sum().sum()
-        val_nan_count_before = X_val.isna().sum().sum()
-
-        self.logger.info(
-            "NaN replacement complete:"
-            f"\n - Train: {train_nan_count_before} NaN values replaced"
-            f"\n - Test: {test_nan_count_before} NaN values replaced"
-            f"\n - Validation: {val_nan_count_before} NaN values replaced"
-        )
 
         # Log final data shapes
         self.logger.info(

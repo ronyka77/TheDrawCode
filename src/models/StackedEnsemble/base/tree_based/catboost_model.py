@@ -8,6 +8,7 @@ threshold tuning, and MLflow integration for experiment tracking.
 The implementation focuses on high precision while maintaining a minimum recall threshold.
 """
 
+import gc
 import os
 import random
 import time
@@ -18,6 +19,7 @@ import mlflow
 import numpy as np
 import optuna
 import pandas as pd
+import torch
 from catboost import Pool
 from sklearn.feature_selection import RFECV
 from sklearn.model_selection import StratifiedKFold
@@ -43,53 +45,50 @@ mlrunds_dir = setup_mlflow_tracking(experiment_name)
 min_recall = 0.25  # Minimum acceptable recall
 n_trials = 100000  # Number of hyperparameter optimization trials as in notebook
 
+
 # Base parameters as in the notebook
 base_params = {
     "loss_function": "Logloss",
     "eval_metric": "AUC",
-    "custom_metric": ["Precision", "Recall"],
+    "custom_metric": ["AUC", "Recall"],
     "thread_count": 8,
     "random_seed": 19,
-    "task_type": "CPU",
+    "task_type": "CPU",  # Reverted back to CPU
     "verbose": False,
+    # SPEED OPTIMIZATIONS:
+    # "bootstrap_type": "Bayesian",  # Faster than default
+    "leaf_estimation_method": "Newton",  # Faster convergence
+    "grow_policy": "SymmetricTree",  # Faster tree construction
 }
-
 # Set fixed seed and hash seed for determinism
 SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
 random.seed(SEED)
 np.random.seed(SEED)
 
-# Restrict parallel threads across various libraries
-os.environ["OMP_NUM_THREADS"] = "12"
-os.environ["MKL_NUM_THREADS"] = "12"
-os.environ["OPENBLAS_NUM_THREADS"] = "12"
+# Restrict parallel threads across various libraries for CPU optimization
+os.environ["OMP_NUM_THREADS"] = "8"
+os.environ["MKL_NUM_THREADS"] = "8"
+os.environ["OPENBLAS_NUM_THREADS"] = "8"
 
 
 def load_hyperparameter_space():
     """
-    Define a tightened hyperparameter space for CatBoost tuning based on the
-    top 10 best trials from the last hypertuning cycle. The updated ranges aim
-    to increase precision by focusing on the sweet-spot regions observed.
-    Returns:
-        dict: Hyperparameter space configuration with narrowed ranges and steps.
+    CPU-optimized hyperparameter space for CatBoost
     """
     hyperparameter_space = {
-        "iterations": {"type": "int", "low": 200, "high": 6000, "log": False, "step": 10},
-        "learning_rate": {"type": "float", "low": 0.060, "high": 0.20, "log": False, "step": 0.001},
+        "iterations": {"type": "int", "low": 400, "high": 3000, "log": False, "step": 10},
+        "learning_rate": {"type": "float", "low": 0.060, "high": 0.25, "log": False, "step": 0.005},
         "depth": {"type": "int", "low": 5, "high": 12, "log": False, "step": 1},
-        "min_data_in_leaf": {"type": "int", "low": 200, "high": 600, "log": False, "step": 10},
-        "colsample_bylevel": {"type": "float", "low": 0.58, "high": 0.75, "log": False, "step": 0.01},
-        "subsample": {"type": "float", "low": 0.50, "high": 0.75, "log": False, "step": 0.005},
-        "bagging_temperature": {"type": "float", "low": 1.0, "high": 10.0, "log": False, "step": 0.1},
-        "reg_lambda": {"type": "float", "low": 6.0, "high": 20.0, "log": False, "step": 0.1},
-        "leaf_estimation_iterations": {"type": "int", "low": 2, "high": 20, "log": False, "step": 1},
-        "early_stopping_rounds": {"type": "int", "low": 50, "high": 2000, "log": False, "step": 10},
-        "scale_pos_weight": {"type": "float", "low": 1.5, "high": 5.0, "log": False, "step": 0.05},
-        "max_bin": {"type": "int", "low": 200, "high": 700, "log": False, "step": 10},
-        "border_count": {"type": "int", "low": 32, "high": 255, "log": False, "step": 8},
-        "feature_border_type": {"type": "categorical", "choices": ["Median", "Uniform", "UniformAndQuantiles", "MaxLogSum", "MinEntropy", "GreedyLogSum"]},
-        "boosting_type": {"type": "categorical", "choices": ["Ordered", "Plain"]},
+        "min_data_in_leaf": {"type": "int", "low": 50, "high": 500, "log": False, "step": 10},
+        "colsample_bylevel": {"type": "float", "low": 0.50, "high": 0.75, "log": False, "step": 0.01},
+        "subsample": {"type": "float", "low": 0.40, "high": 0.75, "log": False, "step": 0.005},
+        "bagging_temperature": {"type": "float", "low": 0.5, "high": 10.0, "log": False, "step": 0.05},
+        "reg_lambda": {"type": "float", "low": 2.0, "high": 20.0, "log": False, "step": 0.1},
+        "leaf_estimation_iterations": {"type": "int", "low": 2, "high": 14, "log": False, "step": 1},
+        "early_stopping_rounds": {"type": "int", "low": 50, "high": 1500, "log": False, "step": 10},
+        "scale_pos_weight": {"type": "float", "low": 1.8, "high": 3.5, "log": False, "step": 0.01},
+        "max_bin": {"type": "int", "low": 32, "high": 256, "log": False, "step": 16},
     }
     return hyperparameter_space
 
@@ -107,6 +106,7 @@ def create_model(model_params):
         params = base_params.copy()
         # Update with provided parameters
         params.update(model_params)
+        # params["class_weights"] = class_weights
         # Create model
         model = cb.CatBoostClassifier(**params)
         return model
@@ -118,46 +118,43 @@ def create_model(model_params):
 
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
-    Train a CatBoost model with early stopping and threshold optimization.
-    Updated to match notebook implementation.
-    Args:
-        X_train: Training features
-        y_train: Training labels
-        X_test: Validation features
-        y_test: Validation labels
-        X_eval: Evaluation features
-        y_eval: Evaluation labels
-        model_params: Model parameters
-    Returns:
-        tuple: (trained_model, metrics)
+    Train a CatBoost model with proper data type handling.
     """
     try:
-        # Combine training and validation data while preserving indexes
+        # Ensure proper data types
         X_combined = pd.concat([X_train, X_test], axis=0)
         y_combined = pd.concat([y_train, y_test], axis=0)
 
-        # Reset indexes to ensure proper alignment
-        X_combined.reset_index(drop=True, inplace=True)
-        y_combined.reset_index(drop=True, inplace=True)
+        # Reset indexes and ensure proper types
+        X_combined = X_combined.reset_index(drop=True)
+        y_combined = y_combined.reset_index(drop=True)
+        X_eval = X_eval.reset_index(drop=True)
+        y_eval = y_eval.reset_index(drop=True)
+
+        # Convert to proper data types for CatBoost
+        X_combined = X_combined.astype(np.float32)
+        y_combined = y_combined.astype(np.int32)
+        X_eval = X_eval.astype(np.float32)
+        y_eval = y_eval.astype(np.int32)
+
+        # Create Pool objects for CatBoost
+        train_pool = Pool(X_combined, y_combined)
+        eval_pool = Pool(X_eval, y_eval)
         
-        # Extract early stopping rounds if present
+        # Extract early stopping rounds
         early_stopping_rounds = model_params.pop("early_stopping_rounds", 100)
 
-        # Create model with remaining parameters
+        # Create model
         model = create_model(model_params)
 
-        # Create eval set for early stopping
-        eval_set = Pool(X_eval, y_eval)
-
-        # Fit model with early stopping
+        # Fit model
         model.fit(
-            X_combined,
-            y_combined,
-            eval_set=eval_set,
+            train_pool,
+            eval_set=eval_pool,
             early_stopping_rounds=early_stopping_rounds,
             verbose=False,
         )
-
+        logger.info(f"Model trained with {model.tree_count_} trees")
         # Get validation predictions
         best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
 
@@ -239,6 +236,7 @@ def optimize_hyperparameters(
 
             if score > 0.36 and score > best_score:
                 log_to_mlflow(model, metrics, params, experiment_name)
+            
             return score
 
         except Exception as e:
@@ -312,7 +310,7 @@ def optimize_hyperparameters(
         logger.info(
             f"Starting batch {batch + 1}/{num_batches} with new sampler (seed={random_seed})"
         )
-        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback])
+        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback], n_jobs=1)
 
         # Merge current batch's top trials with global_top_trials
         for trial_record in top_trials:
@@ -699,6 +697,16 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
     
     return study.best_params, importance_df
 
+# Calculate class weights based on your data
+def calculate_class_weights(y):
+    pos_count = np.sum(y == 1)
+    neg_count = np.sum(y == 0)
+    total = len(y)
+    
+    weight_pos = total / pos_count
+    weight_neg = total / neg_count
+    
+    return [weight_neg, weight_pos]
 
 def main():
     """
@@ -706,7 +714,7 @@ def main():
     """
     try:
         logger.info("Starting CatBoost model training")
-        global X_train, y_train, X_test, y_test, X_eval, y_eval
+        global X_train, y_train, X_test, y_test, X_eval, y_eval, class_weights
         
         # Load data
         dataloader = DataLoader()
@@ -717,6 +725,9 @@ def main():
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
+        # y_train = y_train.astype(int)
+        # y_test = y_test.astype(int)
+        # y_eval = y_eval.astype(int)
 
         # Log data shapes
         logger.info(f"Training data shape: {X_train.shape}")
@@ -725,6 +736,8 @@ def main():
         logger.info(
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
+        class_weights = calculate_class_weights(y_train)
+        logger.info(f"Class weights: {class_weights}")
 
         # --- Feature Selection with RFECV ---
         # selected_features, feature_importance_df = select_features_rfecv(X_eval, y_eval, logger, min_features=150, step=1, scoring='roc_auc', random_state=SEED)

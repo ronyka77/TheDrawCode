@@ -92,67 +92,67 @@ def load_hyperparameter_space():
         "n_estimators": {
             "type": "int",
             "low": 100,
-            "high": 3000,
+            "high": 5000,
             "step": 10,
         },
         "early_stopping_rounds": {
             "type": "int",
             "low": 100,   # Slightly below min
-            "high": 700, # Slightly above max
+            "high": 1000, # Slightly above max
             "step": 10,
         },
         "learning_rate": {
             "type": "float",
-            "low": 0.038,   # Slightly below min
-            "high": 0.17,   # Slightly above max
+            "low": 0.02,   # Slightly below min
+            "high": 0.20,   # Slightly above max
             "step": 0.001,
         },
         "max_depth": {
             "type": "int",
             "low": 5,      # At min
-            "high": 12,    # Slightly above max
+            "high": 14,    # Slightly above max
             "step": 1,
         },
         "min_child_weight": {
             "type": "int",
-            "low": 150,    # Slightly below min
-            "high": 700,   # Slightly above max
+            "low": 100,    # Slightly below min
+            "high": 1000,   # Slightly above max
             "step": 5,
         },
         "colsample_bytree": {
             "type": "float",
-            "low": 0.70,   # Slightly below min
-            "high": 0.97,  # Slightly above max
+            "low": 0.30,   # Slightly below min
+            "high": 0.98,  # Slightly above max
             "step": 0.005,
         },
         "subsample": {
             "type": "float",
-            "low": 0.60,   # Slightly below min
+            "low": 0.65,   # Slightly below min
             "high": 0.97,  # Slightly above max
             "step": 0.005,
         },
         "gamma": {
             "type": "float",
             "low": 0.20,   # Slightly below min
-            "high": 9.0,   # Slightly above max
+            "high": 7.5,   # Slightly above max
             "step": 0.01,
         },
         "lambda": {
             "type": "float",
-            "low": 2.8,    # Slightly below min
+            "low": 4.0,    # Slightly below min
             "high": 17.0,  # Slightly above max
             "step": 0.01,
         },
         "alpha": {
             "type": "float",
-            "low": 24.0,   # Slightly below min
-            "high": 58.0,  # Slightly above max
+            "low": 20.0,   # Slightly below min
+            "high": 75.0,  # Slightly above max
             "step": 0.1,
         },
         "scale_pos_weight": {
             "type": "float",
-            "low": 1.7,    # Slightly below min
-            "high": 3.5,   # Slightly above max
+            "low": 1.8,    # Slightly below min
+            "high": 3.2,   # Slightly above max
             "step": 0.01,
         },
     }
@@ -172,6 +172,7 @@ def create_model(model_params):
     """
     # Update with provided parameters
     model_params.update(base_params)
+        
     # Create model
     # Pass all params, including early_stopping_rounds, to the constructor
     model = xgb.XGBClassifier(**model_params)
@@ -430,7 +431,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
         for metric_name, metric_value in metrics.items():
             trial.set_user_attr(metric_name, metric_value)
         
-        if score > 0.36 and score > best_score:
+        if score > 0.33 and score > best_score:
             log_to_mlflow(model, metrics, params, experiment_name, X_eval)
         return score
 
@@ -457,7 +458,6 @@ def hypertune_xgboost(X_train, y_train, X_test, y_test, X_eval, y_eval, experime
         tuple: (best_params, best_metrics)
     """
     try:
-
         # Load hyperparameter space
         hyperparameter_space = load_hyperparameter_space()
 
@@ -575,6 +575,7 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.warning(
             "Training model with precision target - Ensure parameters are updated from HPO."
         )
+        
         params = base_params.copy()
         params.update(
             {
@@ -753,15 +754,14 @@ def main():
     """
     try:
         logger.info("Starting XGBoost model training")
-        
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
 
         model_type = "xgb"
         features = import_selected_features_ensemble_new(model_type=model_type)
-
         logger.info(f"Features: {len(features)}")
+
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
@@ -794,9 +794,7 @@ def main():
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")  # Add traceback
     finally:
-        # Clean up DMatrix objects if needed (usually not necessary)
-        # del dtrain, dtest, deval
-        gc.collect()  # Force garbage collection
+        gc.collect()
         logger.info("Main execution finished.")
 
 

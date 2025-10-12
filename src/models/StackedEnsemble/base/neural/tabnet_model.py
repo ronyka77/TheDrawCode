@@ -120,9 +120,9 @@ def load_hyperparameter_space():
         "lambda_sparse": {"type": "float", "low": 1e-7, "high": 1e-2, "log": True},
         "momentum": {"type": "float", "low": 0.7, "high": 0.99, "step": 0.005},
         "patience": {"type": "int", "low": 15, "high": 60},
-        "max_epochs": {"type": "int", "low": 90, "high": 180, "step": 5},
-        "batch_size": {"type": "int", "low": 64, "high": 4096, "step": 64},
-        "virtual_batch_size": {"type": "int", "low": 64, "high": 4096, "step": 64},
+        "max_epochs": {"type": "int", "low": 90, "high": 500, "step": 5},
+        "batch_size": {"type": "int", "low": 1024, "high": 8192, "step": 1024},
+        "virtual_batch_size": {"type": "int", "low": 128, "high": 1024, "step": 128},
         "n_independent": {"type": "int", "low": 1, "high": 4},
         "n_shared": {"type": "int", "low": 2, "high": 6},
         "weight_decay": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True},
@@ -550,16 +550,15 @@ def optimize_hyperparameters(
                 else:
                     trial.set_user_attr(metric_name, str(metric_value))
 
+            if score >= 0.32 and score > best_score:
+                logger.info(f"Trial {trial.number} completed with score {score:.4f}")
+                log_to_mlflow(model, metrics, current_params, experiment_name, X_eval)
             # Update best score and params FOR THIS RUN
             if score > best_score:
                 best_score = score
                 best_params = current_params.copy()
                 logger.info(f"  >>> New best score in this run: {best_score:.4f} (Trial {trial.number})")
 
-            if score >= 0.33:
-                logger.info(f"Trial {trial.number} completed with score {score:.4f}")
-                X_eval_orig_df = X_eval.copy()
-                log_to_mlflow(model, metrics, current_params, experiment_name, X_eval_orig_df)
             return score
         except optuna.TrialPruned:
             logger.info(f"Trial {trial.number} pruned.")
@@ -571,7 +570,7 @@ def optimize_hyperparameters(
             logger.error(traceback.format_exc())
             return 0.0 # Return low score for failed trials
 
-    def callback(study, trial, experiment_name, X_eval):
+    def callback(study, trial):
         nonlocal best_score, best_params, top_trials
         logger.info(f"Current best score in this batch: {best_score:.4f}")
         if trial.value > best_score:
@@ -604,7 +603,7 @@ def optimize_hyperparameters(
     storage_url = "sqlite:///optuna_tabnet.db"
     study_name = "tabnet_optimization"
     total_trials = n_trials
-    batch_size = 1000
+    batch_size = 50
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
@@ -620,9 +619,24 @@ def optimize_hyperparameters(
         sampler=sampler,
         pruner=pruner,
     )
-    for _ in range(num_batches):
+    for batch in range(num_batches):
+        if batch > 0:
+            features_to_remove = min(1, X_train.shape[1] - 10)  # Ensure we don't go below 10 features
+            if features_to_remove > 0:
+                # Always remove the first x features
+                features_to_drop = X_train.columns[:features_to_remove].tolist()
+                logger.info(f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}")
+                logger.info(f"Features before removal: {X_train.shape[1]}")
+                
+                # Remove features from all datasets
+                X_train = X_train.drop(columns=features_to_drop)
+                X_test = X_test.drop(columns=features_to_drop)
+                if X_eval is not None:
+                    X_eval = X_eval.drop(columns=features_to_drop)
+                
+                logger.info(f"Features after removal: {X_train.shape[1]}")
         try:
-            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)], n_jobs=4)
+            study.optimize(objective, n_trials=batch_size, callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)], n_jobs=3)
         except KeyboardInterrupt:
             logger.warning("Optimization interrupted by user.")
             break
@@ -1359,10 +1373,7 @@ def main():
         X_eval_orig_df = X_eval_orig_df.copy() # Store original for signature
 
         # Select features
-        features = import_selected_features_ensemble_new(model_type="all")
-        if not features:
-            logger.warning("No features selected. Using all numeric features.")
-            features = import_selected_features_ensemble_new("tabnet")
+        features = import_selected_features_ensemble_new(model_type="tabnet")
 
         X_train = X_train_orig[features]
         X_test = X_test_orig[features]
@@ -1392,8 +1403,7 @@ def main():
         )
 
         # === Run Feature Selection ===
-        # final_selected, scores = improved_tabnet_staged_selection(X_train, y_train, X_test, y_test, X_eval, y_eval, target_features=80)
-        # final_selected, scores = tabnet_feature_selection_pipeline(X_train, y_train, X_eval, y_eval)
+        final_selected, scores = improved_tabnet_staged_selection(X_train, y_train, X_test, y_test, X_eval, y_eval, target_features=100)
 
 
         # train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)

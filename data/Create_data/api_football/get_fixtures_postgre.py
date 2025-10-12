@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import psycopg2
 import requests
 from dotenv import load_dotenv
@@ -257,8 +258,6 @@ class ApiFootball:
 
         if not team_api.get("id") == target_team_id_int:
             self.logger.warning(f"API response team ID {team_api.get('id')} does not match target_team_id {target_team_id_int}")
-            # This might happen if the API call was for a different team than expected, or if an error in calling logic
-            # For now, we proceed, but this is a point of attention.
 
         parsed_data = {
             "fixture_id": fixture_id, # Contextual: links this season's stats to a fixture for fetching trigger
@@ -331,19 +330,10 @@ class ApiFootball:
             self.logger.info("Starting to get season-aggregated team statistics...")
 
             query = text("""
-                SELECT DISTINCT f.fixture_id, f.league_id, f.home_team_id, f.away_team_id, f.date, f.league_season
+                SELECT f.fixture_id, f.league_id, f.home_team_id, f.away_team_id, f.league_season, f.date
                 FROM api_football.fixtures f
-                LEFT JOIN api_football.team_stats ts_home ON 
-                    f.home_team_id = ts_home.team_id AND
-                    f.league_id = ts_home.league_id AND 
-                    f.league_season = ts_home.league_season
-                LEFT JOIN api_football.team_stats ts_away ON
-                    f.away_team_id = ts_away.team_id AND
-                    f.league_id = ts_away.league_id AND
-                    f.league_season = ts_away.league_season
-                WHERE f.date < NOW() + INTERVAL '1 day'
-                AND (ts_home.team_id IS NULL OR ts_away.team_id IS NULL)
-                ORDER BY f.date ASC;
+                left join api_football.team_stats ts on f.fixture_id = ts.fixture_id 
+                WHERE date <= now() and ts.fixture_id  is null;
             """)
             
             fixtures_to_query_teams_for = []
@@ -420,8 +410,8 @@ class ApiFootball:
                             response_json["response"], 
                             fixture_id,
                             team_id_to_fetch, 
-                            league_id, 
-                            season
+                            # league_id, 
+                            # season
                         )
                         if parsed_stats:
                             self.logger.info(f"Parsed season stats for team {team_id_to_fetch}, league {league_id}")
@@ -634,12 +624,10 @@ class ApiFootball:
 
             # Query to find fixtures without statistics
             query = text("""
-                SELECT fixture_id, league_id, league_name 
-                FROM api_football.fixtures
-                WHERE date <= :today
-                AND league_id = ANY(:league_ids)
-                AND (home_total_shots IS NULL OR home_total_shots = 0)
-                AND home_fulltime_goals IS NOT NULL
+                SELECT f.fixture_id, f.league_id, f.league_name 
+                FROM api_football.fixtures f
+                left join api_football.team_stats ts on f.fixture_id = ts.fixture_id 
+                WHERE date <= now() and ts.fixture_id  is null
             """)
 
             league_counts = {}
@@ -1176,7 +1164,7 @@ def main():
     api_football.delete_old_unscored_fixtures()
     api_football.get_fixture_ids_without_predictions()
     api_football.get_team_stats_for_fixtures()
-    api_football.update_venues()
     api_football.get_events_for_missing_fixtures()
+    api_football.update_venues()
 if __name__ == "__main__":
     main()

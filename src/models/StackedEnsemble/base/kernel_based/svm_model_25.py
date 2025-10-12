@@ -224,7 +224,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
             f"Trial {trial.number}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f}, Thresh={threshold:.3f}) Params={trial.params}"
         )
         # Log to MLflow
-        if score > 0.33 and score > best_score:
+        if score > 0.31 and score > best_score:
             input_example = X_eval[:5]
             log_to_mlflow_svm(model, metrics, params, scaler, input_example)
         return score
@@ -294,13 +294,28 @@ def optimize_hyperparameters_svm(
     storage_url = "sqlite:///optuna_svm.db"
     study_name = "svm_optimization"
     total_trials = n_trials
-    batch_size = 250  # Reduced from 500 - with focused search space, smaller batches converge faster
+    batch_size = 50
     num_batches = max(1, total_trials // batch_size)
     if total_trials % batch_size != 0 and total_trials > batch_size:
         num_batches += 1
 
     for batch in range(num_batches):
         random_seed = int(time.time()) + batch
+        # if batch > 0:
+        #     features_to_remove = min(1, X_train.shape[1] - 10)  # Ensure we don't go below 10 features
+        #     if features_to_remove > 0:
+        #         # Always remove the first x features
+        #         features_to_drop = X_train.columns[:features_to_remove].tolist()
+        #         logger.info(f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}")
+        #         logger.info(f"Features before removal: {X_train.shape[1]}")
+        #         features.drop(features_to_drop, axis=1, inplace=True)
+
+        #         # Remove features from all datasets
+        #         X_train = X_train.drop(columns=features_to_drop)
+        #         X_test = X_test.drop(columns=features_to_drop)
+        #         if X_eval is not None:
+        #             X_eval = X_eval.drop(columns=features_to_drop)
+
         # Consider TPESampler if random search is too slow or gets stuck
         sampler = optuna.samplers.RandomSampler(seed=random_seed)
         study = optuna.create_study(
@@ -319,7 +334,7 @@ def optimize_hyperparameters_svm(
             n_trials=batch_size, 
             show_progress_bar=True, 
             callbacks=[callback],
-            n_jobs=4  # Reduced from 8 - with narrowed hyperparameter space, fewer parallel jobs can be more efficient
+            n_jobs=12  # Reduced from 8 - with narrowed hyperparameter space, fewer parallel jobs can be more efficient
         )
 
         # Update overall best score from the study instance after batch
@@ -468,14 +483,16 @@ def train_with_precision_target_svm(
 
         # Define fixed parameters (Update these based on prior tuning or best guess)
         fixed_params = {
-            'C': 0.21803146573987586,
-            'cache_size': 7938,
-            'class_weight': {0: 1, 1: 2.837097067307186},
+            'C': 0.6175310980516687,
+            'cache_size': 5466,
+            'class_weight': 'balanced',
+            'coef0': 0.4568065814626598,
+            'degree': 6,
+            'gamma': 0.00020587086243364596,
             'kernel': 'rbf',
-            'gamma': 0.003987527724385146,
             'probability': True,
             'random_state': 19,
-            'tol': 1.3459599027867769e-06,
+            'tol': 9.218236481865033e-05,
             'verbose': False
         }
         model_params = base_params.copy()
@@ -585,17 +602,9 @@ if __name__ == "__main__":
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
 
-        # Select features
-        try:
-            # Attempt to load features specific to SVM if defined
-            features = import_selected_features_ensemble_new(model_type="svm")
-            logger.info(f"Using 'svm' specific feature set with {len(features)} features.")
-        except (KeyError, FileNotFoundError):
-            logger.warning("SVM specific features not found. Falling back to 'all' features.")
-            features = import_selected_features_ensemble_new(model_type="all")
-            if not features:
-                logger.error("Failed to load any features. Exiting.")
-                sys.exit(1) # Or handle differently
+        features = import_selected_features_ensemble_new(model_type="svm")
+        logger.info(f"Using 'svm' specific feature set with {len(features)} features.")
+
 
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
@@ -603,6 +612,9 @@ if __name__ == "__main__":
         try:
             with open('src/models/scalers/scaler_svm.pkl', 'rb') as f:
                 scaler = pickle.load(f)
+            X_train_scaled = scaler.transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            X_eval_scaled = scaler.transform(X_eval)
         except Exception as e:
             logger.error(f"Error loading SVM scaler: {str(e)}")
             scaler = StandardScaler()
@@ -610,10 +622,11 @@ if __name__ == "__main__":
             scaler.fit(X_train)
             with open('src/models/scalers/scaler_svm.pkl', 'wb') as f:
                 pickle.dump(scaler, f)
+            X_train_scaled = scaler.transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            X_eval_scaled = scaler.transform(X_eval)
         
-        X_train_scaled = scaler.transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-        X_eval_scaled = scaler.transform(X_eval)
+        
         
         # Log data shapes
         logger.info(f"Training data shape after selection: {X_train.shape}")
@@ -624,7 +637,6 @@ if __name__ == "__main__":
         )
 
         # --- Choose Mode: hypertune or fixed params ---
-        # mode = "hypertune" or "fixed_params"
         mode = "hypertune" 
 
         best_model_params = None
@@ -646,14 +658,6 @@ if __name__ == "__main__":
                 best_model_params = final_model.get_params() # Get params from trained model
         else:
             logger.error(f"Invalid mode selected: {mode}")
-
-        # --- Log Final Results Summary ---
-        if best_model_params and final_metrics:
-            logger.info(f"SVM process (mode: {mode}) completed successfully.")
-            logger.info(f"Final Run Metrics: {final_metrics}")
-            logger.info(f"Parameters Used/Found: {best_model_params}")
-        else:
-            logger.error(f"SVM process (mode: {mode}) failed or did not produce results.")
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

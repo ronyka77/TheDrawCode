@@ -45,7 +45,7 @@ sklearn_version = sklearn.__version__
 pip_requirements = [f"scikit-learn=={sklearn_version}", f"mlflow=={mlflow.__version__}"]
 
 # Update base parameters for RandomForest
-base_params = {"random_state": 19, "n_jobs": 2, "verbose": 0, "criterion": "entropy", "max_features": "log2"}
+base_params = {"random_state": 19, "n_jobs": 2, "verbose": 0, "criterion": "entropy"}
 # Set fixed seed and hash seed for determinism
 SEED = 19
 os.environ["PYTHONHASHSEED"] = str(SEED)
@@ -71,20 +71,20 @@ def load_hyperparameter_space_for_hpo():
         },
         "max_depth": {
             "type": "int", 
-            "low": 5,
-            "high": 20,
+            "low": 15,
+            "high": 25,
             "step": 1,
         },
         "min_samples_split": {
             "type": "int",
-            "low": 5,  
+            "low": 8,  
             "high": 30,  
             "step": 1,  
         },
         "min_samples_leaf": {
             "type": "int",
-            "low": 5,  
-            "high": 40,  
+            "low": 10,  
+            "high": 50,  
             "step": 1,  
         },
         # "max_features": {
@@ -93,9 +93,9 @@ def load_hyperparameter_space_for_hpo():
         # },
         "class_weight": {
             "type": "float",
-            "low": 1.6,   
-            "high": 3.5,  
-            "step": 0.05, 
+            "low": 1.8,   
+            "high": 2.9,  
+            "step": 0.02, 
         },
     }
     return hyperparameter_space
@@ -229,8 +229,8 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
             # Log to MLflow
-            if score > 0.33 and score > best_score:
-                log_to_mlflow(model, metrics, params, experiment_name)
+            if score > 0.30 and score > best_score:
+                log_to_mlflow(model, metrics, params, experiment_name, X_eval)
             return score
 
         except Exception as e:
@@ -281,13 +281,29 @@ def optimize_hyperparameters(
     study_name = "random_forest_optimization"
     # Total trials to conduct
     total_trials = n_trials  # Example; you can set n_trials accordingly.
-    batch_size = 1000
+    batch_size = 100
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
 
     # Loop over batches, resetting the sampler each time
     for batch in range(num_batches):
+        if batch > 0:  # Skip feature reduction for the first batch
+            features_to_remove = min(1, X_train.shape[1] - 10)  # Ensure we don't go below 10 features
+            if features_to_remove > 0:
+                # Always remove the first x features
+                features_to_drop = X_train.columns[:features_to_remove].tolist()
+                
+                logger.info(f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}")
+                logger.info(f"Features before removal: {X_train.shape[1]}")
+                
+                # Remove features from all datasets
+                X_train = X_train.drop(columns=features_to_drop)
+                X_test = X_test.drop(columns=features_to_drop)
+                if X_eval is not None:
+                    X_eval = X_eval.drop(columns=features_to_drop)
+                
+                logger.info(f"Features after removal: {X_train.shape[1]}")
         # Create a new sampler with a dynamic seed
         random_seed = int(time.time())
         new_sampler = optuna.samplers.RandomSampler(seed=random_seed)
@@ -304,7 +320,7 @@ def optimize_hyperparameters(
         logger.info(
             f"Starting batch {batch + 1}/{num_batches} with new sampler (seed={random_seed})"
         )
-        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback], n_jobs=8)
+        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback], n_jobs=4)
 
         # Merge current batch's top trials with global_top_trials
         for trial_record in top_trials:
@@ -364,7 +380,7 @@ def hypertune_random_forest(experiment_name: str):
         return None, None
 
 
-def log_to_mlflow(model, metrics, params, experiment_name):
+def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
     """
     Log trained model, metrics, and parameters to MLflow.
     Args:

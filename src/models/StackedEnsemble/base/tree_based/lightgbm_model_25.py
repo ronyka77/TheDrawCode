@@ -21,6 +21,7 @@ import pandas as pd
 from sklearn.feature_selection import RFECV
 from sklearn.model_selection import StratifiedKFold
 
+from src.models.StackedEnsemble.base.tree_based.xgboost_model_outliers import apply_outlier_removal
 from src.utils.logger import ExperimentLogger
 
 experiment_name = "lightgbm_soccer_prediction_25"
@@ -41,6 +42,10 @@ mlrunds_dir = setup_mlflow_tracking(experiment_name)
 # Global settings
 min_recall = 0.25  # Minimum acceptable recall
 n_trials = 100000  # Number of hyperparameter optimization trials as in notebook
+
+# Outlier removal settings
+OUTLIER_CONTAMINATION = 0.02  # Expected proportion of outliers (10%)
+OUTLIER_RANDOM_STATE = 19  # For reproducibility
 
 # Base parameters as in the notebook
 base_params = {
@@ -73,24 +78,23 @@ def load_hyperparameter_space():
         dict: Hyperparameter space configuration with narrowed ranges and steps.
     """
     hyperparameter_space = {
-        "n_estimators": {"type": "int", "low": 200, "high": 6000, "log": False, "step": 10},
-        "learning_rate": {"type": "float", "low": 0.060, "high": 0.20, "log": False, "step": 0.001},
-        "num_leaves": {"type": "int", "low": 55, "high": 200, "log": False, "step": 5},
-        "max_depth": {"type": "int", "low": 5, "high": 12, "log": False, "step": 1},
-        "min_child_samples": {"type": "int", "low": 200, "high": 600, "log": False, "step": 10},
-        "feature_fraction": {"type": "float", "low": 0.58, "high": 0.75, "log": False, "step": 0.01},
-        "bagging_fraction": {"type": "float", "low": 0.50, "high": 0.75, "log": False, "step": 0.005},
-        "bagging_freq": {"type": "int", "low": 10, "high": 35, "log": False, "step": 1},
-        "reg_alpha": {"type": "float", "low": 8.0, "high": 20.0, "log": False, "step": 0.1},
-        "reg_lambda": {"type": "float", "low": 6.0, "high": 20.0, "log": False, "step": 0.1},
-        "min_split_gain": {"type": "float", "low": 0.12, "high": 0.30, "log": False, "step": 0.005},
-        "early_stopping_rounds": {"type": "int", "low": 50, "high": 2000, "log": False, "step": 10},
-        "path_smooth": {"type": "float", "low": 0.10, "high": 0.60, "log": False, "step": 0.005},
-        "cat_smooth": {"type": "float", "low": 20.0, "high": 40.0, "log": False, "step": 0.1},
-        "max_bin": {"type": "int", "low": 200, "high": 700, "log": False, "step": 10},
+        "n_estimators": {"type": "int", "low": 1000, "high": 12000, "log": False, "step": 10},
+        "learning_rate": {"type": "float", "low": 0.030, "high": 0.40, "log": False, "step": 0.001},
+        "num_leaves": {"type": "int", "low": 10, "high": 250, "log": False, "step": 5},
+        "max_depth": {"type": "int", "low": 7, "high": 13, "log": False, "step": 1},
+        "min_child_samples": {"type": "int", "low": 100, "high": 1000, "log": False, "step": 10},
+        "feature_fraction": {"type": "float", "low": 0.25, "high": 0.80, "log": False, "step": 0.01},
+        "bagging_fraction": {"type": "float", "low": 0.25, "high": 0.80, "log": False, "step": 0.005},
+        "bagging_freq": {"type": "int", "low": 30, "high": 100, "log": False, "step": 1},
+        "reg_alpha": {"type": "float", "low": 8.0, "high": 27.0, "log": False, "step": 0.1},
+        "reg_lambda": {"type": "float", "low": 1.0, "high": 22.0, "log": False, "step": 0.1},
+        "min_split_gain": {"type": "float", "low": 0.02, "high": 0.45, "log": False, "step": 0.005},
+        "early_stopping_rounds": {"type": "int", "low": 400, "high": 2000, "log": False, "step": 10},
+        "path_smooth": {"type": "float", "low": 0.02, "high": 0.30, "log": False, "step": 0.005},
+        "cat_smooth": {"type": "float", "low": 10.0, "high": 50.0, "log": False, "step": 0.1},
+        "max_bin": {"type": "int", "low": 300, "high": 1000, "log": False, "step": 10},
     }
     return hyperparameter_space
-
 
 def create_model(model_params):
     """
@@ -112,7 +116,6 @@ def create_model(model_params):
     except Exception as e:
         logger.error(f"Error creating LightGBM model: {str(e)}")
         raise
-
 
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
@@ -162,7 +165,6 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     except Exception as e:
         logger.error(f"Error training LightGBM model: {str(e)}")
         raise
-
 
 def optimize_hyperparameters(
     X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
@@ -229,8 +231,8 @@ def optimize_hyperparameters(
             for metric_name, metric_value in metrics.items():
                 trial.set_user_attr(metric_name, metric_value)
 
-            if score > 0.36 and score > best_score:
-                log_to_mlflow(model, metrics, params, experiment_name)
+            if score > 0.34 and score > best_score:
+                log_to_mlflow(model, metrics, params, experiment_name, X_eval)
             return score
 
         except Exception as e:
@@ -281,13 +283,30 @@ def optimize_hyperparameters(
     study_name = "lightgbm_optimization"
     # Total trials to conduct
     total_trials = n_trials  # Example; you can set n_trials accordingly.
-    batch_size = 1000
+    batch_size = 500
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
 
     # Loop over batches, resetting the sampler each time
     for batch in range(num_batches):
+        # Feature reduction: Remove 2 features every batch
+        if batch > 0:  # Skip feature reduction for the first batch
+            features_to_remove = min(1, X_train.shape[1] - 10)  # Ensure we don't go below 10 features
+            if features_to_remove > 0:
+                # Always remove the first x features
+                features_to_drop = X_train.columns[:features_to_remove].tolist()
+                
+                logger.info(f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}")
+                logger.info(f"Features before removal: {X_train.shape[1]}")
+                
+                # Remove features from all datasets
+                X_train = X_train.drop(columns=features_to_drop)
+                X_test = X_test.drop(columns=features_to_drop)
+                if X_eval is not None:
+                    X_eval = X_eval.drop(columns=features_to_drop)
+                
+                logger.info(f"Features after removal: {X_train.shape[1]}")
         # Create a new sampler with a dynamic seed
         random_seed = int(time.time())
         new_sampler = optuna.samplers.RandomSampler(seed=random_seed)
@@ -330,7 +349,6 @@ def optimize_hyperparameters(
 
     return best_params
 
-
 def hypertune_lightgbm(experiment_name: str):
     """
     Main training function with MLflow tracking.
@@ -368,8 +386,7 @@ def hypertune_lightgbm(experiment_name: str):
         logger.error(f"Error in hyperparameter tuning: {str(e)}")
         return None, None
 
-
-def log_to_mlflow(model, metrics, params, experiment_name):
+def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
     """
     Log trained model, metrics, and parameters to MLflow.
     Args:
@@ -400,7 +417,7 @@ def log_to_mlflow(model, metrics, params, experiment_name):
                 registered_model_name=f"lightgbm_{datetime.now().strftime('%Y%m%d_%H%M')}",
             )
             # Create input example for model signature
-            input_example = X_train.head(5)
+            input_example = X_eval.head(5)
             # Handle integer columns by converting them to float64 to properly manage missing values
             input_example = X_eval.iloc[:5].copy() if hasattr(X_eval, "iloc") else X_eval[:5].copy()
 
@@ -433,7 +450,6 @@ def log_to_mlflow(model, metrics, params, experiment_name):
         logger.error(f"Error logging to MLflow: {str(e)}")
         return None
 
-
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
     Train XGBoost model with focus on precision target.
@@ -452,19 +468,20 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         params = base_params.copy()
         params.update(
             {
-                "learning_rate": 0.156,
-                "num_leaves": 180,
-                "max_depth": 7,
-                "min_child_samples": 400,
-                "feature_fraction": 0.6699999999999999,
-                "bagging_fraction": 0.7300000000000001,
-                "bagging_freq": 24,
-                "reg_alpha": 10.4,
-                "reg_lambda": 10.9,
-                "min_split_gain": 0.22999999999999998,
-                "path_smooth": 0.335,
-                "cat_smooth": 28.0,
-                "max_bin": 310,
+                "learning_rate": 0.369,
+                "num_leaves": 215,
+                "max_depth": 12,
+                "min_child_samples": 260,
+                "feature_fraction": 0.78,
+                "bagging_fraction": 0.7,
+                "bagging_freq": 87,
+                "reg_alpha": 13.100000000000001,
+                "reg_lambda": 18.900000000000002,
+                "min_split_gain": 0.43000000000000005,
+                "path_smooth": 0.025,
+                "cat_smooth": 25.0,
+                "max_bin": 360,
+                "n_estimators": 3260,
                 "device": "cpu",
                 "metric": ["aucpr", "binary_logloss"],
                 "n_jobs": 8,
@@ -716,8 +733,17 @@ def main():
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
 
+        # Apply outlier removal to training data
+        # X_train, y_train, X_test, y_test, X_eval, y_eval = apply_outlier_removal(
+        #     X_train, y_train, X_test, y_test, X_eval, y_eval
+        # )
+
         # --- Feature Selection with RFECV ---
-        # selected_features, feature_importance_df = select_features_rfecv(X_eval, y_eval, logger, min_features=150, step=1, scoring='roc_auc', random_state=SEED)
+        # selected_features, feature_importance_df = select_features_rfecv(X_eval, y_eval, logger, 
+        #                                                                 min_features=150, 
+        #                                                                 step=1, 
+        #                                                                 scoring='roc_auc', 
+        #                                                                 random_state=SEED)
         # print(feature_importance_df)
 
         # --- Hyperparameter Optimization with Feature Importance ---

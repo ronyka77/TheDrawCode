@@ -123,9 +123,6 @@ class AdvancedGoalFeatureEngineer:
                 df["away_h2h_dominance"] * df["weighted_h2h_draw_rate"] * df["elo_similarity"]
             )
 
-            # Referee tendency features
-
-            # df['ref_goal_tendency'] = df['referee_foul_rate'] * df['referee_card_rate'] * df['league_competitiveness']
             # Calculate referee goals per game based on historical matches
             df["referee_goals_per_game"] = (
                 (df["home_goal_rollingaverage"] + df["away_goal_rollingaverage"])

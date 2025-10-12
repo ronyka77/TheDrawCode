@@ -23,26 +23,18 @@ class ELOCalculator:
         os.makedirs(self.model_dir, exist_ok=True)
 
         # Define data paths
-        # self.training_data_path = './data_files/model_data_training_newPoisson.xlsx'
-        # self.training_data_path_new = './data_files/model_data_training_withPoisson.xlsx'
-        # self.prediction_data_path = './data_files/model_data_prediction_newPoisson.xlsx'
-        self.api_prediction_data_path = "./data_files/api_football_prediction_newPoisson.xlsx"
+        # self.api_prediction_data_path = "./data_files/api_football_prediction_newPoisson.xlsx"
         self.api_prediction_data_path_new = "./data_files/api_football_prediction_new_newPoisson.xlsx"
-        self.api_training_data_path = "./data_files/api_football_training_newPoisson.xlsx"
+        # self.api_training_data_path = "./data_files/api_football_training_newPoisson.xlsx"
 
         # Define export paths
-        # self.training_export_path = './data_files/model_data_training_newPoisson.xlsx'
-        # self.training_export_path_new = './data_files/model_data_training_withPoisson.xlsx'
-        # self.prediction_export_path = './data_files/model_data_prediction_newPoisson.xlsx'
-        self.api_prediction_export_path = "./data_files/api_football_prediction_newPoisson.xlsx"
+        # self.api_prediction_export_path = "./data_files/api_football_prediction_newPoisson.xlsx"
         self.api_prediction_export_path_new = "./data_files/api_football_prediction_new_newPoisson.xlsx"
-        self.api_training_export_path = "./data_files/api_football_training_newPoisson.xlsx"
+        # self.api_training_export_path = "./data_files/api_football_training_newPoisson.xlsx"
 
         # ELO settings
         self.INITIAL_ELO = 1500
         # Pre-defined K-factors for each league ID
-        # Higher K-factors (>35) indicate more predictable leagues
-        # Lower K-factors (<34) indicate more volatile leagues
         self.prefixed_k_factors = {
             2: 31.88,  # League 2
             39: 34.40,  # League 39
@@ -262,47 +254,22 @@ class ELOCalculator:
                         )
                 return df
 
-            # # Process training data
-            # self.logger.info("Processing training data...")
-            # training_data = pd.read_excel(self.training_data_path)
-            # training_data = convert_numeric_columns(training_data)
-            # training_data = training_data.sort_values('Datum')
-            # training_data = self.add_elo_scores(training_data)
-            # training_data.to_excel(self.training_export_path, index=False)
-            # self.logger.info("Training data processed and saved")
-            # # Process new training data with Poisson
-            # self.logger.info("Processing new training data with Poisson...")
-            # training_data_new = pd.read_excel(self.training_data_path_new)
-            # training_data_new = convert_numeric_columns(training_data_new)
-            # training_data_new = training_data_new.sort_values('Datum')
-            # training_data_new = self.add_elo_scores(training_data_new)
-            # training_data_new.to_excel(self.training_export_path_new, index=False)
-            # self.logger.info("Training data with Poisson processed and saved")
-            # # Process prediction data
-            # self.logger.info("Processing prediction data...")
-            # prediction_data = pd.read_excel(self.prediction_data_path)
-            # prediction_data = convert_numeric_columns(prediction_data)
-            # prediction_data = prediction_data.sort_values('Datum')
-            # prediction_data = self.add_elo_scores(prediction_data)
-            # prediction_data.to_excel(self.prediction_export_path, index=False)
-            # self.logger.info("Prediction data processed and saved")
-
-            # Process API data
-            self.logger.info("Processing API prediction data...")
-            api_prediction_data = load_excel_with_calamine(self.api_prediction_data_path)
-            api_prediction_copy = api_prediction_data.copy()
-            api_prediction_data = convert_numeric_columns(api_prediction_data)
-            api_prediction_data = api_prediction_data.sort_values("Date")
-            api_prediction_data = self.add_elo_scores(api_prediction_data)
-            api_prediction_copy = api_prediction_copy.merge(
-                api_prediction_data[["fixture_id", "home_team_elo", "away_team_elo"]],
-                on="fixture_id",
-                how="left",
-            )
-            self.save_data_to_excel(
-                api_prediction_copy, self.api_prediction_export_path, "API prediction data"
-            )
-            self.logger.info("API prediction data processed and saved")
+            # # Process API data
+            # self.logger.info("Processing API prediction data...")
+            # api_prediction_data = load_excel_with_calamine(self.api_prediction_data_path)
+            # api_prediction_copy = api_prediction_data.copy()
+            # api_prediction_data = convert_numeric_columns(api_prediction_data)
+            # api_prediction_data = api_prediction_data.sort_values("Date")
+            # api_prediction_data = self.add_elo_scores(api_prediction_data)
+            # api_prediction_copy = api_prediction_copy.merge(
+            #     api_prediction_data[["fixture_id", "home_team_elo", "away_team_elo"]],
+            #     on="fixture_id",
+            #     how="left",
+            # )
+            # self.save_data_to_excel(
+            #     api_prediction_copy, self.api_prediction_export_path, "API prediction data"
+            # )
+            # self.logger.info("API prediction data processed and saved")
 
             # Process API new data
             self.logger.info("Processing API prediction data...")
@@ -321,23 +288,6 @@ class ELOCalculator:
             )
             self.logger.info("API prediction data processed and saved")
 
-            # Process API training data
-            self.logger.info("Processing API training data...")
-            api_training_data = load_excel_with_calamine(self.api_training_data_path)
-            api_training_copy = api_training_data.copy()
-            api_training_data = convert_numeric_columns(api_training_data)
-            api_training_data = api_training_data.sort_values("Date")
-            api_training_data = self.add_elo_scores(api_training_data)
-            api_training_copy = api_training_copy.merge(
-                api_training_data[["fixture_id", "home_team_elo", "away_team_elo"]],
-                on="fixture_id",
-                how="left",
-            )
-            self.save_data_to_excel(
-                api_training_copy, self.api_training_export_path, "API training data"
-            )
-            self.logger.info("API training data processed and saved")
-
         except Exception as e:
             self.logger.error(f"Error in process_data: {str(e)}")
             raise
@@ -355,36 +305,6 @@ class ELOCalculator:
             The original DataFrame
         """
         try:
-            # # Create a write-only workbook and worksheet
-            # wb = Workbook(write_only=True)
-            # ws = wb.create_sheet("Sheet1")
-
-            # # Convert DataFrame to dictionary of records
-            # records = df.to_dict("records")
-
-            # # Initialize the prediction generator
-            # prediction_generator = iter(records)
-
-            # # Retrieve the first row to determine headers
-            # try:
-            #     first_row = next(prediction_generator)
-            # except StopIteration:
-            #     self.logger.warning(f"No data to export for {type}")
-            #     return df
-
-            # headers = list(first_row.keys())
-            # ws.append(headers)
-            # ws.append([first_row.get(header) for header in headers])
-            # row_count = 1  # Counting first data row already written
-
-            # # Process remaining rows
-            # for row_dict in prediction_generator:
-            #     ws.append([row_dict.get(header) for header in headers])
-            #     row_count += 1
-            #     if row_count % 5000 == 0:
-            #         self.logger.info(f"Processed {row_count} rows")
-
-            # wb.save(output_path)
             export_to_xlsx_fast(df, output_path)
             self.logger.info(f"Successfully exported {len(df)} rows to {output_path}")
         except Exception as e:

@@ -376,8 +376,8 @@ def main():
     X_combined = pd.concat([X_train, X_test], axis=0, ignore_index=True)
     y_combined = pd.concat([y_train, y_test], axis=0, ignore_index=True)
     logger.info(f"Combined dataset shape: {X_combined.shape}")
-    # stage1_features, avg_importance = xgboost_staged_selection(X_combined, y_combined, X_eval, y_eval, target_features=120)
-    stage2_features, avg_importance = lightgbm_staged_selection(X_combined, y_combined, X_eval, y_eval, target_features=120)
+    stage1_features, avg_importance = xgboost_staged_selection(X_combined, y_combined, X_eval, y_eval, target_features=150)
+    stage2_features, avg_importance = lightgbm_staged_selection(X_combined, y_combined, X_eval, y_eval, target_features=150)
 
 
 

@@ -8,7 +8,6 @@ import mlflow.sklearn
 import numpy as np
 import optuna
 import pandas as pd
-import shap
 
 # Use 80% of logical CPUs (32 threads * 0.8 = 25.6)
 NUM_THREADS = "25"  # Tailored for AMD 7950X3D, 64GB RAM, Windows 11
@@ -19,7 +18,8 @@ os.environ["OPENBLAS_NUM_THREADS"] = NUM_THREADS
 os.environ["TF_INTRA_OP_PARALLELISM_THREADS"] = NUM_THREADS
 os.environ["TF_INTER_OP_PARALLELISM_THREADS"] = NUM_THREADS
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force CPU usage
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"   # Reduce TensorFlow logging verbosity
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"    # Change from "2" to "3"
+os.environ["XLA_FLAGS"] = "--xla_hlo_profile=false"  # Disable XLA logging
 
 # Optional: Set process priority to high (Windows only)
 try:
@@ -31,6 +31,7 @@ except Exception:
 
 import tensorflow as tf
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import RobustScaler
 from tensorflow import keras
 from tensorflow.keras import callbacks, layers, regularizers  # type: ignore
@@ -45,7 +46,10 @@ logger = ExperimentLogger(experiment_name=experiment_name)
 from src.models.ensemble.data_utils import prepare_data
 from src.models.StackedEnsemble.shared.data_loader_new import DataLoader
 from src.models.StackedEnsemble.shared.hypertuner_utils import optimize_threshold
-from src.utils.create_evaluation_set import import_selected_features_ensemble_new, setup_mlflow_tracking
+from src.utils.create_evaluation_set import (
+    import_selected_features_ensemble_new,
+    setup_mlflow_tracking,
+)
 
 # Set random seeds for reproducibility
 random_seed = 19
@@ -371,9 +375,9 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
                 else:
                     trial.set_user_attr(metric_name, str(metric_value))
             
-            if score > 0.34 and score > best_score:
+            if score > 0.30 and score > best_score:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
-                log_to_mlflow(model, metrics, params, experiment_name, scaler)
+                log_to_mlflow(model, metrics, params, experiment_name, scaler, X_eval)
             return score
         except Exception as e:
             logger.error(f"Trial failed: {str(e)}")
@@ -412,7 +416,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     storage_url = "sqlite:///optuna_mlp.db"
     study_name = "mlp_optimization"
     total_trials = n_trials
-    batch_size = 1000
+    batch_size = 100
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
@@ -426,9 +430,22 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         load_if_exists=True,
         sampler=sampler,
     )
-    for _ in range(num_batches):
+    for batch in range(num_batches):
+        if batch > 0:  # Skip feature reduction for the first batch
+            features_to_remove = min(1, X_train.shape[1] - 20)
+            if features_to_remove > 0:
+                logger.info(f"Batch {batch + 1}: Removing {features_to_remove} features from position 0")
+                logger.info(f"Features before removal: {X_train.shape[1]}")
+                
+                # Remove features from numpy arrays by slicing (remove first features_to_remove columns)
+                X_train = X_train[:, features_to_remove:]
+                X_test = X_test[:, features_to_remove:]
+                if X_eval is not None:
+                    X_eval = X_eval[:, features_to_remove:]
+                
+                logger.info(f"Features after removal: {X_train.shape[1]}")
         try:
-            study.optimize(objective, n_trials=batch_size, callbacks=[callback], n_jobs=2)
+            study.optimize(objective, n_trials=batch_size, callbacks=[callback], n_jobs=3)
         except KeyboardInterrupt:
             logger.info("Study interrupted by user. Saving current state...")
             study.save_state(f"{study_name}_interrupted.pkl")
@@ -454,14 +471,13 @@ def hypertune_mlp(experiment_name):
         logger.error(f"Error during hypertuning: {str(e)}")
         return None, None
 
-def log_to_mlflow(model, metrics, params, experiment_name, scaler):
+def log_to_mlflow(model, metrics, params, experiment_name, scaler, X_eval):
     """
     Log the final MLP model, its metrics, and parameters to MLflow.
     
     Returns:
         str: Run ID.
     """
-    global X_eval
     try:
         mlflow.set_experiment(experiment_name)
         with mlflow.start_run(run_name=f"mlp_final_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
@@ -686,7 +702,7 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
         probs = wrapped_model.predict_proba(X_eval_scaled)[:, 1]
         preds = (probs >= threshold).astype(int)
         baseline = np.sum((y_val_np == 1) & (preds == 1)) / (np.sum(preds == 1))
-        for idx, feat in enumerate(feature_names):
+        for idx, _feat in enumerate(feature_names):
             X_shuffled = X_eval_scaled.copy()
             X_shuffled[:, idx] = np.random.permutation(X_shuffled[:, idx])
             probs_shuffled = wrapped_model.predict_proba(X_shuffled)[:, 1]
@@ -708,12 +724,145 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
         'mean_importance': mean_importances
     }).sort_values('mean_importance', ascending=False)
     logger.info('Top features by average permutation importance across trials:')
-    for idx, row in importance_df.head(100).iterrows():
+    for _idx, row in importance_df.head(100).iterrows():
         logger.info(f'  {row.feature}: {row.mean_importance:.6f}')
-    # You can return this DataFrame or the top N features as a list:
-    top_features = importance_df.head(100)['feature'].tolist()
+
     
     return study.best_params, importance_df
+
+def mlp_staged_selection(X, y, X_eval, y_eval, target_features=100):
+    """Multi-stage MLP feature selection with different objectives"""
+    
+    logger.info(f"Starting MLP staged selection with {X.shape[1]} initial features")
+    
+    # Stage 1: Quick filter with simple MLP
+    logger.info("Stage 1: Quick filter with simple MLP")
+    X_scaled, X_eval_scaled, _X_eval_scaled, scaler_stage1 = preprocess_data(X, X_eval, X_eval)
+    
+    # Create simple MLP for quick filtering
+    mlp_fast = keras.Sequential([
+        layers.InputLayer(shape=(X.shape[1],)),
+        layers.Dense(64, activation='relu'),
+        layers.Dropout(0.3),
+        layers.Dense(32, activation='relu'),
+        layers.Dropout(0.3),
+        layers.Dense(1, activation='sigmoid')
+    ])
+    
+    mlp_fast.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=0.01),
+        loss='binary_crossentropy',
+        metrics=['accuracy', 'precision', 'recall']
+    )
+    
+    # Train quick model
+    mlp_fast.fit(
+        X_scaled, y,
+        validation_data=(X_eval_scaled, y_eval),
+        epochs=50,
+        batch_size=512,
+        verbose=0,
+        callbacks=[keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)]
+    )
+    
+    # Calculate permutation importance for stage 1
+    baseline_score = mlp_fast.evaluate(X_eval_scaled, y_eval, verbose=0)[1]  # accuracy
+    stage1_importances = []
+    
+    for i in range(X.shape[1]):
+        X_eval_permuted = X_eval_scaled.copy()
+        X_eval_permuted[:, i] = np.random.permutation(X_eval_permuted[:, i])
+        permuted_score = mlp_fast.evaluate(X_eval_permuted, y_eval, verbose=0)[1]
+        importance = baseline_score - permuted_score
+        stage1_importances.append(importance)
+    
+    stage1_importances = np.array(stage1_importances)
+    stage1_features = X.columns[np.argsort(stage1_importances)[-200:]].tolist()
+    
+    logger.info(f"Stage 1: Selected {len(stage1_features)} features")
+    
+    # Stage 2: Refined selection with cross-validation
+    logger.info("Stage 2: Refined selection with cross-validation")
+    X_stage1 = X[stage1_features]
+    X_eval_stage1 = X_eval[stage1_features]
+    
+    # Cross-validation feature importance
+    cv_scores = []
+    cv_importances = []
+    
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X_stage1, y)):
+        logger.info(f"Processing fold {fold + 1}/5")
+        
+        X_train_cv, X_val_cv = X_stage1.iloc[train_idx], X_stage1.iloc[val_idx]
+        y_train_cv, y_val_cv = y.iloc[train_idx], y.iloc[val_idx]
+        
+        # Scale data for this fold
+        scaler_cv = RobustScaler()
+        X_train_cv_scaled = scaler_cv.fit_transform(X_train_cv)
+        X_val_cv_scaled = scaler_cv.transform(X_val_cv)
+        X_eval_stage1_scaled = scaler_cv.transform(X_eval_stage1)
+        
+        # Create refined MLP
+        mlp_refined = keras.Sequential([
+            layers.InputLayer(shape=(X_stage1.shape[1],)),
+            layers.Dense(128, activation='elu', kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)),
+            layers.Dropout(0.4),
+            layers.Dense(64, activation='elu', kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)),
+            layers.Dropout(0.4),
+            layers.Dense(32, activation='elu', kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)),
+            layers.Dropout(0.3),
+            layers.Dense(1, activation='sigmoid')
+        ])
+        
+        mlp_refined.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=0.001),
+            loss='binary_crossentropy',
+            metrics=['accuracy', 'precision', 'recall']
+        )
+        
+        # Train refined model
+        mlp_refined.fit(
+            X_train_cv_scaled, y_train_cv,
+            validation_data=(X_val_cv_scaled, y_val_cv),
+            epochs=100,
+            batch_size=256,
+            verbose=0,
+            callbacks=[keras.callbacks.EarlyStopping(patience=15, restore_best_weights=True)]
+        )
+        
+        # Calculate permutation importance for this fold
+        baseline_score_cv = mlp_refined.evaluate(X_eval_stage1_scaled, y_eval, verbose=0)[1]
+        fold_importances = []
+        
+        for i in range(X_stage1.shape[1]):
+            X_eval_permuted = X_eval_stage1_scaled.copy()
+            X_eval_permuted[:, i] = np.random.permutation(X_eval_permuted[:, i])
+            permuted_score = mlp_refined.evaluate(X_eval_permuted, y_eval, verbose=0)[1]
+            importance = baseline_score_cv - permuted_score
+            fold_importances.append(importance)
+        
+        cv_importances.append(fold_importances)
+        cv_scores.append(baseline_score_cv)
+        
+        # Clear memory
+        del mlp_refined
+        keras.backend.clear_session()
+    
+    # Average importance across folds
+    avg_importance = np.mean(cv_importances, axis=0)
+    stage2_features = [stage1_features[i] for i in np.argsort(avg_importance)[-target_features:]]
+    
+    # Log average importances for the selected features
+    selected_indices = np.argsort(avg_importance)[-target_features:]
+    selected_importances = avg_importance[selected_indices]
+    feature_importance_pairs = list(zip(stage2_features, selected_importances))
+    
+    logger.info(f"Stage 2: Selected {len(stage2_features)} features: {stage2_features}")
+    logger.info(f"Feature-importance pairs: {feature_importance_pairs}")
+    logger.info(f"CV Score: {np.mean(cv_scores):.4f} ± {np.std(cv_scores):.4f}")
+    
+    return stage2_features, avg_importance
 
 
 def main():
@@ -726,6 +875,7 @@ def main():
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
         features = import_selected_features_ensemble_new(model_type="mlp")
+
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
@@ -742,8 +892,14 @@ def main():
         best_params, metrics = hypertune_mlp(experiment_name)
         logger.info(f"Hypertuning completed with hyperparameters: {best_params}")
 
+        X_combined = pd.concat([X_train, X_test])
+        y_combined = pd.concat([y_train, y_test])
+        X_eval_combined = pd.concat([X_eval, X_test])
+        y_eval_combined = pd.concat([y_eval, y_test])
+        mlp_staged_selection(X_combined, y_combined, X_eval_combined, y_eval_combined, target_features=80)
+
         # # Optional seed-based fine-tuning for improved precision
-        train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        # train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")

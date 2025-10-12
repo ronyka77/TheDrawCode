@@ -283,7 +283,7 @@ class PoissonXGCalculator:
             self.logger.error(f"Error in prediction: {str(e)}")
             raise
 
-    def add_poisson_xG(self, df: pd.DataFrame, base_df: pd.DataFrame, type: str) -> pd.DataFrame:
+    def add_poisson_xG(self, df: pd.DataFrame, base_df: pd.DataFrame, type: str, is_training: bool = False) -> pd.DataFrame:
         # Sort by date if available
         if "Datum" in df.columns:
             df["Datum"] = pd.to_datetime(df["Datum"])
@@ -292,7 +292,7 @@ class PoissonXGCalculator:
             df["Date"] = pd.to_datetime(df["Date"])
             df = df.sort_values("Date")
 
-        if type == "training" or type == "api_training":
+        if is_training:
             # Fit model on training data
             self.logger.info("Training model on historical data...")
             self.fit(df)
@@ -328,36 +328,6 @@ class PoissonXGCalculator:
 
         # Export results
         try:
-            # # Create a write-only workbook and worksheet
-            # wb = Workbook(write_only=True)
-            # ws = wb.create_sheet("Sheet1")
-
-            # # Convert DataFrame to dictionary of records
-            # records = df_with_xg.to_dict("records")
-
-            # # Initialize the prediction generator
-            # prediction_generator = iter(records)
-
-            # # Retrieve the first row to determine headers
-            # try:
-            #     first_row = next(prediction_generator)
-            # except StopIteration:
-            #     self.logger.warning(f"No data to export for {type}")
-            #     return df_with_xg
-
-            # headers = list(first_row.keys())
-            # ws.append(headers)
-            # ws.append([first_row.get(header) for header in headers])
-            # row_count = 1  # Counting first data row already written
-
-            # # Process remaining rows
-            # for row_dict in prediction_generator:
-            #     ws.append([row_dict.get(header) for header in headers])
-            #     row_count += 1
-            #     if row_count % 5000 == 0:
-            #         self.logger.info(f"Processed {row_count} rows")
-
-            # wb.save(output_path)
             export_to_xlsx_fast(df_with_xg, output_path)
             self.logger.info(f"Successfully exported {len(df_with_xg)} rows to {output_path}")
         except Exception as e:
@@ -375,26 +345,8 @@ class PoissonXGCalculator:
             self.logger.info("Starting data processing...")
 
             # Load training data
-            # training_path = './data_files/PowerBI/model_data_training.csv'
-            # training_path_new = './data_files/PowerBI/model_data_training2.csv'
-            # prediction_path = './data_files/PowerBI/model_data_prediction.csv'
-            # merged_path = './data_files/PowerBI/merged_data_prediction.csv'
-            api_prediction_path = "./data_files/PowerBI/api_data_prediction.xlsx"
             api_prediction_new_path = "./data_files/PowerBI/api_data_prediction_new.xlsx"
-            api_training_path = "./data_files/PowerBI/api_data_training.xlsx"
             api_future_path = "./data_files/PowerBI/api_football_future.xlsx"
-
-            # training_data = pd.read_csv(training_path)
-            # training_data_new = pd.read_csv(training_path_new)
-            # prediction_data = pd.read_csv(prediction_path)
-            # merged_data = pd.read_csv(merged_path)
-
-            # Read Excel files with openpyxl, treating 'Infinity' and similar strings as NaN
-            self.logger.info(f"Loading prediction data from {api_prediction_path}")
-            api_prediction_data = load_excel_with_calamine(api_prediction_path, self.logger)
-
-            self.logger.info(f"Loading training data from {api_training_path}")
-            api_training_data = load_excel_with_calamine(api_training_path, self.logger)
 
             self.logger.info(f"Loading future data from {api_future_path}")
             api_future_data = load_excel_with_calamine(api_future_path, self.logger)
@@ -402,24 +354,6 @@ class PoissonXGCalculator:
             self.logger.info(f"Loading prediction data from {api_prediction_new_path}")
             api_prediction_data_new = load_excel_with_calamine(api_prediction_new_path, self.logger)
 
-            api_training_data = api_training_data.rename(
-                columns={
-                    "home_possession_mean": "Home_possession_mean",
-                    "home_shot_on_target_mean": "Home_shot_on_target_mean",
-                    "away_goal_difference_cum": "Away_goal_difference_cum",
-                    "home_points_cum": "Home_points_cum",
-                    "away_points_cum": "Away_points_cum",
-                }
-            )
-            api_prediction_data = api_prediction_data.rename(
-                columns={
-                    "home_possession_mean": "Home_possession_mean",
-                    "home_shot_on_target_mean": "Home_shot_on_target_mean",
-                    "away_goal_difference_cum": "Away_goal_difference_cum",
-                    "home_points_cum": "Home_points_cum",
-                    "away_points_cum": "Away_points_cum",
-                }
-            )
             api_future_data = api_future_data.rename(
                 columns={
                     "home_possession_mean": "Home_possession_mean",
@@ -439,15 +373,8 @@ class PoissonXGCalculator:
                 }
             )
             
-
-            # self.add_poisson_xG(training_data, 'training')
-            # self.add_poisson_xG(training_data_new, 'training_new')
-            # self.add_poisson_xG(prediction_data, 'prediction')
-            # self.add_poisson_xG(merged_data, 'merged')
-            self.add_poisson_xG(api_training_data, api_training_data, "api_training")
-            self.add_poisson_xG(api_prediction_data, api_prediction_data, "api_prediction")
+            self.add_poisson_xG(api_prediction_data_new, api_prediction_data_new, "api_prediction_new", is_training=True)
             self.add_poisson_xG(api_future_data, api_future_data, "api_future")
-            self.add_poisson_xG(api_prediction_data_new, api_prediction_data_new, "api_prediction_new")
         except Exception as e:
             self.logger.error(f"Error in data processing: {str(e)}")
             raise
