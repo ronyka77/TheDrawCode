@@ -751,7 +751,6 @@ def main():
             experiment_name,
         )
 
-        # logger.info("Proceeding to train final model with precision target settings.") # noqa: E501
         # best_model, best_metrics = train_with_precision_target( # noqa: E501
         #     x_train, # noqa: E501
         #     y_train, # noqa: E501

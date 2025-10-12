@@ -160,3 +160,4 @@ data/Create_data/api_football/api_test.py
 data/Create_data/api_football/api_test.json
 *ensemble_40
 *prompts
+.sonarlint/connectedMode.json

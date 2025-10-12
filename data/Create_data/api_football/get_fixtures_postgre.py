@@ -4,7 +4,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import psycopg2
 import requests
@@ -25,13 +25,23 @@ try:
 except Exception as e:
     print(f"Error setting project root path: {e}")
     # Fallback to current directory if path resolution fails
-    sys.path.append(os.getcwd().parent.parent.parent)
-    print(f"Current directory get_fixtures: {os.getcwd().parent.parent.parent}")
+    fallback_path = Path(os.getcwd()).parent.parent.parent
+    sys.path.append(str(fallback_path))
+    print(f"Current directory get_fixtures: {fallback_path}")
 
 from src.utils.logger import ExperimentLogger
 
-# PostgreSQL engine setup
-engine = create_engine("postgresql+psycopg2://postgres:ronaldo99@localhost:5432/api_football")
+# PostgreSQL engine setup with environment variables
+db_host = os.getenv("POSTGRES_HOST", "localhost")
+db_name = os.getenv("POSTGRES_DB", "api_football")
+db_user = os.getenv("POSTGRES_USER", "postgres")
+db_password = os.getenv("POSTGRES_PASSWORD")
+db_port = os.getenv("POSTGRES_PORT", "5432")
+
+if not db_password:
+    raise ValueError("POSTGRES_PASSWORD environment variable is required")
+
+engine = create_engine(f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}")
 metadata = MetaData()
 
 # Reflect the fixtures table
@@ -40,13 +50,16 @@ predictions_table = Table("predictions", metadata, autoload_with=engine, schema=
 team_stats_table = Table("team_stats", metadata, autoload_with=engine, schema="api_football")
 fixture_events_table = Table("events", metadata, autoload_with=engine, schema="api_football")
 
+# Constants for event types
+VAR_CHECK_DETAIL = "VAR Check"
+
 
 class ApiFootball:
     """
     A class to interact with the API-Football API and store data in PostgreSQL.
     """
 
-    def __init__(self, api_key: str, logger: ExperimentLogger = None):
+    def __init__(self, api_key: str, logger: Optional[ExperimentLogger] = None):
         self.api_key = api_key
         self.logger = logger or ExperimentLogger()
         self.base_url = "https://v3.football.api-sports.io/"
@@ -58,7 +71,7 @@ class ApiFootball:
         self.data_dir = os.path.join(self.project_root, "data", "create_data", "api-football")
         os.makedirs(self.data_dir, exist_ok=True)
 
-    def _get_request(self, endpoint: str, params: dict = None) -> dict:
+    def _get_request(self, endpoint: str, params: Optional[dict] = None) -> dict:
         """
         Sends a GET request to the specified endpoint.
         Args:
@@ -222,7 +235,7 @@ class ApiFootball:
 
     def _parse_team_stat_response(
         self, api_response_data: dict, fixture_id: int, target_team_id: Any
-    ) -> dict:
+    ) -> Optional[dict]:
         """Parses the teams/statistics API response (a dictionary) for a specific team's season stats,
         and filters the output to match the known columns in api_football.team_stats table."""
         known_team_stats_columns = [
@@ -308,7 +321,7 @@ class ApiFootball:
         clean_sheet_api = api_response_data.get("clean_sheet", {})
         failed_to_score_api = api_response_data.get("failed_to_score", {})
 
-        if not team_api.get("id") == target_team_id_int:
+        if team_api.get("id") != target_team_id_int:
             self.logger.warning(
                 f"API response team ID {team_api.get('id')} does not match target_team_id {target_team_id_int}"
             )
@@ -509,7 +522,8 @@ class ApiFootball:
                             self.logger.info(
                                 f"Parsed season stats for team {team_id_to_fetch}, league {league_id}"
                             )
-                            if not parsed_stats.get("team_id") or parsed_stats.get("team_id") <= 0:
+                            team_id_value = parsed_stats.get("team_id")
+                            if not team_id_value or (isinstance(team_id_value, (int, float)) and team_id_value <= 0):
                                 self.logger.warning(
                                     f"Skipping stats record - missing or invalid team_id for fixture {fixture_id}"
                                 )
@@ -663,10 +677,10 @@ class ApiFootball:
                     if k == "ball_possession" and isinstance(val, str) and val.endswith("%"):
                         try:
                             val = float(val.replace("%", ""))
-                        except Exception:
+                        except (ValueError, AttributeError):
                             val = None
                     # Convert passes_percent from '55%' to float if needed
-                    if (
+                    elif (
                         k == "passes_percent"
                         or k == "passes_%"
                         and isinstance(val, str)
@@ -674,7 +688,7 @@ class ApiFootball:
                     ):
                         try:
                             val = float(val.replace("%", ""))
-                        except Exception:
+                        except (ValueError, AttributeError):
                             val = None
                     result[v] = val
                 return result
@@ -936,11 +950,6 @@ class ApiFootball:
             message = f"Error processing or upserting prediction for fixture ID {fixture_id}: {e}"
             self.logger.error(message)
             print(message)
-            if self.conn and not self.conn.closed:
-                try:
-                    self.conn.rollback()
-                except psycopg2.Error as rb_e:
-                    print(f"Rollback failed: {rb_e}")
             return False
 
     def get_fixture_ids_without_predictions(self) -> list[int]:
@@ -1114,7 +1123,7 @@ class ApiFootball:
         except Exception as e:
             self.logger.error(f"Error deleting old unscored fixtures: {e}")
 
-    def _map_api_event_to_row(self, event_data: dict, fixture_id_context: int) -> dict:
+    def _map_api_event_to_row(self, event_data: dict, fixture_id_context: int) -> Optional[dict]:
         """Maps a single event object from the API response to a dictionary for the fixture_events table."""
         if not event_data or not isinstance(event_data, dict):
             self.logger.warning(
@@ -1138,16 +1147,17 @@ class ApiFootball:
         if raw_event_detail is None and event_type:
             # Map event types to default details when API doesn't provide them
             default_details = {
-                "Var": "VAR Check",
-                "var": "VAR Check",  # Handle case variations
-                "VAR": "VAR Check",
+                "Var": VAR_CHECK_DETAIL,
+                "var": VAR_CHECK_DETAIL,  # Handle case variations
+                "VAR": VAR_CHECK_DETAIL,
                 "Goal": "Goal",
                 "Card": "Card",
                 "subst": "Substitution",
                 "Substitution": "Substitution",
             }
 
-            event_detail = default_details.get(event_type, f"{event_type} Event")
+            event_type_str = str(event_type) if event_type is not None else ""
+            event_detail = default_details.get(event_type_str, f"{event_type_str} Event")
 
             # Log when we apply a default value for tracking
             self.logger.info(

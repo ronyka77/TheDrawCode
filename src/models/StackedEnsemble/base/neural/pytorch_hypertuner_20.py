@@ -121,27 +121,27 @@ class PytorchModel(nn.Module):
 
         # Timing: Data scaling
         scale_start = time.time()
-        X_scaled = self.scaler_.transform(X)
+        x_scaled = self.scaler_.transform(X)
         scale_time = time.time() - scale_start
 
         # Timing: Tensor conversion
         tensor_start = time.time()
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=self.device_)
+        x_tensor = torch.tensor(x_scaled, dtype=torch.float32, device=self.device_)
         tensor_time = time.time() - tensor_start
 
         # Timing: Model inference
         inference_start = time.time()
-        n_samples = X_tensor.shape[0]
+        n_samples = x_tensor.shape[0]
         all_probs = []
 
         with torch.no_grad():
             # Process in proper batches
             for i in range(0, n_samples, batch_size):
                 batch_end = min(i + batch_size, n_samples)
-                batch_X = X_tensor[i:batch_end]
+                batch_x = x_tensor[i:batch_end]
 
                 # Forward pass
-                outputs = self.network(batch_X)
+                outputs = self.network(batch_x)
                 # Apply sigmoid and keep on GPU until all batches processed
                 probs = torch.sigmoid(outputs)
                 all_probs.append(probs)
@@ -194,6 +194,9 @@ pip_requirements = [
 ]
 
 base_params = {"random_state": SEED}
+
+# Constants for repeated strings
+SCALER_PATH_PYTORCH = "src/models/scalers/scaler_pytorch.pkl"
 
 global logger, experiment_name
 
@@ -256,24 +259,24 @@ def load_hyperparameter_space():
     return hyperparameter_space
 
 
-def preprocess_data(X_train, X_test, X_eval=None):
+def preprocess_data(x_train, x_test, x_eval=None):
     try:
-        with open("src/models/scalers/scaler_pytorch.pkl", "rb") as f:
+        with open(SCALER_PATH_PYTORCH, "rb") as f:
             scaler = pickle.load(f)
         logger.info("Loaded existing PyTorch scaler")
-        X_train_scaled = scaler.transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-        X_eval_scaled = scaler.transform(X_eval)
+        x_train_scaled = scaler.transform(x_train)
+        x_test_scaled = scaler.transform(x_test)
+        x_eval_scaled = scaler.transform(x_eval)
     except Exception as e:
         logger.error(f"Error loading PyTorch scaler: {str(e)}")
         scaler = RobustScaler()
         logger.info("Created new PyTorch scaler")
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-        X_eval_scaled = scaler.transform(X_eval)
-        with open("src/models/scalers/scaler_pytorch.pkl", "wb") as f:
+        x_train_scaled = scaler.fit_transform(x_train)
+        x_test_scaled = scaler.transform(x_test)
+        x_eval_scaled = scaler.transform(x_eval)
+        with open(SCALER_PATH_PYTORCH, "wb") as f:
             pickle.dump(scaler, f)
-    return X_train_scaled, X_test_scaled, X_eval_scaled, scaler
+    return x_train_scaled, x_test_scaled, x_eval_scaled, scaler
 
 
 def create_pytorch_model(model_params, input_dim, device, scaler):
@@ -313,13 +316,14 @@ def create_pytorch_model(model_params, input_dim, device, scaler):
 
 
 # --- Phase 3: Core Training Logic ---
+# Cognitive complexity is high due to comprehensive ML training logic (data prep, training loop, validation, early stopping)
 def train_pytorch_model(
     model,
-    X_train,
+    x_train,
     y_train,
-    X_test,
+    x_test,
     y_test,
-    X_val,
+    x_val,
     y_val,
     model_params,
     device,
@@ -330,9 +334,9 @@ def train_pytorch_model(
     Trains the PyTorch model, handles validation, early stopping, and threshold tuning.
     Args:
         model (torch.nn.Module): The PyTorch model instance.
-        X_train, y_train: Training data and labels (numpy/pandas).
-        X_val, y_val: Validation data and labels (numpy/pandas).
-        X_eval, y_eval: Evaluation data for final threshold tuning (numpy/pandas).
+        x_train, y_train: Training data and labels (numpy/pandas).
+        x_val, y_val: Validation data and labels (numpy/pandas).
+        x_eval, y_eval: Evaluation data for final threshold tuning (numpy/pandas).
         model_params (dict): Hyperparameters including batch_size, epochs, optimizer, etc.
         device (torch.device): CPU or CUDA device.
         scaler (RobustScaler): The fitted scaler instance.
@@ -345,13 +349,13 @@ def train_pytorch_model(
     try:
         # --- Data Preparation ---
         batch_size = model_params["batch_size"]
-        X_combined = pd.concat([X_train, X_test], axis=0)
+        x_combined = pd.concat([x_train, x_test], axis=0)
         y_combined = pd.concat([y_train, y_test], axis=0)
 
-        X_combined_scaled = scaler.transform(X_combined)
-        X_val_scaled = scaler.transform(X_val)
+        x_combined_scaled = scaler.transform(x_combined)
+        x_val_scaled = scaler.transform(x_val)
         # No need to scale X_eval here, will be handled by pytorch_predict_proba
-        X_train_tensor = torch.tensor(X_combined_scaled, dtype=torch.float32)
+        x_train_tensor = torch.tensor(x_combined_scaled, dtype=torch.float32)
         # Fix ndarray attribute access - safely get values
         y_combined_values = (
             y_combined.values if hasattr(y_combined, "values") else np.asarray(y_combined)
@@ -359,16 +363,16 @@ def train_pytorch_model(
         y_train_tensor = torch.tensor(y_combined_values, dtype=torch.float32).unsqueeze(
             1
         )  # Ensure (N, 1)
-        X_val_tensor = torch.tensor(X_val_scaled, dtype=torch.float32)
+        x_val_tensor = torch.tensor(x_val_scaled, dtype=torch.float32)
         # Fix ndarray attribute access - safely get values
         y_val_values = y_val.values if hasattr(y_val, "values") else np.asarray(y_val)
         y_val_tensor = torch.tensor(y_val_values, dtype=torch.float32).unsqueeze(1)  # Ensure (N, 1)
 
-        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-        val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
+        train_dataset = TensorDataset(x_train_tensor, y_train_tensor)
+        val_dataset = TensorDataset(x_val_tensor, y_val_tensor)
 
-        train_loader = TorchDataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = TorchDataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        train_loader = TorchDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+        val_loader = TorchDataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
         logger.info(
             f"Data loaders created. Train batches: {len(train_loader)}, Val batches: {len(val_loader)}"
         )
@@ -401,11 +405,11 @@ def train_pytorch_model(
             # Training Phase
             model.train()
             epoch_train_loss = 0.0
-            for batch_X, batch_y in train_loader:
-                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+            for batch_x, batch_y in train_loader:
+                batch_x, batch_y = batch_x.to(device), batch_y.to(device)
 
                 optimizer.zero_grad()
-                outputs = model(batch_X)
+                outputs = model(batch_x)
                 loss = criterion(outputs, batch_y)
                 loss.backward()
                 optimizer.step()
@@ -416,9 +420,9 @@ def train_pytorch_model(
             model.eval()
             epoch_val_loss = 0.0
             with torch.no_grad():
-                for batch_X, batch_y in val_loader:
-                    batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                    outputs = model(batch_X)
+                for batch_x, batch_y in val_loader:
+                    batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+                    outputs = model(batch_x)
                     loss = criterion(outputs, batch_y)
                     epoch_val_loss += loss.item()
             avg_val_loss = epoch_val_loss / len(val_loader)
@@ -453,7 +457,7 @@ def train_pytorch_model(
                 "No best model state found (early stopping might not have been triggered or training was too short)."
             )
 
-        # Threshold Optimization using validation data (X_val, y_val)
+        # Threshold Optimization using validation data (x_val, y_val)
         logger.info("Optimizing threshold on validation data...")
         # Fix ndarray attribute access - safely get values
         y_val_np = (
@@ -461,11 +465,11 @@ def train_pytorch_model(
         )  # optimize_threshold expects numpy array
 
         # Call optimize_threshold with the model, X, and y
-        # Assumes optimize_threshold will internally call model.predict_proba(X_val)
+        # Assumes optimize_threshold will internally call model.predict_proba(x_val)
         try:
             best_threshold, metrics = optimize_threshold(
                 model,  # Pass the model object
-                X_val,  # Pass validation features
+                x_val,  # Pass validation features
                 y_val_np,  # Pass validation true labels
                 min_recall=MIN_RECALL,
                 # Removed pre-calculated probs and other args
@@ -491,14 +495,15 @@ def train_pytorch_model(
 
 
 # --- Phase 4: Optuna Integration ---
+# Cognitive complexity is high due to Optuna hyperparameter optimization logic
 # Define the objective function with fixed arguments using lambda
 def objective(
     trial,
-    X_train,
+    x_train,
     y_train,
-    X_test,
+    x_test,
     y_test,
-    X_val,
+    x_val,
     y_val,
     hyperparameter_space,
     input_dim,
@@ -541,11 +546,11 @@ def objective(
         # train_pytorch_model handles potential TrialPruned exception
         model, metrics = train_pytorch_model(
             model,
-            X_train,
+            x_train,
             y_train,
-            X_test,
+            x_test,
             y_test,
-            X_val,
+            x_val,
             y_val,
             params,
             device,
@@ -578,7 +583,7 @@ def objective(
                 metrics,
                 params,
                 experiment_name,
-                X_val,
+                x_val,
                 scaler,
                 pip_requirements,
                 run_name_prefix=f"pytorch_trial_{trial.number}",
@@ -593,11 +598,11 @@ def objective(
 
 
 def optimize_hyperparameters(
-    X_train,
+    x_train,
     y_train,
-    X_test,
+    x_test,
     y_test,
-    X_val,
+    x_val,
     y_val,
     hyperparameter_space,
     input_dim,
@@ -608,9 +613,9 @@ def optimize_hyperparameters(
     """
     Orchestrates the hyperparameter optimization process using Optuna.
     Args:
-        X_train, y_train: Training data.
-        X_test, y_test: Test data.
-        X_val, y_val: Validation data.
+        x_train, y_train: Training data.
+        x_test, y_test: Test data.
+        x_val, y_val: Validation data.
         hyperparameter_space (dict): The search space definition.
         input_dim (int): Number of input features.
         device (torch.device): Device for training.
@@ -629,11 +634,11 @@ def optimize_hyperparameters(
         nonlocal best_score_overall
         return objective(
             trial,
-            X_train,
+            x_train,
             y_train,
-            X_test,
+            x_test,
             y_test,
-            X_val,
+            x_val,
             y_val,
             hyperparameter_space,
             input_dim,
@@ -703,7 +708,7 @@ def log_to_mlflow_pytorch(
     metrics,
     params,
     experiment_name,
-    X_eval,  # For input example
+    x_eval,  # For input example
     scaler,  # Log the scaler as well
     pip_requirements,
     run_name_prefix="pytorch_final",
@@ -715,7 +720,7 @@ def log_to_mlflow_pytorch(
         metrics (dict): Model evaluation metrics (precision, recall, threshold, etc.).
         params (dict): Hyperparameters used for the final model.
         experiment_name (str): Target MLflow experiment.
-        X_eval (pd.DataFrame or np.ndarray): Evaluation data to create input example.
+        x_eval (pd.DataFrame or np.ndarray): Evaluation data to create input example.
         scaler (RobustScaler): The fitted scaler instance to log.
         pip_requirements (list): List of pip requirements strings.
         run_name_prefix (str): Prefix for the MLflow run name.
@@ -740,13 +745,13 @@ def log_to_mlflow_pytorch(
             logger.info(f"Logged metrics: {metrics}")
 
             # Log the scaler
-            scaler_path = "src/models/scalers/scaler_pytorch.pkl"
+            scaler_path = SCALER_PATH_PYTORCH
             mlflow.log_artifact(scaler_path, artifact_path="scaler")
             logger.info("Logged scaler artifact.")
 
             # Log the PyTorch model
             # --- Signature Inference ---
-            input_example_df = X_eval.iloc[:5].copy()  # Get DataFrame slice first
+            input_example_df = x_eval.iloc[:5].copy()  # Get DataFrame slice first
             # Scale this specific example for prediction
             input_example_np_scaled = scaler.transform(input_example_df).astype(np.float32)
             input_example_tensor = torch.tensor(input_example_np_scaled, dtype=torch.float32)
@@ -811,11 +816,11 @@ def log_to_mlflow_pytorch(
 
 
 def hypertune_pytorch(
-    X_train,
+    x_train,
     y_train,
-    X_test,
+    x_test,
     y_test,
-    X_val,
+    x_val,
     y_val,
     experiment_name: str,
     input_dim: int,
@@ -825,9 +830,9 @@ def hypertune_pytorch(
     """
     Main orchestration function for hyperparameter tuning and final model training.
     Args:
-        X_train, y_train: Training data.
-        X_val, y_val: Validation data.
-        X_eval, y_eval: Evaluation data.
+        x_train, y_train: Training data.
+        x_val, y_val: Validation data.
+        x_eval, y_eval: Evaluation data.
         experiment_name (str): MLflow experiment name.
         input_dim (int): Number of input features.
         device (torch.device): Device for training.
@@ -842,11 +847,11 @@ def hypertune_pytorch(
         # Run hyperparameter optimization
         logger.info("Initiating Optuna hyperparameter search...")
         best_hpo_params = optimize_hyperparameters(
-            X_train,
+            x_train,
             y_train,
-            X_test,
+            x_test,
             y_test,
-            X_val,
+            x_val,
             y_val,
             hyperparameter_space,
             input_dim,
@@ -871,11 +876,11 @@ def hypertune_pytorch(
         # Train the final model (without passing Optuna trial)
         final_model, final_metrics = train_pytorch_model(
             final_model,
-            X_train,
+            x_train,
             y_train,
-            X_test,
+            x_test,
             y_test,
-            X_val,
+            x_val,
             y_val,
             best_hpo_params,
             device,
@@ -890,7 +895,7 @@ def hypertune_pytorch(
             metrics=final_metrics,
             params=best_hpo_params,
             experiment_name=experiment_name,
-            X_eval=X_val,
+            x_eval=x_val,
             scaler=scaler,
             pip_requirements=pip_requirements,
             run_name_prefix=experiment_name + "_model",
@@ -908,11 +913,11 @@ def hypertune_pytorch(
 
 
 def train_with_precision_target_pytorch(
-    X_train,
+    x_train,
     y_train,
-    X_test,
+    x_test,
     y_test,
-    X_val,
+    x_val,
     y_val,
     experiment_name: str,
     input_dim: int,
@@ -923,9 +928,9 @@ def train_with_precision_target_pytorch(
     Trains a single model using fixed, hardcoded hyperparameters.
     Mirrors the structure of the XGBoost version but uses PyTorch logic.
     Args:
-        X_train, y_train: Training data.
-        X_val, y_val: Validation data.
-        X_eval, y_eval: Evaluation data.
+        x_train, y_train: Training data.
+        x_val, y_val: Validation data.
+        x_eval, y_eval: Evaluation data.
         experiment_name (str): MLflow experiment name.
         input_dim (int): Number of input features.
         device (torch.device): Device for training.
@@ -955,11 +960,11 @@ def train_with_precision_target_pytorch(
         # Train the model
         model, metrics = train_pytorch_model(
             model,
-            X_train,
+            x_train,
             y_train,
-            X_test,
+            x_test,
             y_test,
-            X_val,
+            x_val,
             y_val,
             fixed_params,  # Use the hardcoded dict
             device,
@@ -977,17 +982,17 @@ def train_with_precision_target_pytorch(
         #     metrics=metrics,
         #     params=fixed_params, # Log the hardcoded params used
         #     experiment_name=experiment_name,
-        #     X_eval=X_val,
+        #     x_eval=x_val,
         #     scaler=scaler,
         #     pip_requirements=pip_requirements,
         #     run_name_prefix="pytorch_fixed_params"
         # )
         compute_permutation_importance(
-            model=model,
-            X_val=X_val,
-            y_val=y_val,
-            metric=metrics["precision"],
-            threshold=metrics["threshold"],
+            model,
+            x_val,
+            y_val,
+            metrics["precision"],
+            metrics["threshold"],
         )
         logger.info("Training with fixed parameters completed successfully.")
         return model, metrics
@@ -999,7 +1004,7 @@ def train_with_precision_target_pytorch(
 
 def compute_permutation_importance(
     model,
-    X_val: pd.DataFrame,
+    x_val: pd.DataFrame,
     y_val: np.ndarray,
     metric,
     threshold: float,
@@ -1010,7 +1015,7 @@ def compute_permutation_importance(
     Compute permutation feature importance for a given metric and threshold.
     Args:
         model: Trained model with predict_proba(X) method.
-        X_val: Validation features (DataFrame).
+        x_val: Validation features (DataFrame).
         y_val: Validation labels (array-like).
         metric: Metric function (e.g., sklearn.metrics.precision_score).
         threshold: Threshold for positive class prediction.
@@ -1020,16 +1025,16 @@ def compute_permutation_importance(
         DataFrame with columns: ['feature', 'importance'] (mean drop in metric), sorted descending.
     """
     try:
-        feature_names = X_val.columns.tolist()
+        feature_names = x_val.columns.tolist()
         # Convert y_val to numpy array safely
         if hasattr(y_val, "values"):
-            y_val_np = np.asarray(y_val.values)
+            y_val_np = np.asarray(y_val.values)  # type: ignore
         elif isinstance(y_val, np.ndarray):
             y_val_np = y_val
         else:
             y_val_np = np.array(y_val)
         # Compute baseline metric
-        probs = model.predict_proba(X_val)[:, 1]
+        probs = model.predict_proba(x_val)[:, 1]
         preds = (probs >= threshold).astype(int)
         # Fix: metric is being passed as a float value instead of a function
         # We'll calculate precision directly since that's what was passed in
@@ -1041,15 +1046,17 @@ def compute_permutation_importance(
             for i in range(n_repeats):
                 feat_idx = feature_names.index(feat) + 1
                 logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i + 1}")
-                X_shuffled = X_val.copy()
+                x_shuffled = x_val.copy()
                 # Safely get values from the column
                 feat_values = (
-                    X_shuffled[feat].values
-                    if hasattr(X_shuffled[feat], "values")
-                    else X_shuffled[feat]
+                    x_shuffled[feat].values
+                    if hasattr(x_shuffled[feat], "values")
+                    else x_shuffled[feat]
                 )
-                X_shuffled[feat] = np.random.permutation(np.asarray(feat_values))
-                probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
+                # Use numpy.random.Generator for better performance
+                rng = np.random.default_rng(random_state)
+                x_shuffled[feat] = rng.permutation(np.asarray(feat_values))
+                probs_shuffled = model.predict_proba(x_shuffled)[:, 1]
                 preds_shuffled = (probs_shuffled >= threshold).astype(int)
                 # Calculate precision directly instead of using metric parameter
                 precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (
@@ -1062,23 +1069,19 @@ def compute_permutation_importance(
             logger.debug(f"Feature: {feat}, Mean drop: {mean_drop:.4f}")
         # Sort by importance descending
         importances.sort(key=lambda x: x[1], reverse=True)
-        # Fix column parameter type issues in DataFrame constructors
         columns_list = ["feature", "importance"]
-        assert isinstance(columns_list, list), f"columns must be a list, got {type(columns_list)}"
-        df_importance = pd.DataFrame(data=importances, columns=columns_list)
+        df_importance = pd.DataFrame(data=importances, columns=columns_list)  # type: ignore
         logger.info("Top features by permutation importance:")
         logger.info(df_importance.head(100).to_string(index=False))
         return df_importance
     except Exception as e:
         logger.error(f"Error in compute_permutation_importance: {str(e)}")
         # Return empty DataFrame with correct columns instead of None
-        # Fix column parameter type issues in DataFrame constructors
         empty_columns = ["feature", "importance"]
-        assert isinstance(empty_columns, list), f"columns must be a list, got {type(empty_columns)}"
-        return pd.DataFrame(data=[], columns=empty_columns)
+        return pd.DataFrame(data=[], columns=empty_columns)  # type: ignore
 
 
-def _perform_stage1_selection(X, y, X_eval, y_eval, device, scaler):
+def _perform_stage1_selection(x, y, x_eval, y_eval, device, scaler):
     """
     Perform Stage 1 feature selection with simple architecture.
 
@@ -1090,7 +1093,7 @@ def _perform_stage1_selection(X, y, X_eval, y_eval, device, scaler):
     # Prepare scaler for Stage 1
     if scaler is None:
         stage1_scaler = RobustScaler()
-        stage1_scaler.fit(X)
+        stage1_scaler.fit(x)
     else:
         stage1_scaler = scaler
 
@@ -1108,12 +1111,12 @@ def _perform_stage1_selection(X, y, X_eval, y_eval, device, scaler):
         "weight_decay": 1e-4,
     }
 
-    input_dim = X.shape[1]
+    input_dim = x.shape[1]
     stage1_model = create_pytorch_model(stage1_params, input_dim, device, stage1_scaler)
 
     # Train Stage 1 model
     stage1_model, stage1_metrics = train_pytorch_model(
-        stage1_model, X, y, X, y, X_eval, y_eval, stage1_params, device, stage1_scaler, trial=None
+        stage1_model, x, y, x, y, x_eval, y_eval, stage1_params, device, stage1_scaler, trial=None
     )
 
     if not stage1_metrics:
@@ -1124,7 +1127,7 @@ def _perform_stage1_selection(X, y, X_eval, y_eval, device, scaler):
     logger.info("Computing Stage 1 permutation importance...")
     stage1_importance = compute_permutation_importance(
         model=stage1_model,
-        X_val=X_eval,
+        x_val=x_eval,
         # Fix ndarray attribute access - safely get values
         y_val=y_eval.values if hasattr(y_eval, "values") else np.asarray(y_eval),
         metric=stage1_metrics["precision"],
@@ -1140,7 +1143,7 @@ def _perform_stage1_selection(X, y, X_eval, y_eval, device, scaler):
     return stage1_features, stage1_scaler
 
 
-def _perform_stage2_selection(X, y, X_eval, y_eval, stage1_features, device, target_features=80):
+def _perform_stage2_selection(x, y, x_eval, y_eval, stage1_features, device, target_features=80):
     """
     Perform Stage 2 feature selection with cross-validation.
 
@@ -1149,8 +1152,8 @@ def _perform_stage2_selection(X, y, X_eval, y_eval, stage1_features, device, tar
     """
     logger.info("Stage 2: Refined selection with cross-validation")
 
-    X_stage1 = X[stage1_features]
-    X_eval_stage1 = X_eval[stage1_features]
+    x_stage1 = x[stage1_features]
+    x_eval_stage1 = x_eval[stage1_features]
 
     # Stage 2 model: More complex and thorough
     stage2_params = {
@@ -1172,20 +1175,20 @@ def _perform_stage2_selection(X, y, X_eval, y_eval, stage1_features, device, tar
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
 
-    for fold, (train_idx, val_idx) in enumerate(skf.split(X_stage1, y)):
+    for fold, (train_idx, val_idx) in enumerate(skf.split(x_stage1, y)):
         logger.info(f"Processing fold {fold + 1}/5")
 
-        X_train_cv = X_stage1.iloc[train_idx]
-        X_val_cv = X_stage1.iloc[val_idx]
+        x_train_cv = x_stage1.iloc[train_idx]
+        x_val_cv = x_stage1.iloc[val_idx]
         y_train_cv = y.iloc[train_idx]
         y_val_cv = y.iloc[val_idx]
 
         fold_result = _process_cv_fold(
-            X_train_cv,
+            x_train_cv,
             y_train_cv,
-            X_val_cv,
+            x_val_cv,
             y_val_cv,
-            X_eval_stage1,
+            x_eval_stage1,
             y_eval,
             stage2_params,
             device,
@@ -1204,11 +1207,11 @@ def _perform_stage2_selection(X, y, X_eval, y_eval, stage1_features, device, tar
 
 
 def _process_cv_fold(
-    X_train_cv,
+    x_train_cv,
     y_train_cv,
-    X_val_cv,
+    x_val_cv,
     y_val_cv,
-    X_eval_stage1,
+    x_eval_stage1,
     y_eval,
     stage2_params,
     device,
@@ -1223,7 +1226,7 @@ def _process_cv_fold(
     """
     # Create fold-specific scaler
     fold_scaler = RobustScaler()
-    fold_scaler.fit(X_train_cv)
+    fold_scaler.fit(x_train_cv)
 
     # Create and train model for this fold
     input_dim_stage2 = len(stage1_features)
@@ -1231,11 +1234,11 @@ def _process_cv_fold(
 
     fold_model, fold_metrics = train_pytorch_model(
         fold_model,
-        X_train_cv,
+        x_train_cv,
         y_train_cv,
-        X_val_cv,
+        x_val_cv,
         y_val_cv,
-        X_eval_stage1,
+        x_eval_stage1,
         y_eval,
         stage2_params,
         device,
@@ -1245,7 +1248,7 @@ def _process_cv_fold(
 
     if fold_metrics:
         fold_importance_scores, fold_precision = _compute_fold_importance(
-            fold_model, X_eval_stage1, y_eval, fold_metrics, stage1_features
+            fold_model, x_eval_stage1, y_eval, fold_metrics, stage1_features
         )
     else:
         logger.warning(f"Fold {fold + 1} training failed, using zero importance")
@@ -1259,7 +1262,7 @@ def _process_cv_fold(
     return fold_importance_scores, fold_precision
 
 
-def _compute_fold_importance(fold_model, X_eval_stage1, y_eval, fold_metrics, stage1_features):
+def _compute_fold_importance(fold_model, x_eval_stage1, y_eval, fold_metrics, stage1_features):
     """
     Compute permutation importance for a fold.
 
@@ -1269,7 +1272,7 @@ def _compute_fold_importance(fold_model, X_eval_stage1, y_eval, fold_metrics, st
     # Compute permutation importance for this fold
     fold_importance = compute_permutation_importance(
         model=fold_model,
-        X_val=X_eval_stage1,
+        x_val=x_eval_stage1,
         # Fix ndarray attribute access - safely get values
         y_val=y_eval.values if hasattr(y_eval, "values") else np.asarray(y_eval),
         metric=fold_metrics["precision"],
@@ -1282,7 +1285,7 @@ def _compute_fold_importance(fold_model, X_eval_stage1, y_eval, fold_metrics, st
     fold_importance_scores = [importance_dict.get(feat, 0.0) for feat in stage1_features]
 
     # Calculate validation score
-    y_eval_pred_proba = fold_model.predict_proba(X_eval_stage1)[:, 1]
+    y_eval_pred_proba = fold_model.predict_proba(x_eval_stage1)[:, 1]
     y_eval_pred = (y_eval_pred_proba >= fold_metrics["threshold"]).astype(int)
     # Fix ndarray attribute access - safely get values
     y_eval_np = y_eval.values if hasattr(y_eval, "values") else np.asarray(y_eval)
@@ -1327,13 +1330,13 @@ def _get_fallback_selection(stage1_features, target_features):
     return stage1_features[:target_features], np.ones(target_features), 0.0
 
 
-def pytorch_staged_selection(X, y, X_eval, y_eval, target_features=80, device=None, scaler=None):
+def pytorch_staged_selection(x, y, x_eval, y_eval, target_features=80, device=None, scaler=None):
     """
     Multi-stage PyTorch neural network feature selection with different objectives.
     Args:
-        X (pd.DataFrame): Training features
+        x (pd.DataFrame): Training features
         y (pd.Series): Training labels
-        X_eval (pd.DataFrame): Evaluation features
+        x_eval (pd.DataFrame): Evaluation features
         y_eval (pd.Series): Evaluation labels
         target_features (int): Number of final features to select
         device (torch.device): Device for training (defaults to global device)
@@ -1345,31 +1348,31 @@ def pytorch_staged_selection(X, y, X_eval, y_eval, target_features=80, device=No
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    logger.info(f"Starting PyTorch staged selection with {X.shape[1]} initial features")
+    logger.info(f"Starting PyTorch staged selection with {x.shape[1]} initial features")
 
     # Stage 1: Quick filter with simple architecture and high learning rate
-    stage1_features, stage1_scaler = _perform_stage1_selection(X, y, X_eval, y_eval, device, scaler)
+    stage1_features, _ = _perform_stage1_selection(x, y, x_eval, y_eval, device, scaler)
 
     if stage1_features is None:
-        return X.columns.tolist()[:target_features], np.ones(target_features), 0.0
+        return x.columns.tolist()[:target_features], np.ones(target_features), 0.0
 
     # Stage 2: Refined selection with cross-validation
     stage2_features, final_importance_scores, cv_precision_score = _perform_stage2_selection(
-        X, y, X_eval, y_eval, stage1_features, device, target_features
+        x, y, x_eval, y_eval, stage1_features, device, target_features
     )
     return stage2_features, final_importance_scores, cv_precision_score
 
 
 def run_staged_feature_selection_workflow(
-    X_train, y_train, X_test, y_test, X_val, y_val, experiment_name: str, target_features: int = 80
+    x_train, y_train, x_test, y_test, x_val, y_val, experiment_name: str, target_features: int = 80
 ):
     """
     Run the complete staged feature selection workflow and save results.
 
     Args:
-        X_train, y_train: Training data
-        X_test, y_test: Test data
-        X_val, y_val: Validation data
+        x_train, y_train: Training data
+        x_test, y_test: Test data
+        x_val, y_val: Validation data
         experiment_name (str): Experiment name for file naming
         target_features (int): Number of features to select
 
@@ -1379,34 +1382,34 @@ def run_staged_feature_selection_workflow(
     logger.info(f"Starting staged feature selection workflow for {target_features} features")
 
     # Combine train and test data for feature selection
-    X_combined = pd.concat([X_train, X_test], axis=0)
+    x_combined = pd.concat([x_train, x_test], axis=0)
     y_combined = pd.concat([y_train, y_test], axis=0)
 
     # Run staged feature selection
-    selected_features, importance_scores, CV_Precision_Score = pytorch_staged_selection(
-        X=X_combined,
+    selected_features, importance_scores, cv_precision_score = pytorch_staged_selection(
+        x=x_combined,
         y=y_combined,
-        X_eval=X_val,
+        x_eval=x_val,
         y_eval=y_val,
         target_features=target_features,
         device=device,
         scaler=None,  # Let the function create its own scaler
     )
     logger.info(f"Selected features: {selected_features}")
-    logger.info(f"CV Precision Score: {CV_Precision_Score}")
+    logger.info(f"CV Precision Score: {cv_precision_score}")
     # Save as JSON for programmatic use
     feature_dict = {
         "selected_features": selected_features,
         "importance_scores": importance_scores,
         "metadata": {
             "target_features": target_features,
-            "original_feature_count": X_combined.shape[1],
+            "original_feature_count": x_combined.shape[1],
             "selection_timestamp": datetime.now().isoformat(),
             "selection_method": "pytorch_staged_selection",
-            "feature_reduction_ratio": len(selected_features) / X_combined.shape[1],
+            "feature_reduction_ratio": len(selected_features) / x_combined.shape[1],
             "mean_importance_score": float(np.mean(importance_scores)),
             "std_importance_score": float(np.std(importance_scores)),
-            "CV_Precision_Score": CV_Precision_Score,
+            "cv_precision_score": cv_precision_score,
         },
     }
 
@@ -1422,11 +1425,11 @@ def run_staged_feature_selection_workflow(
     logger.info("Feature selection results saved to:")
     logger.info(f"  - JSON file: {feature_json_path}")
     logger.info(
-        f"Selected {len(selected_features)} features out of {X_combined.shape[1]} original features"
+        f"Selected {len(selected_features)} features out of {x_combined.shape[1]} original features"
     )
-    logger.info(f"Feature reduction ratio: {len(selected_features) / X_combined.shape[1]:.3f}")
+    logger.info(f"Feature reduction ratio: {len(selected_features) / x_combined.shape[1]:.3f}")
 
-    return selected_features, importance_scores, CV_Precision_Score
+    return selected_features, importance_scores, cv_precision_score
 
 
 def main():
@@ -1446,9 +1449,9 @@ def main():
 
         # Load data using the shared DataLoader
         dataloader = DataLoader()
-        X_train, y_train, X_test, y_test, X_val, y_val = dataloader.load_data()
+        x_train, y_train, x_test, y_test, x_val, y_val = dataloader.load_data()
 
-        if X_train is None:
+        if x_train is None:
             logger.error("Data loading failed. Exiting.")
             return
         # Select features using the existing method
@@ -1456,7 +1459,7 @@ def main():
         features = import_selected_features_ensemble_new(model_type=model_type)
         if not features:
             logger.warning("No features selected for pytorch_model. Using all columns.")
-            features = X_train.columns.tolist()
+            features = x_train.columns.tolist()
             # Ensure target column is not in features if it exists initially
             if "target" in features:
                 features.remove("target")
@@ -1464,13 +1467,13 @@ def main():
         if not isinstance(features, list):
             features = list(features) if hasattr(features, "__iter__") else [str(features)]
 
-        X_train = prepare_data(X_train, features)
-        X_test = prepare_data(X_test, features)
-        X_val = prepare_data(X_val, features)
+        x_train = prepare_data(x_train, features)
+        x_test = prepare_data(x_test, features)
+        x_val = prepare_data(x_val, features)
         input_dim = len(features)
         logger.info(f"Final feature set: {input_dim} features.")
-        X_train_scaled, X_test_scaled, X_val_scaled, scaler = preprocess_data(
-            X_train, X_test, X_val
+        _, _, _, scaler = preprocess_data(
+            x_train, x_test, x_val
         )
 
         # Configuration: Set to True to run staged feature selection
@@ -1481,13 +1484,13 @@ def main():
             logger.info("=== RUNNING STAGED FEATURE SELECTION ===")
 
             # Run staged feature selection workflow
-            selected_features, importance_scores, CV_Precision_Score = (
+            selected_features, _, cv_precision_score = (
                 run_staged_feature_selection_workflow(
-                    X_train,
+                    x_train,
                     y_train,
-                    X_test,
+                    x_test,
                     y_test,
-                    X_val,
+                    x_val,
                     y_val,
                     experiment_name,
                     target_features=TARGET_FEATURES,
@@ -1499,15 +1502,15 @@ def main():
             logger.info(
                 f"Using {len(features)} features from staged selection, features: {features}"
             )
-            logger.info(f"CV Precision Score: {CV_Precision_Score:.4f}")
+            logger.info(f"CV Precision Score: {cv_precision_score:.4f}")
         elif RUN_TYPE == "tuning":
             # Run Hyperparameter Optimization and Final Model Training
-            best_params, final_metrics = hypertune_pytorch(
-                X_train,
+            _, _ = hypertune_pytorch(
+                x_train,
                 y_train,
-                X_test,
+                x_test,
                 y_test,
-                X_val,
+                x_val,
                 y_val,
                 experiment_name,
                 input_dim,
@@ -1516,11 +1519,11 @@ def main():
             )
         elif RUN_TYPE == "training":
             train_with_precision_target_pytorch(
-                X_train,
+                x_train,
                 y_train,
-                X_test,
+                x_test,
                 y_test,
-                X_val,
+                x_val,
                 y_val,
                 experiment_name,
                 input_dim,
