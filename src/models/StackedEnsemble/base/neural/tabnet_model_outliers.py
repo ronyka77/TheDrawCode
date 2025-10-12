@@ -1,4 +1,5 @@
 import os
+import pickle
 import random
 import traceback
 import warnings
@@ -17,6 +18,7 @@ from sklearn.base import BaseEstimator
 from sklearn.feature_selection import f_classif, mutual_info_classif
 from sklearn.metrics import precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
 # from sklearn.preprocessing import QuantileTransformer
 from sklearn.utils.multiclass import type_of_target
@@ -25,6 +27,7 @@ from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
 
 # Logger and shared utilities
 from src.utils.logger import ExperimentLogger
+from src.utils.outlier_detection import analyze_outlier_impact, remove_outliers_isolation_forest
 
 experiment_name = "tabnet_soccer_prediction"
 logger = ExperimentLogger(experiment_name=experiment_name)
@@ -47,6 +50,10 @@ warnings.filterwarnings("ignore", message=".*sample_weight.*", category=UserWarn
 min_recall = 0.30
 # You can adjust n_trials if needed
 n_trials = 20000
+
+# Scaling configuration
+SCALING_METHOD = "standard"  # Options: "standard", "robust", "minmax"
+SCALER_SAVE_PATH = "src/models/scalers/scaler_tabnet.pkl"
 
 # Then modify your base_params to include the custom metrics
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -104,116 +111,195 @@ else:
     base_params["device_name"] = "cpu"
 
 
-def load_hyperparameter_space():
+def get_scaler(scaling_method=SCALING_METHOD):
     """
-    Define hyperparameter space for TabNet tuning.
+    Get the appropriate scaler based on the scaling method.
+
+    Args:
+        scaling_method (str): Type of scaler to use ("standard", "robust", "minmax")
+
+    Returns:
+        sklearn scaler object
     """
-    hyperparameter_space = {
-        "learning_rate": {
-            "type": "float",
-            "low": 0.0003,
-            "high": 0.04,
-            "log": True,
-        },
-        "eps": {"type": "float", "low": 1e-8, "high": 1e-4, "log": True},
-        "n_d": {"type": "int", "low": 32, "high": 128},
-        "n_a": {"type": "int", "low": 32, "high": 128},
-        "n_steps": {"type": "int", "low": 2, "high": 6},
-        "gamma": {"type": "float", "low": 0.5, "high": 3.0, "step": 0.05},
-        "lambda_sparse": {"type": "float", "low": 1e-7, "high": 1e-2, "log": True},
-        "momentum": {"type": "float", "low": 0.7, "high": 0.99, "step": 0.005},
-        "patience": {"type": "int", "low": 15, "high": 60},
-        "max_epochs": {"type": "int", "low": 90, "high": 500, "step": 5},
-        "batch_size": {"type": "int", "low": 1024, "high": 8192, "step": 1024},
-        "virtual_batch_size": {"type": "int", "low": 128, "high": 1024, "step": 128},
-        "n_independent": {"type": "int", "low": 1, "high": 4},
-        "n_shared": {"type": "int", "low": 2, "high": 6},
-        "weight_decay": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True},
-        "scheduler_type": {
-            "type": "categorical",
-            "choices": ["plateau", "onecycle", "none"],
-        },
-        "scheduler_patience": {"type": "int", "low": 2, "high": 10},
-        "scheduler_factor": {"type": "float", "low": 0.05, "high": 0.5},
-        "scheduler_min_lr": {"type": "float", "low": 1e-6, "high": 1e-4, "log": True},
-        "scheduler_pct_start": {"type": "float", "low": 0.1, "high": 0.5, "step": 0.05},
-        "scheduler_div_factor": {"type": "float", "low": 10.0, "high": 40.0, "step": 0.5},
-        "scheduler_final_div_factor": {
-            "type": "float",
-            "low": 1000.0,
-            "high": 10000.0,
-            "step": 100.0,
-        },
-        "mask_type": {"type": "categorical", "choices": ["sparsemax", "entmax"]},
-    }
-    return hyperparameter_space
+    if scaling_method == "standard":
+        return StandardScaler()
+    elif scaling_method == "robust":
+        return RobustScaler(quantile_range=(5, 95))
+    elif scaling_method == "minmax":
+        return MinMaxScaler(feature_range=(-1, 1))
+    else:
+        logger.warning(f"Unknown scaling method '{scaling_method}', defaulting to StandardScaler")
+        return StandardScaler()
 
 
-# Create a custom metric that heavily weights precision
-class PrecisionFocusedMetric(Metric):
-    def __init__(self, beta=0.5):
-        self._name = "precision_focused"
-        self._maximize = True
-        self.beta = beta
+def load_or_create_scaler(X_train, scaling_method=SCALING_METHOD, force_retrain=False):
+    """
+    Load existing scaler or create and fit a new one.
 
-    def __call__(self, y_true, y_score):
-        """F-beta score with beta < 1 to favor precision over recall"""
+    Args:
+        X_train: Training data to fit scaler on (if creating new)
+        scaling_method (str): Type of scaler to use
+        force_retrain (bool): Force retraining of scaler even if it exists
 
-        # Ensure y_true is a 1D array
-        # Check type of target
-        y_true_type = type_of_target(y_true)
-        if y_true_type == "multilabel-indicator":
-            # Assuming binary classification represented as one-hot
-            # Convert back to 1D: take the argmax along the class axis (axis=1)
-            y_true_flat = np.argmax(y_true, axis=1)
-        elif y_true_type == "binary":
-            y_true_flat = y_true.astype(int)  # Ensure integer type
-        else:
-            # Handle unexpected types or raise an error
-            logger.warning(
-                f"Unexpected y_true type '{y_true_type}' in PrecisionFocusedMetric. Attempting to flatten."
-            )
-            try:
-                y_true_flat = y_true.astype(int).ravel()  # General attempt to flatten
-            except Exception as e:
-                logger.error(f"Could not convert y_true to 1D array: {e}")
-                return 0.0  # Return 0 score if conversion fails
+    Returns:
+        tuple: (fitted_scaler, is_new_scaler)
+    """
+    scaler_path = SCALER_SAVE_PATH
 
-        # Ensure y_score handling is robust
-        # Check if y_score has 2 columns (expected for binary probabilities)
-        if y_score.ndim == 2 and y_score.shape[1] == 2:
-            pred = (y_score[:, 1] > 0.5).astype(int)  # Use probability of positive class
-        elif y_score.ndim == 1:  # If y_score is already 1D predictions/scores
-            pred = (y_score > 0.5).astype(int)  # Threshold directly
-        else:
-            logger.error(f"Unexpected y_score shape {y_score.shape} in PrecisionFocusedMetric.")
-            return 0.0  # Return 0 score if y_score format is wrong
+    # Create directory if it doesn't exist
+    os.makedirs(os.path.dirname(scaler_path), exist_ok=True)
 
-        # Calculate precision and recall safely
+    if not force_retrain and os.path.exists(scaler_path):
         try:
-            # Check target types again just before sklearn call for debugging
-            # logger.debug(f"y_true_flat type: {type_of_target(y_true_flat)}, pred type: {type_of_target(pred)}")
-            precision = precision_score(y_true_flat, pred, zero_division=0)
-            recall = recall_score(y_true_flat, pred, zero_division=0)
-        except ValueError as e:
-            logger.error(f"Error calculating scores in PrecisionFocusedMetric: {e}")
-            logger.error(
-                f"y_true_flat sample: {y_true_flat[:5]}, shape: {y_true_flat.shape}, type: {type_of_target(y_true_flat)}"
-            )
-            logger.error(
-                f"pred sample: {pred[:5]}, shape: {pred.shape}, type: {type_of_target(pred)}"
-            )
-            return 0.0  # Return 0 score if scikit-learn metric fails
+            with open(scaler_path, "rb") as f:
+                scaler = pickle.load(f)
+            logger.info(f"Loaded existing TabNet scaler from {scaler_path}")
+            logger.info(f"Scaler type: {type(scaler).__name__}")
 
-        # If recall below threshold, return 0
-        if recall < min_recall:
-            return 0.0
+            # Verify scaler compatibility
+            if hasattr(scaler, "transform"):
+                return scaler, False
+            else:
+                logger.warning("Loaded scaler is invalid, creating new one")
 
-        # F-beta with beta < 1 favors precision
-        f_beta = (
-            (1 + self.beta**2) * (precision * recall) / (self.beta**2 * precision + recall + 1e-8)
+        except Exception as e:
+            logger.warning(f"Failed to load existing scaler: {str(e)}")
+            logger.info("Creating new scaler")
+
+    # Create and fit new scaler
+    scaler = get_scaler(scaling_method)
+    logger.info(f"Creating new TabNet scaler: {type(scaler).__name__}")
+
+    # Fit scaler on training data
+    if isinstance(X_train, pd.DataFrame):
+        scaler.fit(X_train.values)
+    else:
+        scaler.fit(X_train)
+
+    # Save scaler
+    try:
+        with open(scaler_path, "wb") as f:
+            pickle.dump(scaler, f)
+        logger.info(f"Saved new TabNet scaler to {scaler_path}")
+    except Exception as e:
+        logger.warning(f"Failed to save scaler: {str(e)}")
+
+    return scaler, True
+
+
+def preprocess_data_with_scaling(
+    X_train, X_test=None, X_eval=None, scaling_method=SCALING_METHOD, force_retrain=False
+):
+    """
+    Preprocess data with scaling for TabNet.
+
+    Args:
+        X_train: Training features
+        X_test: Test features (optional)
+        X_eval: Evaluation features (optional)
+        scaling_method (str): Type of scaling to apply
+        force_retrain (bool): Force retraining of scaler
+
+    Returns:
+        tuple: (X_train_scaled, X_test_scaled, X_eval_scaled, scaler)
+    """
+    logger.info(f"Preprocessing data with {scaling_method} scaling for TabNet")
+
+    # Load or create scaler
+    scaler, is_new = load_or_create_scaler(X_train, scaling_method, force_retrain)
+
+    # Transform data
+    if isinstance(X_train, pd.DataFrame):
+        X_train_scaled = scaler.transform(X_train.values)
+        X_test_scaled = scaler.transform(X_test.values) if X_test is not None else None
+        X_eval_scaled = scaler.transform(X_eval.values) if X_eval is not None else None
+    else:
+        X_train_scaled = scaler.transform(X_train)
+        X_test_scaled = scaler.transform(X_test) if X_test is not None else None
+        X_eval_scaled = scaler.transform(X_eval) if X_eval is not None else None
+
+    # Log scaling statistics
+    if is_new:
+        logger.info("=== Scaling Statistics ===")
+        if hasattr(scaler, "mean_"):
+            logger.info(
+                f"Feature means: min={scaler.mean_.min():.4f}, max={scaler.mean_.max():.4f}"
+            )
+        if hasattr(scaler, "scale_"):
+            logger.info(
+                f"Feature scales: min={scaler.scale_.min():.4f}, max={scaler.scale_.max():.4f}"
+            )
+        elif hasattr(scaler, "data_range_"):
+            logger.info(
+                f"Feature ranges: min={scaler.data_range_.min():.4f}, max={scaler.data_range_.max():.4f}"
+            )
+
+        logger.info(
+            f"Scaled data range - Train: [{X_train_scaled.min():.4f}, {X_train_scaled.max():.4f}]"
         )
-        return f_beta
+        logger.info("===========================")
+
+    return X_train_scaled, X_test_scaled, X_eval_scaled, scaler
+
+
+def create_tabnet_sklearn_wrapper_with_scaler(model, scaler):
+    """
+    Create a TabNet sklearn wrapper that includes the scaler for end-to-end preprocessing.
+
+    Args:
+        model: Trained TabNet model
+        scaler: Fitted scaler
+
+    Returns:
+        TabNetSklearnWrapperWithScaler instance
+    """
+    return TabNetSklearnWrapperWithScaler(model=model, scaler=scaler)
+
+
+class TabNetSklearnWrapperWithScaler(BaseEstimator):
+    """
+    A scikit-learn compatible wrapper for TabNet that includes automatic scaling.
+    This ensures end-to-end preprocessing compatibility with MLflow and ensemble models.
+    """
+
+    def __init__(self, model=None, scaler=None, **kwargs):
+        self.model = model
+        self.scaler = scaler
+        self.kwargs = kwargs
+
+    def fit(self, X, y):
+        """
+        Fit method for scikit-learn compatibility.
+        """
+        if self.scaler is None:
+            self.scaler = get_scaler()
+            if isinstance(X, pd.DataFrame):
+                self.scaler.fit(X.values)
+            else:
+                self.scaler.fit(X)
+
+        # Scale data
+        X_scaled = self.scaler.transform(X.values if isinstance(X, pd.DataFrame) else X)
+
+        if self.model is None:
+            self.model = TabNetClassifier(**self.kwargs)
+
+        self.model.fit(X_scaled, y)
+        return self
+
+    def predict(self, X):
+        """
+        Predict method for scikit-learn compatibility with automatic scaling.
+        """
+        X_scaled = self.scaler.transform(X.values if isinstance(X, pd.DataFrame) else X)
+        return self.model.predict(X_scaled)
+
+    def predict_proba(self, X):
+        """
+        Predict probability method for scikit-learn compatibility with automatic scaling.
+        """
+        X_scaled = self.scaler.transform(X.values if isinstance(X, pd.DataFrame) else X)
+        return self.model.predict_proba(X_scaled)
 
 
 class TabNetSklearnWrapper(BaseEstimator):
@@ -404,9 +490,11 @@ def create_model(model_params):
         raise
 
 
-def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
+def train_model(
+    X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, model_params
+):
     """
-    Train a TabNet model with early stopping.
+    Train a TabNet model with early stopping and automatic scaling.
     Uses internal TabNet loss, controls imbalance via fit(weights=...).
     Returns the trained model and evaluation metrics after threshold optimization.
     """
@@ -426,8 +514,12 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         # Update OneCycleLR scheduler params if needed
         if model_params.get("scheduler_type") == "onecycle":
             # Combine X_train and X_test for step calculation as they are used together in fit
-            total_samples = (len(X_train) if hasattr(X_train, "__len__") else X_train.shape[0]) + (
-                len(X_test) if hasattr(X_test, "__len__") else X_test.shape[0]
+            total_samples = (
+                len(X_train_scaled)
+                if hasattr(X_train_scaled, "__len__")
+                else X_train_scaled.shape[0]
+            ) + (
+                len(X_test_scaled) if hasattr(X_test_scaled, "__len__") else X_test_scaled.shape[0]
             )
             steps_per_epoch = total_samples // batch_size_to_use + (
                 1 if total_samples % batch_size_to_use != 0 else 0
@@ -441,17 +533,24 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
             else:
                 logger.warning("OneCycleLR selected but model.scheduler_params not found/dict.")
 
-        # Convert data to numpy arrays
-        if isinstance(X_train, pd.DataFrame):
-            X_train = X_train.values
+        # Convert data to numpy arrays and ensure correct dtypes
+        if isinstance(X_train_scaled, pd.DataFrame):
+            X_train_scaled = X_train_scaled.values
+        if isinstance(X_test_scaled, pd.DataFrame):
+            X_test_scaled = X_test_scaled.values
+        if isinstance(X_eval_scaled, pd.DataFrame):
+            X_eval_scaled = X_eval_scaled.values
+
+        # Ensure float64 for numerical stability
+        X_train_scaled = X_train_scaled.astype("float64")
+        X_test_scaled = X_test_scaled.astype("float64")
+        X_eval_scaled = X_eval_scaled.astype("float64")
+
+        # Handle labels
         if isinstance(y_train, (pd.Series, pd.DataFrame)):
             y_train = y_train.values
-        if isinstance(X_test, pd.DataFrame):
-            X_test = X_test.values
         if isinstance(y_test, (pd.Series, pd.DataFrame)):
             y_test = y_test.values
-        if isinstance(X_eval, pd.DataFrame):
-            X_eval = X_eval.values
         if isinstance(y_eval, (pd.Series, pd.DataFrame)):
             y_eval = y_eval.values
 
@@ -463,13 +562,13 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         if y_eval.ndim == 2 and y_eval.shape[1] == 1:
             y_eval = y_eval.ravel()
 
-        # Combine training and testing data
-        X_combined = np.concatenate([X_train, X_test], axis=0)
+        # Combine training and testing data (now scaled)
+        X_combined = np.concatenate([X_train_scaled, X_test_scaled], axis=0)
         y_combined = np.concatenate([y_train, y_test], axis=0)
 
-        # Define fit parameters dictionary, now using fit_weights_value
+        # Define fit parameters dictionary, now using fit_weights_value (with scaled eval data)
         fit_params = {
-            "eval_set": [(X_eval, y_eval)],
+            "eval_set": [(X_eval_scaled, y_eval)],
             "eval_metric": [PrecisionFocusedMetric],
             "max_epochs": max_epochs,
             "patience": patience_to_use,
@@ -490,14 +589,19 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
             peak_mem = torch.cuda.max_memory_allocated() / (1024**2)
             logger.info(f"Peak GPU memory during training: {peak_mem:.2f} MB")
 
-        # Optimize threshold using shared utility
-        best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
+        # Optimize threshold using shared utility (with scaled eval data)
+        best_threshold, metrics = optimize_threshold(
+            model, X_eval_scaled, y_eval, min_recall=min_recall
+        )
 
         # Add fit_weights used to metrics dict for logging
         metrics["fit_weights_used"] = fit_weights_value
         # Add GPU memory usage to metrics if available
         if torch.cuda.is_available():
             metrics["peak_gpu_memory_mb"] = peak_mem
+
+        # Store the scaler with the model for future use
+        model._scaler = scaler
 
         return model, metrics
     except Exception as e:
@@ -518,6 +622,12 @@ def optimize_hyperparameters(
     best_params = {}
     global_top_trials = []
     top_trials = []
+
+    # Apply scaling to all datasets
+    logger.info("Applying scaling to TabNet input data")
+    X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data_with_scaling(
+        X_train, X_test, X_eval, scaling_method=SCALING_METHOD
+    )
 
     def objective(trial):
         nonlocal best_score, best_params
@@ -605,7 +715,13 @@ def optimize_hyperparameters(
 
             # Train model and get metrics
             model, metrics = train_model(
-                X_train, y_train, X_test, y_test, X_eval, y_eval, current_params
+                X_train_scaled,
+                y_train,
+                X_test_scaled,
+                y_test,
+                X_eval_scaled,
+                y_eval,
+                current_params,
             )
             # Store model reference for callback but don't try to serialize it
             setattr(trial, "model", model)  # noqa: B010
@@ -640,9 +756,11 @@ def optimize_hyperparameters(
                 else:
                     trial.set_user_attr(metric_name, str(metric_value))
 
-            if score >= 0.32 and score > best_score:
+            if score >= 0.30 and score > best_score:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
-                log_to_mlflow(model, metrics, current_params, experiment_name, X_eval)
+                X_eval_orig_df = X_eval.copy()
+                log_to_mlflow(model, metrics, current_params, experiment_name, X_eval_orig_df)
+
             # Update best score and params FOR THIS RUN
             if score > best_score:
                 best_score = score
@@ -662,7 +780,7 @@ def optimize_hyperparameters(
             logger.error(traceback.format_exc())
             return 0.0  # Return low score for failed trials
 
-    def callback(study, trial):
+    def callback(study, trial, experiment_name, X_eval):
         nonlocal best_score, best_params, top_trials
         logger.info(f"Current best score in this batch: {best_score:.4f}")
         if trial.value > best_score:
@@ -695,7 +813,7 @@ def optimize_hyperparameters(
     storage_url = "sqlite:///optuna_tabnet.db"
     study_name = "tabnet_optimization"
     total_trials = n_trials
-    batch_size = 50
+    batch_size = 1000
     num_batches = total_trials // batch_size
     if total_trials % batch_size != 0:
         num_batches += 1
@@ -711,28 +829,14 @@ def optimize_hyperparameters(
         sampler=sampler,
         pruner=pruner,
     )
-    for batch in range(num_batches):
-        if batch > 0:
-            features_to_remove = min(
-                1, X_train.shape[1] - 10
-            )  # Ensure we don't go below 10 features
-            if features_to_remove > 0:
-                # Always remove the first x features
-                features_to_drop = X_train.columns[:features_to_remove].tolist()
-                logger.info(
-                    f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}"
-                )
-                logger.info(f"Features before removal: {X_train.shape[1]}")
-
-                # Remove features from all datasets
-                X_train = X_train.drop(columns=features_to_drop)
-                X_test = X_test.drop(columns=features_to_drop)
-                if X_eval is not None:
-                    X_eval = X_eval.drop(columns=features_to_drop)
-
-                logger.info(f"Features after removal: {X_train.shape[1]}")
+    for _ in range(num_batches):
         try:
-            study.optimize(objective, n_trials=batch_size, callbacks=[callback], n_jobs=3)
+            study.optimize(
+                objective,
+                n_trials=batch_size,
+                callbacks=[lambda study, trial: callback(study, trial, experiment_name, X_eval)],
+                n_jobs=4,
+            )
         except KeyboardInterrupt:
             logger.warning("Optimization interrupted by user.")
             break
@@ -842,8 +946,15 @@ def log_to_mlflow(model, metrics, params, experiment_name, X_eval_df_for_sig):
                 )
 
             # --- Log Model ---
-            # Re-wrap model just before logging to be safe
-            sklearn_wrapper_for_log = TabNetSklearnWrapper(model=model)
+            # Create wrapper with scaler for end-to-end preprocessing
+            scaler = getattr(model, "_scaler", None)
+            if scaler is not None:
+                sklearn_wrapper_for_log = TabNetSklearnWrapperWithScaler(model=model, scaler=scaler)
+                logger.info("Using TabNet wrapper with integrated scaler for MLflow logging")
+            else:
+                sklearn_wrapper_for_log = TabNetSklearnWrapper(model=model)
+                logger.warning("No scaler found, using standard TabNet wrapper")
+
             model_reg_name = f"tabnet_final_{datetime.now().strftime('%Y%m%d_%H%M')}"
             try:
                 logger.info(
@@ -1227,9 +1338,14 @@ def tabnet_feature_selection_pipeline(X, y, X_eval, y_eval, target_range=(50, 70
     X_train, X_val = X_filtered, X_eval_filtered
     y_train, y_val = y, y_eval
 
+    # Apply scaling for TabNet feature selection
+    X_train_scaled, X_val_scaled, _, scaler = preprocess_data_with_scaling(
+        X_train, X_val, scaling_method=SCALING_METHOD
+    )
+
     # Convert to numpy arrays for TabNet
-    X_train_np = X_train.values if hasattr(X_train, "values") else X_train
-    X_val_np = X_val.values if hasattr(X_val, "values") else X_val
+    X_train_np = X_train_scaled
+    X_val_np = X_val_scaled
     y_train_np = y_train.values.ravel() if hasattr(y_train, "values") else np.array(y_train).ravel()
     y_val_np = y_val.values.ravel() if hasattr(y_val, "values") else np.array(y_val).ravel()
 
@@ -1548,6 +1664,180 @@ def improved_tabnet_staged_selection(X, y, X_test, y_test, X_eval, y_eval, targe
     return stage2_features, avg_importance
 
 
+def apply_outlier_removal(X_train, y_train, X_test, y_test, X_eval, y_eval):
+    """
+    Apply outlier removal to training data if enabled.
+
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_test: Test features
+        y_test: Test labels
+        X_eval: Evaluation features
+        y_eval: Evaluation labels
+
+    Returns:
+        Tuple of (potentially) cleaned datasets
+    """
+
+    logger.info("Applying Isolation Forest outlier removal to training data")
+
+    # Store original data for comparison
+    X_train_original = X_train.copy()
+    y_train_original = y_train.copy()
+
+    # Preprocess data with persistent scaler (only use training data for scaler fitting)
+    logger.info("Preprocessing data with persistent scaler for outlier detection")
+
+    # Apply outlier removal with pre-fitted scaler
+    X_train_clean, y_train_clean = remove_outliers_isolation_forest(
+        X_train=X_train,
+        y_train=y_train,
+        contamination=0.05,
+        random_state=42,
+        logger=logger,
+    )
+
+    # Analyze impact of outlier removal
+    if len(X_train_clean) < len(X_train_original):
+        impact_analysis = analyze_outlier_impact(
+            X_before=X_train_original,
+            y_before=y_train_original,
+            X_after=X_train_clean,
+            y_after=y_train_clean,
+            logger=logger,
+        )
+
+        # Log outlier removal impact with structured formatting
+        logger.info("=== Outlier Removal Impact Analysis ===")
+        logger.info(f"Samples before: {impact_analysis['samples_before']:,}")
+        logger.info(f"Samples after: {impact_analysis['samples_after']:,}")
+        logger.info(f"Samples removed: {impact_analysis['samples_removed']:,}")
+        logger.info(f"Removal percentage: {impact_analysis['removal_percentage']:.2f}%")
+        logger.info(f"Positive class rate before: {impact_analysis['positive_rate_before']:.4f}")
+        logger.info(f"Positive class rate after: {impact_analysis['positive_rate_after']:.4f}")
+        logger.info(
+            f"Class distribution change: {impact_analysis['class_distribution_change']:.4f}"
+        )
+        logger.info("=========================================")
+    else:
+        logger.info("No outliers were detected/removed")
+
+    return X_train_clean, y_train_clean, X_test, y_test, X_eval, y_eval
+
+
+def load_hyperparameter_space():
+    """
+    Define hyperparameter space for TabNet tuning.
+    """
+    hyperparameter_space = {
+        "learning_rate": {
+            "type": "float",
+            "low": 0.0003,
+            "high": 0.04,
+            "log": True,
+        },
+        "eps": {"type": "float", "low": 1e-8, "high": 1e-4, "log": True},
+        "n_d": {"type": "int", "low": 32, "high": 128},
+        "n_a": {"type": "int", "low": 32, "high": 128},
+        "n_steps": {"type": "int", "low": 2, "high": 6},
+        "gamma": {"type": "float", "low": 0.5, "high": 3.0, "step": 0.05},
+        "lambda_sparse": {"type": "float", "low": 1e-7, "high": 1e-2, "log": True},
+        "momentum": {"type": "float", "low": 0.7, "high": 0.99, "step": 0.005},
+        "patience": {"type": "int", "low": 15, "high": 60},
+        "max_epochs": {"type": "int", "low": 90, "high": 500, "step": 5},
+        "batch_size": {"type": "int", "low": 1024, "high": 8192, "step": 1024},
+        "virtual_batch_size": {"type": "int", "low": 128, "high": 1024, "step": 128},
+        "n_independent": {"type": "int", "low": 1, "high": 4},
+        "n_shared": {"type": "int", "low": 2, "high": 6},
+        "weight_decay": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True},
+        "scheduler_type": {
+            "type": "categorical",
+            "choices": ["plateau", "onecycle", "none"],
+        },
+        "scheduler_patience": {"type": "int", "low": 2, "high": 10},
+        "scheduler_factor": {"type": "float", "low": 0.05, "high": 0.5},
+        "scheduler_min_lr": {"type": "float", "low": 1e-6, "high": 1e-4, "log": True},
+        "scheduler_pct_start": {"type": "float", "low": 0.1, "high": 0.5, "step": 0.05},
+        "scheduler_div_factor": {"type": "float", "low": 10.0, "high": 40.0, "step": 0.5},
+        "scheduler_final_div_factor": {
+            "type": "float",
+            "low": 1000.0,
+            "high": 10000.0,
+            "step": 100.0,
+        },
+        "mask_type": {"type": "categorical", "choices": ["sparsemax", "entmax"]},
+    }
+    return hyperparameter_space
+
+
+# Create a custom metric that heavily weights precision
+class PrecisionFocusedMetric(Metric):
+    def __init__(self, beta=0.5):
+        self._name = "precision_focused"
+        self._maximize = True
+        self.beta = beta
+
+    def __call__(self, y_true, y_score):
+        """F-beta score with beta < 1 to favor precision over recall"""
+
+        # Ensure y_true is a 1D array
+        # Check type of target
+        y_true_type = type_of_target(y_true)
+        if y_true_type == "multilabel-indicator":
+            # Assuming binary classification represented as one-hot
+            # Convert back to 1D: take the argmax along the class axis (axis=1)
+            y_true_flat = np.argmax(y_true, axis=1)
+        elif y_true_type == "binary":
+            y_true_flat = y_true.astype(int)  # Ensure integer type
+        else:
+            # Handle unexpected types or raise an error
+            logger.warning(
+                f"Unexpected y_true type '{y_true_type}' in PrecisionFocusedMetric. Attempting to flatten."
+            )
+            try:
+                y_true_flat = y_true.astype(int).ravel()  # General attempt to flatten
+            except Exception as e:
+                logger.error(f"Could not convert y_true to 1D array: {e}")
+                return 0.0  # Return 0 score if conversion fails
+
+        # Ensure y_score handling is robust
+        # Check if y_score has 2 columns (expected for binary probabilities)
+        if y_score.ndim == 2 and y_score.shape[1] == 2:
+            pred = (y_score[:, 1] > 0.5).astype(int)  # Use probability of positive class
+        elif y_score.ndim == 1:  # If y_score is already 1D predictions/scores
+            pred = (y_score > 0.5).astype(int)  # Threshold directly
+        else:
+            logger.error(f"Unexpected y_score shape {y_score.shape} in PrecisionFocusedMetric.")
+            return 0.0  # Return 0 score if y_score format is wrong
+
+        # Calculate precision and recall safely
+        try:
+            # Check target types again just before sklearn call for debugging
+            # logger.debug(f"y_true_flat type: {type_of_target(y_true_flat)}, pred type: {type_of_target(pred)}")
+            precision = precision_score(y_true_flat, pred, zero_division=0)
+            recall = recall_score(y_true_flat, pred, zero_division=0)
+        except ValueError as e:
+            logger.error(f"Error calculating scores in PrecisionFocusedMetric: {e}")
+            logger.error(
+                f"y_true_flat sample: {y_true_flat[:5]}, shape: {y_true_flat.shape}, type: {type_of_target(y_true_flat)}"
+            )
+            logger.error(
+                f"pred sample: {pred[:5]}, shape: {pred.shape}, type: {type_of_target(pred)}"
+            )
+            return 0.0  # Return 0 score if scikit-learn metric fails
+
+        # If recall below threshold, return 0
+        if recall < min_recall:
+            return 0.0
+
+        # F-beta with beta < 1 favors precision
+        f_beta = (
+            (1 + self.beta**2) * (precision * recall) / (self.beta**2 * precision + recall + 1e-8)
+        )
+        return f_beta
+
+
 def main():
     """
     Main execution function for TabNet hypertuning including loss function.
@@ -1571,27 +1861,27 @@ def main():
         X_test = X_test_orig[features]
         X_eval_df = X_eval_orig_df[features]
 
-        # Assign labels (ensure 1D numpy)
-        y_train = (
-            y_train_orig.values.ravel()
-            if hasattr(y_train_orig, "values")
-            else np.array(y_train_orig).ravel()
-        )
-        y_test = (
-            y_test_orig.values.ravel()
-            if hasattr(y_test_orig, "values")
-            else np.array(y_test_orig).ravel()
-        )
-        y_eval = (
-            y_eval_orig.values.ravel()
-            if hasattr(y_eval_orig, "values")
-            else np.array(y_eval_orig).ravel()
+        # Apply outlier removal to training data
+        X_train, y_train, X_test, y_test, X_eval, y_eval = apply_outlier_removal(
+            X_train, y_train_orig, X_test, y_test_orig, X_eval_df, y_eval_orig
         )
 
-        # Convert features to float64
+        # Assign labels (ensure 1D numpy)
+        y_train = (
+            y_train.values.ravel() if hasattr(y_train, "values") else np.array(y_train).ravel()
+        )
+        y_test = y_test.values.ravel() if hasattr(y_test, "values") else np.array(y_test).ravel()
+        y_eval = y_eval.values.ravel() if hasattr(y_eval, "values") else np.array(y_eval).ravel()
+
+        # Convert features to float64 (will be scaled in train_model function)
         X_train = X_train.astype("float64")
         X_test = X_test.astype("float64")
-        X_eval = X_eval_df.astype("float64")
+        X_eval = X_eval.astype("float64")
+
+        logger.info(
+            f"Data shapes - Train: {X_train.shape}, Test: {X_test.shape}, Eval: {X_eval.shape}"
+        )
+        logger.info("Feature scaling will be applied automatically in TabNet training")
 
         # --- Hyperparameter Optimization with Feature Importance ---
         # best_params, importance_df = hypertune_with_feature_importance(
@@ -1605,8 +1895,9 @@ def main():
 
         # === Run Feature Selection ===
         final_selected, scores = improved_tabnet_staged_selection(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, target_features=100
+            X_train, y_train, X_test, y_test, X_eval, y_eval, target_features=80
         )
+        # final_selected, scores = tabnet_feature_selection_pipeline(X_train, y_train, X_eval, y_eval)
 
         # train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
 

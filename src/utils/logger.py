@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import sys
-import unicodedata
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Optional
@@ -19,80 +18,83 @@ sys.path.append(str(project_root))
 def sanitize_unicode_for_console(text: str) -> str:
     """
     Sanitize Unicode text for console output, replacing problematic characters.
-    
+
     Args:
         text: Input text that may contain Unicode characters
-        
+
     Returns:
         Sanitized text safe for console output
     """
     # Dictionary of common emoji replacements for console-safe alternatives
     emoji_replacements = {
-        '📊': '[CHART]',
-        '🎯': '[TARGET]', 
-        '🚀': '[ROCKET]',
-        '✓': '[OK]',
-        '✗': '[FAIL]',
-        '⚠': '[WARN]',
-        '🎉': '[SUCCESS]',
-        '📈': '[GRAPH]',
-        '🔍': '[SEARCH]',
-        '⭐': '[STAR]',
-        '🔧': '[TOOL]',
-        '📦': '[PACKAGE]',
-        '⚡': '[FAST]',
-        '🎲': '[DICE]',
-        '🧠': '[BRAIN]',
-        '🏆': '[TROPHY]',
-        '🔥': '[FIRE]',
-        '💡': '[IDEA]',
-        '📝': '[NOTE]',
-        '🎪': '[CIRCUS]',
-        '🎨': '[ART]',
-        '🌟': '[SPARKLE]',
-        '🎵': '[MUSIC]',
-        '🎭': '[THEATER]',
-        '🎬': '[MOVIE]',
-        '🎮': '[GAME]',
-        '🎸': '[GUITAR]',
-        '🎤': '[MIC]',
-        '🎧': '[HEADPHONE]',
-        '🎺': '[TRUMPET]',
-        '🎻': '[VIOLIN]',
-        '🥁': '[DRUM]',
-        '🎹': '[PIANO]',
+        "📊": "[CHART]",
+        "🎯": "[TARGET]",
+        "🚀": "[ROCKET]",
+        "✓": "[OK]",
+        "✗": "[FAIL]",
+        "⚠": "[WARN]",
+        "🎉": "[SUCCESS]",
+        "📈": "[GRAPH]",
+        "🔍": "[SEARCH]",
+        "⭐": "[STAR]",
+        "🔧": "[TOOL]",
+        "📦": "[PACKAGE]",
+        "⚡": "[FAST]",
+        "🎲": "[DICE]",
+        "🧠": "[BRAIN]",
+        "🏆": "[TROPHY]",
+        "🔥": "[FIRE]",
+        "💡": "[IDEA]",
+        "📝": "[NOTE]",
+        "🎪": "[CIRCUS]",
+        "🎨": "[ART]",
+        "🌟": "[SPARKLE]",
+        "🎵": "[MUSIC]",
+        "🎭": "[THEATER]",
+        "🎬": "[MOVIE]",
+        "🎮": "[GAME]",
+        "🎸": "[GUITAR]",
+        "🎤": "[MIC]",
+        "🎧": "[HEADPHONE]",
+        "🎺": "[TRUMPET]",
+        "🎻": "[VIOLIN]",
+        "🥁": "[DRUM]",
+        "🎹": "[PIANO]",
     }
-    
+
     # Replace known emojis first
     sanitized = text
     for emoji, replacement in emoji_replacements.items():
         sanitized = sanitized.replace(emoji, replacement)
-    
+
     # Handle any remaining problematic Unicode characters
     try:
         # Try to encode with the system's default encoding
-        sanitized.encode(sys.stdout.encoding or 'utf-8', errors='strict')
+        sanitized.encode(sys.stdout.encoding or "utf-8", errors="strict")
         return sanitized
     except (UnicodeEncodeError, LookupError):
         # If that fails, replace problematic characters
         try:
             # Try UTF-8 first
-            sanitized.encode('utf-8', errors='strict')
+            sanitized.encode("utf-8", errors="strict")
             return sanitized
         except UnicodeEncodeError:
             # Last resort: replace all non-ASCII characters
-            return ''.join(char if ord(char) < 128 else f'[U+{ord(char):04X}]' for char in sanitized)
+            return "".join(
+                char if ord(char) < 128 else f"[U+{ord(char):04X}]" for char in sanitized
+            )
 
 
 class UnicodeAwareFormatter(logging.Formatter):
     """
     Custom formatter that handles Unicode characters safely.
     """
+
     def format(self, record):
         # Sanitize the message for console output
-        if hasattr(record, 'msg') and isinstance(record.msg, str):
+        if hasattr(record, "msg") and isinstance(record.msg, str):
             record.msg = sanitize_unicode_for_console(record.msg)
-        
+
         # Format the basic message
         record.extra_fields = ""
         if hasattr(record, "extra"):
@@ -118,18 +120,19 @@ class UnicodeAwareStreamHandler(logging.StreamHandler):
     """
     Stream handler that properly handles Unicode encoding issues.
     """
+
     def __init__(self, stream=None):
         super().__init__(stream)
-        
+
         if stream is None:
             stream = sys.stdout
-            
-        if hasattr(stream, 'reconfigure'):
+
+        if hasattr(stream, "reconfigure"):
             try:
-                stream.reconfigure(encoding='utf-8', errors='replace')
+                stream.reconfigure(encoding="utf-8", errors="replace")
             except (AttributeError, OSError):
                 pass
-    
+
     def emit(self, record):
         """
         Emit a record with proper Unicode handling.
@@ -146,7 +149,7 @@ class UnicodeAwareStreamHandler(logging.StreamHandler):
             except Exception:
                 # Last resort: print a simple error message
                 try:
-                    self.stream.write(f"[UNICODE ERROR] Log message could not be displayed\n")
+                    self.stream.write("[UNICODE ERROR] Log message could not be displayed\n")
                     self.stream.flush()
                 except Exception:
                     pass
@@ -154,6 +157,7 @@ class UnicodeAwareStreamHandler(logging.StreamHandler):
 
 class ReadableFormatter(UnicodeAwareFormatter):
     """Legacy formatter name for backward compatibility."""
+
     pass
 
 
@@ -239,19 +243,19 @@ class ExperimentLogger:
 
         # Create handlers with Unicode support
         file_handler = RotatingFileHandler(
-            self.log_file, 
-            maxBytes=max_bytes, 
+            self.log_file,
+            maxBytes=max_bytes,
             backupCount=backup_count,
-            encoding='utf-8'  # Ensure UTF-8 encoding for file
+            encoding="utf-8",  # Ensure UTF-8 encoding for file
         )
-        
+
         # Use Unicode-aware stream handler for console
         console_handler = UnicodeAwareStreamHandler(sys.stdout)
 
         # Configure formatters with Unicode support
         file_formatter = UnicodeAwareFormatter(log_format)
         console_formatter = UnicodeAwareFormatter(log_format)
-        
+
         file_handler.setFormatter(file_formatter)
         console_handler.setFormatter(console_formatter)
 
@@ -262,7 +266,7 @@ class ExperimentLogger:
         # Add handlers to the instance logger
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
-        
+
         # CRITICAL: Disable propagation to prevent double logging
         self.logger.propagate = False
 
@@ -288,17 +292,17 @@ class ExperimentLogger:
         """Ensure that the logger has at least one Unicode-aware StreamHandler attached."""
         # Check if we already have a StreamHandler to avoid duplication
         has_stream_handler = any(
-            isinstance(handler, (logging.StreamHandler, UnicodeAwareStreamHandler)) 
+            isinstance(handler, (logging.StreamHandler, UnicodeAwareStreamHandler))
             for handler in self.logger.handlers
         )
-        
+
         if not has_stream_handler:
             console_handler = UnicodeAwareStreamHandler(sys.stdout)
             log_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s%(extra_fields)s"
             formatter = UnicodeAwareFormatter(log_format)
             console_handler.setFormatter(formatter)
             self.logger.addHandler(console_handler)
-        
+
         # Maintain propagation setting to prevent double logging
         self.logger.propagate = False
 
@@ -312,7 +316,7 @@ class ExperimentLogger:
         """
         # Sanitize the message for Unicode safety
         safe_msg = sanitize_unicode_for_console(msg)
-        
+
         if self.structured_logger:
             log_method = getattr(self.structured_logger, level.lower())
             log_method(safe_msg, **(extra or {}))
@@ -359,11 +363,11 @@ class ExperimentLogger:
     def debug(self, msg: str, extra: Optional[dict[str, Any]] = None) -> None:
         """Log a debug message with Unicode support."""
         self._log("DEBUG", msg, extra)
-    
+
     def log_unicode_safe(self, level: str, msg: str, **kwargs) -> None:
         """
         Explicitly Unicode-safe logging method.
-        
+
         Args:
             level: Log level (INFO, WARNING, ERROR, DEBUG)
             msg: Message to log (will be sanitized)

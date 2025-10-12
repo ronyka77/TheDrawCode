@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import optuna
 from optuna.pruners import MedianPruner
@@ -25,7 +25,7 @@ from utils.logger import ExperimentLogger
 class OptunaValidator:
     """Optuna-based hyperparameter optimization with validation."""
 
-    def __init__(self, model_type: str = None, logger: ExperimentLogger = None):
+    def __init__(self, model_type: Optional[str] = None, logger: Optional[ExperimentLogger] = None):
         """Initialize validator.
 
         Args:
@@ -38,6 +38,7 @@ class OptunaValidator:
 
         # Load optimization configuration
         self.hyperparameter_space = self.config_loader.load_hyperparameter_space(model_type)
+        self.optimization_config = self.hyperparameter_space.get("optimization", {})
 
         # Set up study parameters
         self.study_name = self.optimization_config.get("study_name", f"{model_type}_study")
@@ -193,7 +194,7 @@ class OptunaValidator:
         model: Any,
         X_train: Any,
         y_train: Any,
-        X_val: Any,
+        x_val: Any,
         y_val: Any,
         X_test: Any,
         y_test: Any,
@@ -203,7 +204,7 @@ class OptunaValidator:
         Args:
             model: Model instance
             X_train, y_train: Training data
-            X_val, y_val: Validation data
+            x_val, y_val: Validation data
             X_test, y_test: Test data
 
         Returns:
@@ -218,7 +219,7 @@ class OptunaValidator:
 
             try:
                 # Train and evaluate model
-                metrics = model.fit(X_train, y_train, X_val, y_val, X_test, y_test, **params)
+                metrics = model.fit(X_train, y_train, x_val, y_val, X_test, y_test, **params)
 
                 # Get optimization metric
                 score = metrics.get(self.metric, 0.0)

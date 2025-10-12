@@ -6,7 +6,6 @@ import pandas as pd
 import python_calamine as calamine
 import statsmodels.api as sm
 from api_football.add_current_features_postgre import export_to_xlsx_fast
-from openpyxl import Workbook
 from sklearn.linear_model import PoissonRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
@@ -283,7 +282,9 @@ class PoissonXGCalculator:
             self.logger.error(f"Error in prediction: {str(e)}")
             raise
 
-    def add_poisson_xG(self, df: pd.DataFrame, base_df: pd.DataFrame, type: str, is_training: bool = False) -> pd.DataFrame:
+    def add_poisson_xG(
+        self, df: pd.DataFrame, base_df: pd.DataFrame, type: str, is_training: bool = False
+    ) -> pd.DataFrame:
         # Sort by date if available
         if "Datum" in df.columns:
             df["Datum"] = pd.to_datetime(df["Datum"])
@@ -309,7 +310,7 @@ class PoissonXGCalculator:
             "api_prediction": ("./data_files/api_football_prediction_newPoisson.xlsx"),
             "api_prediction_new": ("./data_files/api_football_prediction_new_newPoisson.xlsx"),
             "api_training": ("./data_files/api_football_training_newPoisson.xlsx"),
-            "api_future": ("./data_files/api_football_future_newPoisson.xlsx")
+            "api_future": ("./data_files/api_football_future_newPoisson.xlsx"),
         }
 
         output_path = datasets[type]
@@ -372,8 +373,13 @@ class PoissonXGCalculator:
                     "away_points_cum": "Away_points_cum",
                 }
             )
-            
-            self.add_poisson_xG(api_prediction_data_new, api_prediction_data_new, "api_prediction_new", is_training=True)
+
+            self.add_poisson_xG(
+                api_prediction_data_new,
+                api_prediction_data_new,
+                "api_prediction_new",
+                is_training=True,
+            )
             self.add_poisson_xG(api_future_data, api_future_data, "api_future")
         except Exception as e:
             self.logger.error(f"Error in data processing: {str(e)}")

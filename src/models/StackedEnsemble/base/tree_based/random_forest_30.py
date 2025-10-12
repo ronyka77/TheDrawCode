@@ -65,37 +65,37 @@ def load_hyperparameter_space_for_hpo():
     hyperparameter_space = {
         "n_estimators": {
             "type": "int",
-            "low": 500,    # Focus on range of top performers
+            "low": 500,  # Focus on range of top performers
             "high": 1300,  # Cover the successful range
-            "step": 10,    # Larger step to save computation
+            "step": 10,  # Larger step to save computation
         },
         "max_depth": {
-            "type": "int", 
+            "type": "int",
             "low": 15,
             "high": 25,
             "step": 1,
         },
         "min_samples_split": {
             "type": "int",
-            "low": 8,  
-            "high": 30,  
-            "step": 1,  
+            "low": 8,
+            "high": 30,
+            "step": 1,
         },
         "min_samples_leaf": {
             "type": "int",
-            "low": 10,  
-            "high": 50,  
-            "step": 1,  
+            "low": 10,
+            "high": 50,
+            "step": 1,
         },
         # "max_features": {
-        #     "type": "categorical",  
-        #     "choices": [0.22, 0.24, 0.26, 0.52, 0.70, 0.74, 0.84, 0.88, 0.98, 1.0],  
+        #     "type": "categorical",
+        #     "choices": [0.22, 0.24, 0.26, 0.52, 0.70, 0.74, 0.84, 0.88, 0.98, 1.0],
         # },
         "class_weight": {
             "type": "float",
-            "low": 1.8,   
-            "high": 2.9,  
-            "step": 0.02, 
+            "low": 1.8,
+            "high": 2.9,
+            "step": 0.02,
         },
     }
     return hyperparameter_space
@@ -289,20 +289,24 @@ def optimize_hyperparameters(
     # Loop over batches, resetting the sampler each time
     for batch in range(num_batches):
         if batch > 0:  # Skip feature reduction for the first batch
-            features_to_remove = min(1, X_train.shape[1] - 10)  # Ensure we don't go below 10 features
+            features_to_remove = min(
+                1, X_train.shape[1] - 10
+            )  # Ensure we don't go below 10 features
             if features_to_remove > 0:
                 # Always remove the first x features
                 features_to_drop = X_train.columns[:features_to_remove].tolist()
-                
-                logger.info(f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}")
+
+                logger.info(
+                    f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}"
+                )
                 logger.info(f"Features before removal: {X_train.shape[1]}")
-                
+
                 # Remove features from all datasets
                 X_train = X_train.drop(columns=features_to_drop)
                 X_test = X_test.drop(columns=features_to_drop)
                 if X_eval is not None:
                     X_eval = X_eval.drop(columns=features_to_drop)
-                
+
                 logger.info(f"Features after removal: {X_train.shape[1]}")
         # Create a new sampler with a dynamic seed
         random_seed = int(time.time())
@@ -320,7 +324,9 @@ def optimize_hyperparameters(
         logger.info(
             f"Starting batch {batch + 1}/{num_batches} with new sampler (seed={random_seed})"
         )
-        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback], n_jobs=4)
+        study.optimize(
+            objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback], n_jobs=4
+        )
 
         # Merge current batch's top trials with global_top_trials
         for trial_record in top_trials:
@@ -369,9 +375,7 @@ def hypertune_random_forest(experiment_name: str):
 
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
-        model, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, best_params
-        )
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, best_params)
 
         return best_params, metrics
 
@@ -479,7 +483,9 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         return None, None
 
 
-def select_top_features_rf(model: RandomForestClassifier, X_features: pd.DataFrame, n_features: int = 40) -> list[str]:
+def select_top_features_rf(
+    model: RandomForestClassifier, X_features: pd.DataFrame, n_features: int = 40
+) -> list[str]:
     """
     Selects the top N features based on Random Forest feature importances.
 
@@ -491,8 +497,10 @@ def select_top_features_rf(model: RandomForestClassifier, X_features: pd.DataFra
     Returns:
         A list of the names of the top N features.
     """
-    if not hasattr(model, 'feature_importances_'):
-        raise ValueError("The provided model has not been trained yet or does not support feature importances.")
+    if not hasattr(model, "feature_importances_"):
+        raise ValueError(
+            "The provided model has not been trained yet or does not support feature importances."
+        )
 
     importances = model.feature_importances_
     feature_names = X_features.columns
@@ -500,18 +508,19 @@ def select_top_features_rf(model: RandomForestClassifier, X_features: pd.DataFra
     if len(importances) != len(feature_names):
         raise ValueError("Mismatch between the number of feature importances and feature names.")
 
-    feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
-    feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+    feature_importance_df = pd.DataFrame({"Feature": feature_names, "Importance": importances})
+    feature_importance_df = feature_importance_df.sort_values(by="Importance", ascending=False)
 
-    top_features = feature_importance_df['Feature'].head(n_features).tolist()
+    top_features = feature_importance_df["Feature"].head(n_features).tolist()
     logger.info(f"Selected top {n_features} features based on RF importance.")
-    logger.info(f"Top features: {top_features}") # Log the selected features for visibility
+    logger.info(f"Top features: {top_features}")  # Log the selected features for visibility
 
     return top_features
 
+
 def compute_permutation_importance(
     model,
-    X_val: pd.DataFrame, 
+    X_val: pd.DataFrame,
     y_val: np.ndarray,
     threshold: float = 0.3,
     n_repeats: int = 20,
@@ -544,13 +553,15 @@ def compute_permutation_importance(
         drops = []
         for i in range(n_repeats):
             feat_idx = feature_names.index(feat) + 1
-            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i+1}")
+            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i + 1}")
             X_shuffled = X_val.copy()
             X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
             probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
             preds_shuffled = (probs_shuffled >= threshold).astype(int)
             # Calculate precision directly instead of using metric parameter
-            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (
+                np.sum(preds_shuffled == 1)
+            )
             drop = baseline - precision
             drops.append(drop)
         mean_drop = np.mean(drops)

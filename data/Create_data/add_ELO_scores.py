@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import python_calamine as calamine
 from api_football.add_current_features_postgre import export_to_xlsx_fast
-from openpyxl import Workbook
 
 
 class ELOCalculator:
@@ -24,12 +23,16 @@ class ELOCalculator:
 
         # Define data paths
         # self.api_prediction_data_path = "./data_files/api_football_prediction_newPoisson.xlsx"
-        self.api_prediction_data_path_new = "./data_files/api_football_prediction_new_newPoisson.xlsx"
+        self.api_prediction_data_path_new = (
+            "./data_files/api_football_prediction_new_newPoisson.xlsx"
+        )
         # self.api_training_data_path = "./data_files/api_football_training_newPoisson.xlsx"
 
         # Define export paths
         # self.api_prediction_export_path = "./data_files/api_football_prediction_newPoisson.xlsx"
-        self.api_prediction_export_path_new = "./data_files/api_football_prediction_new_newPoisson.xlsx"
+        self.api_prediction_export_path_new = (
+            "./data_files/api_football_prediction_new_newPoisson.xlsx"
+        )
         # self.api_training_export_path = "./data_files/api_football_training_newPoisson.xlsx"
 
         # ELO settings

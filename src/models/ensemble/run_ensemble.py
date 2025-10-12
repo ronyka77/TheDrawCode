@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 import mlflow
+import mlflow.models
 import mlflow.sklearn
 import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -32,8 +33,9 @@ try:
 except Exception as e:
     print(f"Error setting project root path: {e}")
     # Fallback to current directory if path resolution fails
-    sys.path.append(os.getcwd().parent)
-    print(f"Current directory run_ensemble: {os.getcwd().parent}")
+    current_dir = Path(os.getcwd()).parent
+    sys.path.append(str(current_dir))
+    print(f"Current directory run_ensemble: {current_dir}")
 
 # Set environment variables for Git
 os.environ["GIT_PYTHON_GIT_EXECUTABLE"] = "C:/Program Files/Git/bin/git.exe"
@@ -107,26 +109,33 @@ def run_ensemble(
             )
 
             logger.info("Starting ensemble model execution...")
+            # Initialize variables to None to handle potential loading failures
+            X_train, y_train, X_test, y_test, x_val, y_val = None, None, None, None, None, None
+
             try:
-                logger.info("Loading data...")
-                X_train, y_train, X_test, y_test, X_val, y_val = DataLoader().load_data()
+                X_train, y_train, X_test, y_test, x_val, y_val = DataLoader().load_data()
                 # Convert all columns to float64 to ensure consistent data types
                 X_train = X_train.astype("float64")
                 X_test = X_test.astype("float64")
-                X_val = X_val.astype("float64")
+                x_val = x_val.astype("float64")
             except Exception as e:
                 logger.error(f"Error loading time-based data: {str(e)}")
                 logger.info("Falling back to standard data loading...")
+                raise ValueError(f"Data loading failed: {str(e)}") from e
+
+            # Add null checks for unbound variables
+            if any(var is None for var in [X_train, y_train, X_test, y_test, x_val, y_val]):
+                raise ValueError("Data loading failed - some variables were not initialized")
 
             # Log dataset sizes
             logger.info(
-                f"Dataset sizes - Training: {X_train.shape}, Test: {X_test.shape}, Validation: {X_val.shape}"
+                f"Dataset sizes - Training: {X_train.shape}, Test: {X_test.shape}, Validation: {x_val.shape}"
             )
             mlflow.log_params(
                 {
                     "train_size": len(X_train),
                     "test_size": len(X_test),
-                    "val_size": len(X_val),
+                    "val_size": len(x_val),
                     "positive_rate_train": y_train.mean(),
                     "positive_rate_test": y_test.mean(),
                     "positive_rate_val": y_val.mean(),
@@ -135,17 +144,26 @@ def run_ensemble(
 
             # Feature selection
             logger.info("Selecting features...")
-            features = import_selected_features_ensemble_new(model_type="all")
+            # Add type guard for selected_features parameter
+            try:
+                features = import_selected_features_ensemble_new(model_type="all")
+                if not isinstance(features, list):
+                    raise TypeError(f"Expected features to be a list, got {type(features)}")
+                if not features:
+                    raise ValueError("No features selected")
+            except Exception as e:
+                logger.error(f"Error selecting features: {str(e)}")
+                raise ValueError(f"Feature selection failed: {str(e)}") from e
 
             # Filter features for all datasets
-            X_train_filtered = prepare_data(X_train, features)
-            X_test_filtered = prepare_data(X_test, features)
-            X_val_filtered = prepare_data(X_val, features)
+            x_train_filtered = prepare_data(X_train, features)
+            x_test_filtered = prepare_data(X_test, features)
+            x_val_filtered = prepare_data(x_val, features)
 
             # Log the conversion
             mlflow.log_param("data_type_conversion", "all_columns_to_float64")
             logger.info(
-                f"Data types after conversion: {X_train_filtered.dtypes.value_counts().to_dict()}"
+                f"Data types after conversion: {x_train_filtered.dtypes.value_counts().to_dict()}"
             )
             # Create ensemble with configuration
             ensemble_model = EnsembleModel(
@@ -161,11 +179,11 @@ def run_ensemble(
             # Train the model
             logger.info("Training ensemble model...")
             training_results = ensemble_model.train(
-                X_train=X_train_filtered,
+                X_train=x_train_filtered,
                 y_train=y_train,
-                X_test=X_test_filtered,
+                X_test=x_test_filtered,
                 y_test=y_test,
-                X_val=X_val_filtered,
+                x_val=x_val_filtered,
                 y_val=y_val,
                 split_validation=False,  # Don't split again, we already have splits
             )
@@ -179,7 +197,7 @@ def run_ensemble(
             logger.info("Ensemble model execution completed successfully.")
             # Save model with signature to MLflow
             logger.info("Saving ensemble model with signature to MLflow...")
-            input_example = X_val_filtered.iloc[0:1].copy()
+            input_example = x_val_filtered.iloc[0:1].copy()
             best_threshold = training_results["threshold"]
             # Get prediction for output example
             output_example = ensemble_model.predict_proba(input_example)
@@ -232,8 +250,12 @@ def run_ensemble(
             )
             logger.info(f"Model saved with signature and registered as: {model_name}")
             # Log the run ID for future reference
-            run_id = mlflow.active_run().info.run_id
-            logger.info(f"MLflow Run ID: {run_id}")
+            active_run = mlflow.active_run()
+            if active_run is not None:
+                run_id = active_run.info.run_id
+                logger.info(f"MLflow Run ID: {run_id}")
+            else:
+                logger.warning("No active MLflow run found")
             return ensemble_model
 
     except Exception as e:
@@ -255,6 +277,48 @@ def get_model_params(model):
         return {"error": str(e)}
 
 
+def _extract_base_model_params(ensemble_model):
+    """Extract parameters from base models."""
+    base_models = {
+        "model_xgb": "XGBoost",
+        "model_tabnet": "TabNet",
+        "model_lgb": "LightGBM",
+        "model_mlp": "MLP",
+        "model_extra": "Extra",
+        "model_svm": "SVM"
+    }
+
+    params_dict = {}
+    for attr_name, model_name in base_models.items():
+        if hasattr(ensemble_model, attr_name):
+            params_dict[model_name] = ensemble_model.get_model_params(
+                getattr(ensemble_model, attr_name)
+            )
+
+    return params_dict
+
+
+def _extract_calibrated_model_params(ensemble_model):
+    """Extract parameters from calibrated models."""
+    calibrated_models = {
+        "model_xgb_calibrated": "XGBoost_calibrated",
+        "model_tabnet_calibrated": "TabNet_calibrated",
+        "model_lgb_calibrated": "LightGBM_calibrated",
+        "model_extra_calibrated": "Extra_calibrated",
+        "model_mlp_calibrated": "MLP_calibrated",
+        "model_mlp_sklearn_calibrated": "MLP_sklearn_calibrated",
+        "model_svm_calibrated": "SVM_calibrated"
+    }
+
+    params_dict = {}
+    for attr_name, model_name in calibrated_models.items():
+        model = getattr(ensemble_model, attr_name, None)
+        if model is not None:
+            params_dict[model_name] = ensemble_model.get_model_params(model)
+
+    return params_dict
+
+
 def log_all_model_params(ensemble_model):
     """
     Extracts and logs parameters for each base and extra model in the ensemble.
@@ -265,79 +329,26 @@ def log_all_model_params(ensemble_model):
     """
     params_dict = {}
 
-    # Log parameters from each base model.
-    if hasattr(ensemble_model, "model_xgb"):
-        params_dict["XGBoost"] = ensemble_model.get_model_params(ensemble_model.model_xgb)
-    if hasattr(ensemble_model, "model_tabnet"):
-        params_dict["TabNet"] = ensemble_model.get_model_params(ensemble_model.model_tabnet)
-    if hasattr(ensemble_model, "model_lgb"):
-        params_dict["LightGBM"] = ensemble_model.get_model_params(ensemble_model.model_lgb)
-    if hasattr(ensemble_model, "model_mlp"):
-        params_dict["MLP"] = ensemble_model.get_model_params(ensemble_model.model_mlp)
-    if hasattr(ensemble_model, "model_extra"):
-        params_dict["Extra"] = ensemble_model.get_model_params(ensemble_model.model_extra)
-    if hasattr(ensemble_model, "model_svm"):
-        params_dict["SVM"] = ensemble_model.get_model_params(ensemble_model.model_svm)
+    # Extract base model parameters
+    params_dict.update(_extract_base_model_params(ensemble_model))
 
-    # Optionally, log calibrated versions if available.
-    if (
-        hasattr(ensemble_model, "model_xgb_calibrated")
-        and ensemble_model.model_xgb_calibrated is not None
-    ):
-        params_dict["XGBoost_calibrated"] = ensemble_model.get_model_params(
-            ensemble_model.model_xgb_calibrated
-        )
-    if (
-        hasattr(ensemble_model, "model_tabnet_calibrated")
-        and ensemble_model.model_tabnet_calibrated is not None
-    ):
-        params_dict["TabNet_calibrated"] = ensemble_model.get_model_params(
-            ensemble_model.model_tabnet_calibrated
-        )
-    if (
-        hasattr(ensemble_model, "model_lgb_calibrated")
-        and ensemble_model.model_lgb_calibrated is not None
-    ):
-        params_dict["LightGBM_calibrated"] = ensemble_model.get_model_params(
-            ensemble_model.model_lgb_calibrated
-        )
-    if (
-        hasattr(ensemble_model, "model_extra_calibrated")
-        and ensemble_model.model_extra_calibrated is not None
-    ):
-        params_dict["Extra_calibrated"] = ensemble_model.get_model_params(
-            ensemble_model.model_extra_calibrated
-        )
-    if (
-        hasattr(ensemble_model, "model_mlp_calibrated")
-        and ensemble_model.model_mlp_calibrated is not None
-    ):
-        params_dict["MLP_calibrated"] = ensemble_model.get_model_params(
-            ensemble_model.model_mlp_calibrated
-        )
-    if (
-        hasattr(ensemble_model, "model_mlp_sklearn_calibrated")
-        and ensemble_model.model_mlp_sklearn_calibrated is not None
-    ):
-        params_dict["MLP_sklearn_calibrated"] = ensemble_model.get_model_params(
-            ensemble_model.model_mlp_sklearn_calibrated
-        )
-    if (
-        hasattr(ensemble_model, "model_svm_calibrated")
-        and ensemble_model.model_svm_calibrated is not None
-    ):
-        params_dict["SVM_calibrated"] = ensemble_model.get_model_params(
-            ensemble_model.model_svm_calibrated
-        )
-    # Log additional settings (such as meta-learner parameters) if applicable.
+    # Extract calibrated model parameters
+    params_dict.update(_extract_calibrated_model_params(ensemble_model))
+
+    # Extract meta-learner parameters
     if hasattr(ensemble_model, "meta_learner") and ensemble_model.meta_learner is not None:
         params_dict["MetaLearner"] = ensemble_model.get_model_params(ensemble_model.meta_learner)
 
     # Log the complete parameters dictionary as a JSON artifact to MLflow.
     mlflow.log_dict(params_dict, "ensemble_model_parameters.json")
-    # Optionally, also log some keys using mlflow.log_param for faster comparison in the UI.
+
+    # Log summary parameters for UI comparison
+    _log_model_summary_params(params_dict)
+
+
+def _log_model_summary_params(params_dict):
+    """Log first few parameters from each model for UI comparison."""
     for model_name, params in params_dict.items():
-        # For each top-level model, log a summary (e.g., only the first few keys).
         if isinstance(params, dict):
             for key, value in list(params.items())[:3]:
                 mlflow.log_param(f"{model_name}_{key}", str(value))

@@ -4,9 +4,8 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-import pandas as pd
 import psycopg2
 import requests
 from dotenv import load_dotenv
@@ -26,27 +25,41 @@ try:
 except Exception as e:
     print(f"Error setting project root path: {e}")
     # Fallback to current directory if path resolution fails
-    sys.path.append(os.getcwd().parent.parent.parent)
-    print(f"Current directory get_fixtures: {os.getcwd().parent.parent.parent}")
+    fallback_path = Path(os.getcwd()).parent.parent.parent
+    sys.path.append(str(fallback_path))
+    print(f"Current directory get_fixtures: {fallback_path}")
 
 from src.utils.logger import ExperimentLogger
 
-# PostgreSQL engine setup
-engine = create_engine('postgresql+psycopg2://postgres:ronaldo99@localhost:5432/api_football')
+# PostgreSQL engine setup with environment variables
+db_host = os.getenv("POSTGRES_HOST", "localhost")
+db_name = os.getenv("POSTGRES_DB", "api_football")
+db_user = os.getenv("POSTGRES_USER", "postgres")
+db_password = os.getenv("POSTGRES_PASSWORD")
+db_port = os.getenv("POSTGRES_PORT", "5432")
+
+if not db_password:
+    raise ValueError("POSTGRES_PASSWORD environment variable is required")
+
+engine = create_engine(f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}")
 metadata = MetaData()
 
 # Reflect the fixtures table
-fixtures_table = Table('fixtures', metadata, autoload_with=engine, schema='api_football')
-predictions_table = Table('predictions', metadata, autoload_with=engine, schema='api_football')
-team_stats_table = Table('team_stats', metadata, autoload_with=engine, schema='api_football')
-fixture_events_table = Table('events', metadata, autoload_with=engine, schema='api_football')
+fixtures_table = Table("fixtures", metadata, autoload_with=engine, schema="api_football")
+predictions_table = Table("predictions", metadata, autoload_with=engine, schema="api_football")
+team_stats_table = Table("team_stats", metadata, autoload_with=engine, schema="api_football")
+fixture_events_table = Table("events", metadata, autoload_with=engine, schema="api_football")
+
+# Constants for event types
+VAR_CHECK_DETAIL = "VAR Check"
+
 
 class ApiFootball:
     """
     A class to interact with the API-Football API and store data in PostgreSQL.
     """
 
-    def __init__(self, api_key: str, logger: ExperimentLogger = None):
+    def __init__(self, api_key: str, logger: Optional[ExperimentLogger] = None):
         self.api_key = api_key
         self.logger = logger or ExperimentLogger()
         self.base_url = "https://v3.football.api-sports.io/"
@@ -58,7 +71,7 @@ class ApiFootball:
         self.data_dir = os.path.join(self.project_root, "data", "create_data", "api-football")
         os.makedirs(self.data_dir, exist_ok=True)
 
-    def _get_request(self, endpoint: str, params: dict = None) -> dict:
+    def _get_request(self, endpoint: str, params: Optional[dict] = None) -> dict:
         """
         Sends a GET request to the specified endpoint.
         Args:
@@ -101,54 +114,54 @@ class ApiFootball:
             return d
 
         row = {
-            'fixture_id': safe_get(fixture, 'fixture', 'id'),
-            'referee': safe_get(fixture, 'fixture', 'referee'),
-            'timezone': safe_get(fixture, 'fixture', 'timezone'),
-            'date': safe_get(fixture, 'fixture', 'date'),
-            'timestamp': safe_get(fixture, 'fixture', 'timestamp'),
-            'period_first': safe_get(fixture, 'fixture', 'periods', 'first'),
-            'period_second': safe_get(fixture, 'fixture', 'periods', 'second'),
-            'venue_id': safe_get(fixture, 'fixture', 'venue', 'id'),
-            'venue_name': safe_get(fixture, 'fixture', 'venue', 'name'),
-            'venue_city': safe_get(fixture, 'fixture', 'venue', 'city'),
-            'status_long': safe_get(fixture, 'fixture', 'status', 'long'),
-            'status_short': safe_get(fixture, 'fixture', 'status', 'short'),
-            'status_elapsed': safe_get(fixture, 'fixture', 'status', 'elapsed'),
-            'status_extra': safe_get(fixture, 'fixture', 'status', 'extra'),
-            'league_id': safe_get(fixture, 'league', 'id'),
-            'league_name': safe_get(fixture, 'league', 'name'),
-            'league_country': safe_get(fixture, 'league', 'country'),
-            'league_logo': safe_get(fixture, 'league', 'logo'),
-            'league_flag': safe_get(fixture, 'league', 'flag'),
-            'league_season': safe_get(fixture, 'league', 'season'),
-            'league_round': safe_get(fixture, 'league', 'round'),
-            'league_standings': safe_get(fixture, 'league', 'standings'),
-            'home_team_id': safe_get(fixture, 'teams', 'home', 'id'),
-            'home_team_name': safe_get(fixture, 'teams', 'home', 'name'),
-            'home_team_logo': safe_get(fixture, 'teams', 'home', 'logo'),
-            'home_team_winner': safe_get(fixture, 'teams', 'home', 'winner'),
-            'away_team_id': safe_get(fixture, 'teams', 'away', 'id'),
-            'away_team_name': safe_get(fixture, 'teams', 'away', 'name'),
-            'away_team_logo': safe_get(fixture, 'teams', 'away', 'logo'),
-            'away_team_winner': safe_get(fixture, 'teams', 'away', 'winner'),
-            'home_goals': safe_get(fixture, 'goals', 'home'),
-            'away_goals': safe_get(fixture, 'goals', 'away'),
-            'home_halftime_goals': safe_get(fixture, 'score', 'halftime', 'home'),
-            'away_halftime_goals': safe_get(fixture, 'score', 'halftime', 'away'),
-            'home_fulltime_goals': safe_get(fixture, 'score', 'fulltime', 'home'),
-            'away_fulltime_goals': safe_get(fixture, 'score', 'fulltime', 'away'),
-            'home_extratime_goals': safe_get(fixture, 'score', 'extratime', 'home'),
-            'away_extratime_goals': safe_get(fixture, 'score', 'extratime', 'away'),
-            'home_penalty_goals': safe_get(fixture, 'score', 'penalty', 'home'),
-            'away_penalty_goals': safe_get(fixture, 'score', 'penalty', 'away')
+            "fixture_id": safe_get(fixture, "fixture", "id"),
+            "referee": safe_get(fixture, "fixture", "referee"),
+            "timezone": safe_get(fixture, "fixture", "timezone"),
+            "date": safe_get(fixture, "fixture", "date"),
+            "timestamp": safe_get(fixture, "fixture", "timestamp"),
+            "period_first": safe_get(fixture, "fixture", "periods", "first"),
+            "period_second": safe_get(fixture, "fixture", "periods", "second"),
+            "venue_id": safe_get(fixture, "fixture", "venue", "id"),
+            "venue_name": safe_get(fixture, "fixture", "venue", "name"),
+            "venue_city": safe_get(fixture, "fixture", "venue", "city"),
+            "status_long": safe_get(fixture, "fixture", "status", "long"),
+            "status_short": safe_get(fixture, "fixture", "status", "short"),
+            "status_elapsed": safe_get(fixture, "fixture", "status", "elapsed"),
+            "status_extra": safe_get(fixture, "fixture", "status", "extra"),
+            "league_id": safe_get(fixture, "league", "id"),
+            "league_name": safe_get(fixture, "league", "name"),
+            "league_country": safe_get(fixture, "league", "country"),
+            "league_logo": safe_get(fixture, "league", "logo"),
+            "league_flag": safe_get(fixture, "league", "flag"),
+            "league_season": safe_get(fixture, "league", "season"),
+            "league_round": safe_get(fixture, "league", "round"),
+            "league_standings": safe_get(fixture, "league", "standings"),
+            "home_team_id": safe_get(fixture, "teams", "home", "id"),
+            "home_team_name": safe_get(fixture, "teams", "home", "name"),
+            "home_team_logo": safe_get(fixture, "teams", "home", "logo"),
+            "home_team_winner": safe_get(fixture, "teams", "home", "winner"),
+            "away_team_id": safe_get(fixture, "teams", "away", "id"),
+            "away_team_name": safe_get(fixture, "teams", "away", "name"),
+            "away_team_logo": safe_get(fixture, "teams", "away", "logo"),
+            "away_team_winner": safe_get(fixture, "teams", "away", "winner"),
+            "home_goals": safe_get(fixture, "goals", "home"),
+            "away_goals": safe_get(fixture, "goals", "away"),
+            "home_halftime_goals": safe_get(fixture, "score", "halftime", "home"),
+            "away_halftime_goals": safe_get(fixture, "score", "halftime", "away"),
+            "home_fulltime_goals": safe_get(fixture, "score", "fulltime", "home"),
+            "away_fulltime_goals": safe_get(fixture, "score", "fulltime", "away"),
+            "home_extratime_goals": safe_get(fixture, "score", "extratime", "home"),
+            "away_extratime_goals": safe_get(fixture, "score", "extratime", "away"),
+            "home_penalty_goals": safe_get(fixture, "score", "penalty", "home"),
+            "away_penalty_goals": safe_get(fixture, "score", "penalty", "away"),
         }
         return row
 
     def upsert_fixture(self, row: dict):
         # Upsert a single fixture row into PostgreSQL
         stmt = pg_insert(fixtures_table).values(**row)
-        update_dict = {c: stmt.excluded[c] for c in row.keys() if c != 'fixture_id'}
-        stmt = stmt.on_conflict_do_update(index_elements=['fixture_id'], set_=update_dict)
+        update_dict = {c: stmt.excluded[c] for c in row.keys() if c != "fixture_id"}
+        stmt = stmt.on_conflict_do_update(index_elements=["fixture_id"], set_=update_dict)
         try:
             with engine.begin() as conn:
                 conn.execute(stmt)
@@ -166,8 +179,10 @@ class ApiFootball:
                 # print(fixture)
                 row = self._map_fixture_to_row(fixture)
                 self.upsert_fixture(row)
-            
-            self.logger.info(f"Upserted {len(fixtures)} fixtures for league {league_id} season {season}")
+
+            self.logger.info(
+                f"Upserted {len(fixtures)} fixtures for league {league_id} season {season}"
+            )
             return len(fixtures)
         else:
             self.logger.warning(f"No fixtures found for league {league_id} season {season}")
@@ -205,45 +220,95 @@ class ApiFootball:
 
     def _parse_api_numeric(self, value: Any) -> Any:
         """Helper to parse numeric values that might be strings, ints, floats, or None."""
-        if value is None: 
+        if value is None:
             return None
-        if isinstance(value, (int, float)): 
+        if isinstance(value, (int, float)):
             return value
         try:
             # Attempt to remove % if it's a percentage string before float conversion
             str_value = str(value).strip()
-            if str_value.endswith('%'):
+            if str_value.endswith("%"):
                 return float(str_value[:-1])
             return float(str_value)
         except (ValueError, TypeError):
             return None
 
-    def _parse_team_stat_response(self, api_response_data: dict, fixture_id: int, target_team_id: Any) -> dict:
+    def _parse_team_stat_response(
+        self, api_response_data: dict, fixture_id: int, target_team_id: Any
+    ) -> Optional[dict]:
         """Parses the teams/statistics API response (a dictionary) for a specific team's season stats,
         and filters the output to match the known columns in api_football.team_stats table."""
         known_team_stats_columns = [
-            "fixture_id", "team_id", "updated_at", "league_id", "league_name", "league_country", "league_season", 
-            "team_name", "form", "played_home", "wins_home", "draws_home", "loses_home", "played_away", 
-            "wins_away", "draws_away", "loses_away", "played_total", "wins_total", "draws_total", "loses_total", 
-            "goals_for_home", "goals_for_avg_home", "goals_for_away", "goals_for_avg_away", "goals_for_total", 
-            "goals_for_avg_total", "goals_against_home", "goals_against_avg_home", "goals_against_away", 
-            "goals_against_avg_away", "goals_against_total", "goals_against_avg_total", "clean_sheet_home", 
-            "failed_to_score_home", "clean_sheet_away", "failed_to_score_away", "clean_sheet_total", 
-            "failed_to_score_total", "penalty_scored", "penalty_missed", "penalty_total", "streak_wins", 
-            "streak_draws", "streak_loses", "biggest_wins_home", "biggest_wins_away", "biggest_loses_home", 
-            "biggest_loses_away", "biggest_goals_for_home", "biggest_goals_for_away", 
-            "biggest_goals_against_home", "biggest_goals_against_away"
+            "fixture_id",
+            "team_id",
+            "updated_at",
+            "league_id",
+            "league_name",
+            "league_country",
+            "league_season",
+            "team_name",
+            "form",
+            "played_home",
+            "wins_home",
+            "draws_home",
+            "loses_home",
+            "played_away",
+            "wins_away",
+            "draws_away",
+            "loses_away",
+            "played_total",
+            "wins_total",
+            "draws_total",
+            "loses_total",
+            "goals_for_home",
+            "goals_for_avg_home",
+            "goals_for_away",
+            "goals_for_avg_away",
+            "goals_for_total",
+            "goals_for_avg_total",
+            "goals_against_home",
+            "goals_against_avg_home",
+            "goals_against_away",
+            "goals_against_avg_away",
+            "goals_against_total",
+            "goals_against_avg_total",
+            "clean_sheet_home",
+            "failed_to_score_home",
+            "clean_sheet_away",
+            "failed_to_score_away",
+            "clean_sheet_total",
+            "failed_to_score_total",
+            "penalty_scored",
+            "penalty_missed",
+            "penalty_total",
+            "streak_wins",
+            "streak_draws",
+            "streak_loses",
+            "biggest_wins_home",
+            "biggest_wins_away",
+            "biggest_loses_home",
+            "biggest_loses_away",
+            "biggest_goals_for_home",
+            "biggest_goals_for_away",
+            "biggest_goals_against_home",
+            "biggest_goals_against_away",
         ]
 
         if not api_response_data or not isinstance(api_response_data, dict):
-            self.logger.warning(f"_parse_team_stat_response: Invalid api_response_data for team {target_team_id}, fixture_id context {fixture_id}")
+            self.logger.warning(
+                f"_parse_team_stat_response: Invalid api_response_data for team {target_team_id}, fixture_id context {fixture_id}"
+            )
             return None
 
         # Ensure target_team_id is an int
         try:
-            target_team_id_int = int(target_team_id[0] if isinstance(target_team_id, tuple) else target_team_id)
+            target_team_id_int = int(
+                target_team_id[0] if isinstance(target_team_id, tuple) else target_team_id
+            )
         except (ValueError, TypeError):
-            self.logger.error(f"_parse_team_stat_response: Invalid target_team_id type. Got {target_team_id}")
+            self.logger.error(
+                f"_parse_team_stat_response: Invalid target_team_id type. Got {target_team_id}"
+            )
             return None
 
         # Extract main sections from API response
@@ -256,16 +321,18 @@ class ApiFootball:
         clean_sheet_api = api_response_data.get("clean_sheet", {})
         failed_to_score_api = api_response_data.get("failed_to_score", {})
 
-        if not team_api.get("id") == target_team_id_int:
-            self.logger.warning(f"API response team ID {team_api.get('id')} does not match target_team_id {target_team_id_int}")
+        if team_api.get("id") != target_team_id_int:
+            self.logger.warning(
+                f"API response team ID {team_api.get('id')} does not match target_team_id {target_team_id_int}"
+            )
 
         parsed_data = {
-            "fixture_id": fixture_id, # Contextual: links this season's stats to a fixture for fetching trigger
-            "team_id": team_api.get("id", target_team_id_int), # Prefer API's team_id if available
+            "fixture_id": fixture_id,  # Contextual: links this season's stats to a fixture for fetching trigger
+            "team_id": team_api.get("id", target_team_id_int),  # Prefer API's team_id if available
             "league_id": league_api.get("id"),
             "league_name": league_api.get("name"),
             "league_country": league_api.get("country"),
-            "league_season": league_api.get("season"), # This is the season of the stats
+            "league_season": league_api.get("season"),  # This is the season of the stats
             "team_name": team_api.get("name"),
             "form": api_response_data.get("form"),
             "played_home": fixtures_api.get("played", {}).get("home"),
@@ -281,17 +348,29 @@ class ApiFootball:
             "loses_away": fixtures_api.get("loses", {}).get("away"),
             "loses_total": fixtures_api.get("loses", {}).get("total"),
             "goals_for_home": goals_api.get("for", {}).get("total", {}).get("home"),
-            "goals_for_avg_home": self._parse_api_numeric(goals_api.get("for", {}).get("average", {}).get("home")),
+            "goals_for_avg_home": self._parse_api_numeric(
+                goals_api.get("for", {}).get("average", {}).get("home")
+            ),
             "goals_for_away": goals_api.get("for", {}).get("total", {}).get("away"),
-            "goals_for_avg_away": self._parse_api_numeric(goals_api.get("for", {}).get("average", {}).get("away")),
+            "goals_for_avg_away": self._parse_api_numeric(
+                goals_api.get("for", {}).get("average", {}).get("away")
+            ),
             "goals_for_total": goals_api.get("for", {}).get("total", {}).get("total"),
-            "goals_for_avg_total": self._parse_api_numeric(goals_api.get("for", {}).get("average", {}).get("total")),
+            "goals_for_avg_total": self._parse_api_numeric(
+                goals_api.get("for", {}).get("average", {}).get("total")
+            ),
             "goals_against_home": goals_api.get("against", {}).get("total", {}).get("home"),
-            "goals_against_avg_home": self._parse_api_numeric(goals_api.get("against", {}).get("average", {}).get("home")),
+            "goals_against_avg_home": self._parse_api_numeric(
+                goals_api.get("against", {}).get("average", {}).get("home")
+            ),
             "goals_against_away": goals_api.get("against", {}).get("total", {}).get("away"),
-            "goals_against_avg_away": self._parse_api_numeric(goals_api.get("against", {}).get("average", {}).get("away")),
+            "goals_against_avg_away": self._parse_api_numeric(
+                goals_api.get("against", {}).get("average", {}).get("away")
+            ),
             "goals_against_total": goals_api.get("against", {}).get("total", {}).get("total"),
-            "goals_against_avg_total": self._parse_api_numeric(goals_api.get("against", {}).get("average", {}).get("total")),
+            "goals_against_avg_total": self._parse_api_numeric(
+                goals_api.get("against", {}).get("average", {}).get("total")
+            ),
             "clean_sheet_home": clean_sheet_api.get("home"),
             "clean_sheet_away": clean_sheet_api.get("away"),
             "clean_sheet_total": clean_sheet_api.get("total"),
@@ -310,16 +389,28 @@ class ApiFootball:
             "biggest_loses_away": biggest_api.get("loses", {}).get("away"),
             "biggest_goals_for_home": biggest_api.get("goals", {}).get("for", {}).get("home"),
             "biggest_goals_for_away": biggest_api.get("goals", {}).get("for", {}).get("away"),
-            "biggest_goals_against_home": biggest_api.get("goals", {}).get("against", {}).get("home"),
-            "biggest_goals_against_away": biggest_api.get("goals", {}).get("against", {}).get("away"),
-            "updated_at": datetime.now()
+            "biggest_goals_against_home": biggest_api.get("goals", {})
+            .get("against", {})
+            .get("home"),
+            "biggest_goals_against_away": biggest_api.get("goals", {})
+            .get("against", {})
+            .get("away"),
+            "updated_at": datetime.now(),
         }
-        
+
         # Filter to only include keys that exist in the known_team_stats_columns list and are not None
-        filtered_data = {k: v for k, v in parsed_data.items() if k in known_team_stats_columns and v is not None}
-        
-        if not filtered_data.get("team_id") or not filtered_data.get("league_id") or not filtered_data.get("league_season"):
-            self.logger.warning(f"Filtered data for team {target_team_id_int} (fixture context {fixture_id}) is missing essential keys (team_id, league_id, league_season) after filtering.")
+        filtered_data = {
+            k: v for k, v in parsed_data.items() if k in known_team_stats_columns and v is not None
+        }
+
+        if (
+            not filtered_data.get("team_id")
+            or not filtered_data.get("league_id")
+            or not filtered_data.get("league_season")
+        ):
+            self.logger.warning(
+                f"Filtered data for team {target_team_id_int} (fixture context {fixture_id}) is missing essential keys (team_id, league_id, league_season) after filtering."
+            )
             return None
 
         return filtered_data
@@ -335,7 +426,7 @@ class ApiFootball:
                 left join api_football.team_stats ts on f.fixture_id = ts.fixture_id 
                 WHERE date <= now() and ts.fixture_id  is null;
             """)
-            
+
             fixtures_to_query_teams_for = []
             with engine.connect() as conn:
                 result = conn.execute(query)
@@ -345,12 +436,14 @@ class ApiFootball:
                 self.logger.info("No fixtures found to trigger team statistics processing.")
                 return
 
-            self.logger.info(f"Found {len(fixtures_to_query_teams_for)} fixtures to check for team statistics updates.")
+            self.logger.info(
+                f"Found {len(fixtures_to_query_teams_for)} fixtures to check for team statistics updates."
+            )
 
             api_call_count_total = 0
             api_calls_in_current_batch = 0
-            rate_limit_threshold_per_batch = 250 
-            pause_duration = 60 
+            rate_limit_threshold_per_batch = 250
+            pause_duration = 60
             batch_start_time = time.time()
 
             for i, fixture_row in enumerate(fixtures_to_query_teams_for):
@@ -362,10 +455,14 @@ class ApiFootball:
                 date = fixture_row.date.strftime("%Y-%m-%d")
 
                 if not all([fixture_id, league_id, home_team_id, away_team_id, season]):
-                    self.logger.warning(f"Skipping fixture {fixture_id} due to missing key DB information for team stat processing.")
+                    self.logger.warning(
+                        f"Skipping fixture {fixture_id} due to missing key DB information for team stat processing."
+                    )
                     continue
-                
-                self.logger.info(f"Processing fixture context {fixture_id} ({i+1}/{len(fixtures_to_query_teams_for)}) for league {league_id}, season {season}")
+
+                self.logger.info(
+                    f"Processing fixture context {fixture_id} ({i + 1}/{len(fixtures_to_query_teams_for)}) for league {league_id}, season {season}"
+                )
                 teams_to_process_for_stats = [home_team_id, away_team_id]
                 stats_for_db_batch = []
 
@@ -374,20 +471,26 @@ class ApiFootball:
                         with engine.connect() as conn:
                             check_stmt = team_stats_table.select().where(
                                 team_stats_table.c.team_id == team_id_to_fetch,
-                                team_stats_table.c.fixture_id == fixture_id
+                                team_stats_table.c.fixture_id == fixture_id,
                             )
                             existing_stat_for_season = conn.execute(check_stmt).first()
                         if existing_stat_for_season:
-                            self.logger.info(f"Season stats for team {team_id_to_fetch}, league {league_id}, season {season} already exist in DB. Skipping API call.")
+                            self.logger.info(
+                                f"Season stats for team {team_id_to_fetch}, league {league_id}, season {season} already exist in DB. Skipping API call."
+                            )
                             continue
                     except SQLAlchemyError as e_check:
-                        self.logger.error(f"DB error checking existing season stats for team {team_id_to_fetch}, league {league_id}, season {season}: {e_check}")
+                        self.logger.error(
+                            f"DB error checking existing season stats for team {team_id_to_fetch}, league {league_id}, season {season}: {e_check}"
+                        )
 
                     if api_calls_in_current_batch >= rate_limit_threshold_per_batch:
                         elapsed_time_in_batch = time.time() - batch_start_time
                         if elapsed_time_in_batch < pause_duration:
                             sleep_time = pause_duration - elapsed_time_in_batch
-                            self.logger.info(f"Rate limit threshold hit. Sleeping for {sleep_time:.1f} seconds.")
+                            self.logger.info(
+                                f"Rate limit threshold hit. Sleeping for {sleep_time:.1f} seconds."
+                            )
                             time.sleep(sleep_time)
                         api_calls_in_current_batch = 0
                         batch_start_time = time.time()
@@ -397,58 +500,80 @@ class ApiFootball:
                         "league": league_id,
                         "team": team_id_to_fetch,
                         "season": season,
-                        "date": date
-                    } 
-                    
-                    self.logger.info(f"Calling API for team {team_id_to_fetch}, league {league_id}, season {season} (context fixture {fixture_id})")
+                        "date": date,
+                    }
+
+                    self.logger.info(
+                        f"Calling API for team {team_id_to_fetch}, league {league_id}, season {season} (context fixture {fixture_id})"
+                    )
                     response_json = self._get_request(endpoint, params)
                     api_calls_in_current_batch += 1
                     api_call_count_total += 1
 
                     if response_json and response_json.get("response"):
                         parsed_stats = self._parse_team_stat_response(
-                            response_json["response"], 
+                            response_json["response"],
                             fixture_id,
-                            team_id_to_fetch, 
-                            # league_id, 
+                            team_id_to_fetch,
+                            # league_id,
                             # season
                         )
                         if parsed_stats:
-                            self.logger.info(f"Parsed season stats for team {team_id_to_fetch}, league {league_id}")
-                            if not parsed_stats.get("team_id") or parsed_stats.get("team_id") <= 0:
-                                self.logger.warning(f"Skipping stats record - missing or invalid team_id for fixture {fixture_id}")
+                            self.logger.info(
+                                f"Parsed season stats for team {team_id_to_fetch}, league {league_id}"
+                            )
+                            team_id_value = parsed_stats.get("team_id")
+                            if not team_id_value or (isinstance(team_id_value, (int, float)) and team_id_value <= 0):
+                                self.logger.warning(
+                                    f"Skipping stats record - missing or invalid team_id for fixture {fixture_id}"
+                                )
                                 continue
                             stats_for_db_batch.append(parsed_stats)
                         else:
-                            self.logger.warning(f"Failed to parse API season stats for team {team_id_to_fetch}, L:{league_id}, S:{season}. Response: {response_json.get('response')}")
+                            self.logger.warning(
+                                f"Failed to parse API season stats for team {team_id_to_fetch}, L:{league_id}, S:{season}. Response: {response_json.get('response')}"
+                            )
                     else:
-                        self.logger.error(f"API request failed for team {team_id_to_fetch}, L:{league_id}, S:{season}. Params: {params}. Response: {response_json}")
-                
+                        self.logger.error(
+                            f"API request failed for team {team_id_to_fetch}, L:{league_id}, S:{season}. Params: {params}. Response: {response_json}"
+                        )
+
                 if stats_for_db_batch:
                     try:
                         with engine.begin() as conn:
                             for stat_data in stats_for_db_batch:
-                                conflict_elements = ['team_id', 'fixture_id']
-                                
+                                conflict_elements = ["team_id", "fixture_id"]
+
                                 values_to_insert = stat_data.copy()
-                                values_to_insert['fixture_id'] = fixture_id 
+                                values_to_insert["fixture_id"] = fixture_id
 
                                 stmt = pg_insert(team_stats_table).values(**values_to_insert)
                                 update_cols = {
-                                    c.name: stmt.excluded[c.name] for c in team_stats_table.c 
+                                    c.name: stmt.excluded[c.name]
+                                    for c in team_stats_table.c
                                     if c.name not in conflict_elements
                                 }
-                                stmt = stmt.on_conflict_do_update(index_elements=conflict_elements, set_=update_cols)
+                                stmt = stmt.on_conflict_do_update(
+                                    index_elements=conflict_elements, set_=update_cols
+                                )
                                 conn.execute(stmt)
-                            self.logger.info(f"Successfully upserted {len(stats_for_db_batch)} team season stats records (context fixture {fixture_id}).")
+                            self.logger.info(
+                                f"Successfully upserted {len(stats_for_db_batch)} team season stats records (context fixture {fixture_id})."
+                            )
                     except SQLAlchemyError as e_upsert:
-                        self.logger.error(f"DB error upserting batch season stats (context fixture {fixture_id}): {e_upsert}")
-                
-                if (i + 1) % 10 == 0 : 
-                    self.logger.info(f"--- Progress: Checked {i+1}/{len(fixtures_to_query_teams_for)} fixture contexts. Total API calls this run: {api_call_count_total} ---")
-                time.sleep(0.2) # Shorter delay after each fixture context check
+                        self.logger.error(
+                            f"DB error upserting batch season stats (context fixture {fixture_id}): {e_upsert}"
+                        )
 
-            self.logger.info(f"Finished get_team_stats_for_fixtures (season stats). Total API calls: {api_call_count_total}")
+                if (i + 1) % 10 == 0:
+                    self.logger.info(
+                        f"--- Progress: Checked {i + 1}/{len(fixtures_to_query_teams_for)} fixture contexts. Total API calls this run: {api_call_count_total} ---"
+                    )
+                time.sleep(0.2)  # Shorter delay after each fixture context check
+
+            self.logger.info(
+                f"Finished get_team_stats_for_fixtures (season stats). Total API calls: {api_call_count_total}"
+            )
         except Exception as e:
             self.logger.error(f"General error in get_team_stats_for_fixtures: {e}")
 
@@ -527,75 +652,94 @@ class ApiFootball:
             # Map statistics to fixture table columns
             def stat_map(prefix, stats):
                 mapping = {
-                    'shots_on_goal': f'{prefix}_shots_on_goal',
-                    'shots_off_goal': f'{prefix}_shots_off_goal', 
-                    'total_shots': f'{prefix}_total_shots',
-                    'blocked_shots': f'{prefix}_blocked_shots',
-                    'shots_insidebox': f'{prefix}_shots_insidebox',
-                    'shots_outsidebox': f'{prefix}_shots_outsidebox',
-                    'fouls': f'{prefix}_fouls',
-                    'corner_kicks': f'{prefix}_corner_kicks',
-                    'offsides': f'{prefix}_offsides',
-                    'ball_possession': f'{prefix}_ball_possession',
-                    'yellow_cards': f'{prefix}_yellow_cards',
-                    'red_cards': f'{prefix}_red_cards',
-                    'goalkeeper_saves': f'{prefix}_goalkeeper_saves',
-                    'total_passes': f'{prefix}_total_passes',
-                    'passes_accurate': f'{prefix}_passes_accurate',
-                    'passes_%': f'{prefix}_passes_percent',
-                    'expected_goals': f'{prefix}_expected_goals'
+                    "shots_on_goal": f"{prefix}_shots_on_goal",
+                    "shots_off_goal": f"{prefix}_shots_off_goal",
+                    "total_shots": f"{prefix}_total_shots",
+                    "blocked_shots": f"{prefix}_blocked_shots",
+                    "shots_insidebox": f"{prefix}_shots_insidebox",
+                    "shots_outsidebox": f"{prefix}_shots_outsidebox",
+                    "fouls": f"{prefix}_fouls",
+                    "corner_kicks": f"{prefix}_corner_kicks",
+                    "offsides": f"{prefix}_offsides",
+                    "ball_possession": f"{prefix}_ball_possession",
+                    "yellow_cards": f"{prefix}_yellow_cards",
+                    "red_cards": f"{prefix}_red_cards",
+                    "goalkeeper_saves": f"{prefix}_goalkeeper_saves",
+                    "total_passes": f"{prefix}_total_passes",
+                    "passes_accurate": f"{prefix}_passes_accurate",
+                    "passes_%": f"{prefix}_passes_percent",
+                    "expected_goals": f"{prefix}_expected_goals",
                 }
                 result = {}
                 for k, v in mapping.items():
                     val = stats.get(k)
                     # Convert ball_possession from '55%' to float if needed
-                    if k == 'ball_possession' and isinstance(val, str) and val.endswith('%'):
+                    if k == "ball_possession" and isinstance(val, str) and val.endswith("%"):
                         try:
-                            val = float(val.replace('%', ''))
-                        except Exception:
+                            val = float(val.replace("%", ""))
+                        except (ValueError, AttributeError):
                             val = None
                     # Convert passes_percent from '55%' to float if needed
-                    if k == 'passes_percent' or k == 'passes_%' and isinstance(val, str) and val.endswith('%'):
+                    elif (
+                        k == "passes_percent"
+                        or k == "passes_%"
+                        and isinstance(val, str)
+                        and val.endswith("%")
+                    ):
                         try:
-                            val = float(val.replace('%', ''))
-                        except Exception:
+                            val = float(val.replace("%", ""))
+                        except (ValueError, AttributeError):
                             val = None
                     result[v] = val
                 return result
 
-            home_stats = stat_map('home', statistics['home']['stats'])
-            away_stats = stat_map('away', statistics['away']['stats'])
+            home_stats = stat_map("home", statistics["home"]["stats"])
+            away_stats = stat_map("away", statistics["away"]["stats"])
 
             # Prepare update dict
             update_dict = {**home_stats, **away_stats}
 
             # Update the fixture row in PostgreSQL
-            stmt = update(fixtures_table).where(fixtures_table.c.fixture_id == fixture_id).values(**update_dict)
+            stmt = (
+                update(fixtures_table)
+                .where(fixtures_table.c.fixture_id == fixture_id)
+                .values(**update_dict)
+            )
             try:
                 with engine.begin() as conn:
                     conn.execute(stmt)
                 self.logger.info(f"Statistics for fixture {fixture_id} updated in PostgreSQL.")
             except Exception as e:
-                self.logger.error(f"Error updating statistics for fixture {fixture_id} in PostgreSQL: {e}")
+                self.logger.error(
+                    f"Error updating statistics for fixture {fixture_id} in PostgreSQL: {e}"
+                )
             return statistics
         else:
             self.logger.warning(f"No statistics found for fixture {fixture_id}")
             try:
                 # Get fixture date from PostgreSQL
-                query = text("SELECT date FROM api_football.fixtures WHERE fixture_id = :fixture_id")
+                query = text(
+                    "SELECT date FROM api_football.fixtures WHERE fixture_id = :fixture_id"
+                )
                 with engine.connect() as conn:
                     result = conn.execute(query, {"fixture_id": fixture_id}).first()
                     if result:
                         fixture_date = datetime.strptime(str(result[0]), "%Y-%m-%d %H:%M:%S")
                         if fixture_date < datetime.now() - timedelta(days=7):
                             # Delete old fixture from PostgreSQL
-                            delete_query = text("DELETE FROM api_football.fixtures WHERE fixture_id = :fixture_id")
+                            delete_query = text(
+                                "DELETE FROM api_football.fixtures WHERE fixture_id = :fixture_id"
+                            )
                             with engine.begin() as conn:
                                 result = conn.execute(delete_query, {"fixture_id": fixture_id})
                                 if result.rowcount == 1:
-                                    self.logger.info(f"Fixture {fixture_id} dropped from PostgreSQL due to date constraint.")
+                                    self.logger.info(
+                                        f"Fixture {fixture_id} dropped from PostgreSQL due to date constraint."
+                                    )
                                 else:
-                                    self.logger.warning(f"Fixture {fixture_id} was NOT deleted (rowcount={result.rowcount}).")
+                                    self.logger.warning(
+                                        f"Fixture {fixture_id} was NOT deleted (rowcount={result.rowcount})."
+                                    )
                             return {}
             except Exception as e:
                 self.logger.error(f"Error checking date for fixture {fixture_id}: {e}")
@@ -634,11 +778,8 @@ class ApiFootball:
             fixture_ids = []
 
             with engine.connect() as conn:
-                result = conn.execute(
-                    query,
-                    {"today": today, "league_ids": target_league_ids}
-                )
-                
+                result = conn.execute(query, {"today": today, "league_ids": target_league_ids})
+
                 for row in result:
                     fixture_ids.append(row.fixture_id)
                     league_id = row.league_id
@@ -659,154 +800,162 @@ class ApiFootball:
             return []
 
     def get_prediction_for_fixture(self, fixture_id: int) -> bool:
-            """
-            Fetches prediction data for a specific fixture_id from the API,
-            transforms it, and upserts it into the api_football.predictions table.
-            Args:
-                fixture_id (int): The ID of the fixture to get predictions for.
-            Returns:
-                bool: True if the operation was successful, False otherwise.
-            """
-            api_url = f"{self.base_url}/predictions?fixture={fixture_id}"
-            try:
-                response = requests.get(api_url, headers=self.headers)
-                response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
+        """
+        Fetches prediction data for a specific fixture_id from the API,
+        transforms it, and upserts it into the api_football.predictions table.
+        Args:
+            fixture_id (int): The ID of the fixture to get predictions for.
+        Returns:
+            bool: True if the operation was successful, False otherwise.
+        """
+        api_url = f"{self.base_url}/predictions?fixture={fixture_id}"
+        try:
+            response = requests.get(api_url, headers=self.headers)
+            response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
 
-                api_data = response.json()
+            api_data = response.json()
 
-                if not api_data.get("response"):
-                    message = f"No prediction data found in API response for fixture ID: {fixture_id}"
-                    self.logger.warning(message)
-                    print(message)
-                    return False
-                
-                # The main object containing all prediction related data for the fixture
-                prediction_api_obj = api_data["response"][0]
+            if not api_data.get("response"):
+                message = f"No prediction data found in API response for fixture ID: {fixture_id}"
+                self.logger.warning(message)
+                print(message)
+                return False
 
-                # Extract parts of the API response
-                predictions_part = prediction_api_obj.get("predictions", {})
-                teams_api_part = prediction_api_obj.get("teams", {})
-                comparison_part = prediction_api_obj.get("comparison", {})
-                h2h_list_api = prediction_api_obj.get("h2h", [])
-                
-                fixture_home_team_id = teams_api_part.get("home", {}).get("id")
-                fixture_away_team_id = teams_api_part.get("away", {}).get("id")
+            # The main object containing all prediction related data for the fixture
+            prediction_api_obj = api_data["response"][0]
 
-                # Helper to safely get and convert percentage strings (e.g., "50%" or "50.5") to float
-                def parse_percent(percent_val):
-                    if percent_val is None: 
-                        return None
-                    if isinstance(percent_val, (int, float)): 
-                        return float(percent_val)
-                    try:
-                        s_val = str(percent_val).replace('%', '')
-                        return float(s_val)
-                    except ValueError:
-                        return None
+            # Extract parts of the API response
+            predictions_part = prediction_api_obj.get("predictions", {})
+            teams_api_part = prediction_api_obj.get("teams", {})
+            comparison_part = prediction_api_obj.get("comparison", {})
+            h2h_list_api = prediction_api_obj.get("h2h", [])
 
-                # Prepare data for database, matching the provided schema
-                data_to_upsert = {
-                    "fixture_id": fixture_id,
+            fixture_home_team_id = teams_api_part.get("home", {}).get("id")
+            fixture_away_team_id = teams_api_part.get("away", {}).get("id")
 
-                    # From 'predictions' part
-                    "winner_id": predictions_part.get("winner", {}).get("id"),
-                    "winner_name": predictions_part.get("winner", {}).get("name"),
-                    "win_or_draw": predictions_part.get("win_or_draw"),
-                    "under_over": predictions_part.get("under_over"), 
-                    "goals_home": predictions_part.get("goals", {}).get("home"),
-                    "goals_away": predictions_part.get("goals", {}).get("away"),
-                    "advice": predictions_part.get("advice"),
-                    "home_win_percent": parse_percent(predictions_part.get("percent", {}).get("home")),
-                    "draw_percent": parse_percent(predictions_part.get("percent", {}).get("draw")),
-                    "away_win_percent": parse_percent(predictions_part.get("percent", {}).get("away")),
-                    
-                    # From 'comparison' part - parse percentages to remove % signs
-                    "comparison_home_form": parse_percent(comparison_part.get("form", {}).get("home")),
-                    "comparison_away_form": parse_percent(comparison_part.get("form", {}).get("away")),
-                    "comparison_home_att": parse_percent(comparison_part.get("att", {}).get("home")),
-                    "comparison_away_att": parse_percent(comparison_part.get("att", {}).get("away")),
-                    "comparison_home_def": parse_percent(comparison_part.get("def", {}).get("home")),
-                    "comparison_away_def": parse_percent(comparison_part.get("def", {}).get("away")),
-                    "comparison_home_poisson_distribution": parse_percent(comparison_part.get("poisson_distribution", {}).get("home")),
-                    "comparison_away_poisson_distribution": parse_percent(comparison_part.get("poisson_distribution", {}).get("away")),
-                    "comparison_home_h2h": parse_percent(comparison_part.get("h2h", {}).get("home")),
-                    "comparison_away_h2h": parse_percent(comparison_part.get("h2h", {}).get("away")),
-                    "comparison_home_goals": parse_percent(comparison_part.get("goals", {}).get("home")),
-                    "comparison_away_goals": parse_percent(comparison_part.get("goals", {}).get("away")),
-                    "comparison_home_total": parse_percent(comparison_part.get("total", {}).get("home")),
-                    "comparison_away_total": parse_percent(comparison_part.get("total", {}).get("away")),
-                    
-                    "updated_at": datetime.now(),
-                }
-
-                # Calculate H2H stats
-                h2h_home_wins_calc, h2h_away_wins_calc, h2h_draws_calc = 0, 0, 0
-                if fixture_home_team_id is not None and fixture_away_team_id is not None and h2h_list_api:
-                    for match in h2h_list_api:
-                        match_teams = match.get("teams", {})
-                        match_goals = match.get("goals", {})
-                        
-                        h2h_match_home_id = match_teams.get("home", {}).get("id")
-                        
-                        h2h_gh = match_goals.get("home") 
-                        h2h_ga = match_goals.get("away") 
-
-                        if isinstance(h2h_gh, (int, float)) and isinstance(h2h_ga, (int, float)):
-                            if h2h_gh == h2h_ga:
-                                h2h_draws_calc += 1
-                            elif h2h_match_home_id == fixture_home_team_id: 
-                                if h2h_gh > h2h_ga: 
-                                    h2h_home_wins_calc +=1 
-                                else: 
-                                    h2h_away_wins_calc +=1 
-                            elif h2h_match_home_id == fixture_away_team_id: 
-                                if h2h_ga > h2h_gh:
-                                    h2h_home_wins_calc += 1
-                                else:
-                                    h2h_away_wins_calc += 1
-                
-                data_to_upsert["h2h_home_wins"] = h2h_home_wins_calc
-                data_to_upsert["h2h_away_wins"] = h2h_away_wins_calc
-                data_to_upsert["h2h_draws"] = h2h_draws_calc
-                data_to_upsert["h2h_total_matches"] = len(h2h_list_api) if h2h_list_api else 0
-
-                # Upsert to PostgreSQL
-                stmt = pg_insert(predictions_table).values(**data_to_upsert)
-                update_dict = {c: stmt.excluded[c] for c in data_to_upsert.keys() if c != 'fixture_id'}
-                stmt = stmt.on_conflict_do_update(index_elements=['fixture_id'], set_=update_dict)
+            # Helper to safely get and convert percentage strings (e.g., "50%" or "50.5") to float
+            def parse_percent(percent_val):
+                if percent_val is None:
+                    return None
+                if isinstance(percent_val, (int, float)):
+                    return float(percent_val)
                 try:
-                    with engine.begin() as conn:
-                        conn.execute(stmt)
-                    message = f"Successfully upserted prediction for fixture ID: {fixture_id}"
-                    self.logger.info(message)
-                    print(message)
-                    return True
-                except SQLAlchemyError as e:
-                    message = f"Error upserting prediction for fixture ID {fixture_id}: {e}"
-                    self.logger.error(message)
-                    print(message)
-                    return False
+                    s_val = str(percent_val).replace("%", "")
+                    return float(s_val)
+                except ValueError:
+                    return None
 
-            except requests.exceptions.RequestException as e:
-                message = f"API request failed for fixture ID {fixture_id}: {e}"
+            # Prepare data for database, matching the provided schema
+            data_to_upsert = {
+                "fixture_id": fixture_id,
+                # From 'predictions' part
+                "winner_id": predictions_part.get("winner", {}).get("id"),
+                "winner_name": predictions_part.get("winner", {}).get("name"),
+                "win_or_draw": predictions_part.get("win_or_draw"),
+                "under_over": predictions_part.get("under_over"),
+                "goals_home": predictions_part.get("goals", {}).get("home"),
+                "goals_away": predictions_part.get("goals", {}).get("away"),
+                "advice": predictions_part.get("advice"),
+                "home_win_percent": parse_percent(predictions_part.get("percent", {}).get("home")),
+                "draw_percent": parse_percent(predictions_part.get("percent", {}).get("draw")),
+                "away_win_percent": parse_percent(predictions_part.get("percent", {}).get("away")),
+                # From 'comparison' part - parse percentages to remove % signs
+                "comparison_home_form": parse_percent(comparison_part.get("form", {}).get("home")),
+                "comparison_away_form": parse_percent(comparison_part.get("form", {}).get("away")),
+                "comparison_home_att": parse_percent(comparison_part.get("att", {}).get("home")),
+                "comparison_away_att": parse_percent(comparison_part.get("att", {}).get("away")),
+                "comparison_home_def": parse_percent(comparison_part.get("def", {}).get("home")),
+                "comparison_away_def": parse_percent(comparison_part.get("def", {}).get("away")),
+                "comparison_home_poisson_distribution": parse_percent(
+                    comparison_part.get("poisson_distribution", {}).get("home")
+                ),
+                "comparison_away_poisson_distribution": parse_percent(
+                    comparison_part.get("poisson_distribution", {}).get("away")
+                ),
+                "comparison_home_h2h": parse_percent(comparison_part.get("h2h", {}).get("home")),
+                "comparison_away_h2h": parse_percent(comparison_part.get("h2h", {}).get("away")),
+                "comparison_home_goals": parse_percent(
+                    comparison_part.get("goals", {}).get("home")
+                ),
+                "comparison_away_goals": parse_percent(
+                    comparison_part.get("goals", {}).get("away")
+                ),
+                "comparison_home_total": parse_percent(
+                    comparison_part.get("total", {}).get("home")
+                ),
+                "comparison_away_total": parse_percent(
+                    comparison_part.get("total", {}).get("away")
+                ),
+                "updated_at": datetime.now(),
+            }
+
+            # Calculate H2H stats
+            h2h_home_wins_calc, h2h_away_wins_calc, h2h_draws_calc = 0, 0, 0
+            if (
+                fixture_home_team_id is not None
+                and fixture_away_team_id is not None
+                and h2h_list_api
+            ):
+                for match in h2h_list_api:
+                    match_teams = match.get("teams", {})
+                    match_goals = match.get("goals", {})
+
+                    h2h_match_home_id = match_teams.get("home", {}).get("id")
+
+                    h2h_gh = match_goals.get("home")
+                    h2h_ga = match_goals.get("away")
+
+                    if isinstance(h2h_gh, (int, float)) and isinstance(h2h_ga, (int, float)):
+                        if h2h_gh == h2h_ga:
+                            h2h_draws_calc += 1
+                        elif h2h_match_home_id == fixture_home_team_id:
+                            if h2h_gh > h2h_ga:
+                                h2h_home_wins_calc += 1
+                            else:
+                                h2h_away_wins_calc += 1
+                        elif h2h_match_home_id == fixture_away_team_id:
+                            if h2h_ga > h2h_gh:
+                                h2h_home_wins_calc += 1
+                            else:
+                                h2h_away_wins_calc += 1
+
+            data_to_upsert["h2h_home_wins"] = h2h_home_wins_calc
+            data_to_upsert["h2h_away_wins"] = h2h_away_wins_calc
+            data_to_upsert["h2h_draws"] = h2h_draws_calc
+            data_to_upsert["h2h_total_matches"] = len(h2h_list_api) if h2h_list_api else 0
+
+            # Upsert to PostgreSQL
+            stmt = pg_insert(predictions_table).values(**data_to_upsert)
+            update_dict = {c: stmt.excluded[c] for c in data_to_upsert.keys() if c != "fixture_id"}
+            stmt = stmt.on_conflict_do_update(index_elements=["fixture_id"], set_=update_dict)
+            try:
+                with engine.begin() as conn:
+                    conn.execute(stmt)
+                message = f"Successfully upserted prediction for fixture ID: {fixture_id}"
+                self.logger.info(message)
+                print(message)
+                return True
+            except SQLAlchemyError as e:
+                message = f"Error upserting prediction for fixture ID {fixture_id}: {e}"
                 self.logger.error(message)
                 print(message)
                 return False
-            except (Exception, psycopg2.Error) as e:
-                message = f"Error processing or upserting prediction for fixture ID {fixture_id}: {e}"
-                self.logger.error(message)
-                print(message)
-                if self.conn and not self.conn.closed:
-                    try: 
-                        self.conn.rollback()
-                    except psycopg2.Error as rb_e:
-                        print(f"Rollback failed: {rb_e}")
-                return False
+
+        except requests.exceptions.RequestException as e:
+            message = f"API request failed for fixture ID {fixture_id}: {e}"
+            self.logger.error(message)
+            print(message)
+            return False
+        except (Exception, psycopg2.Error) as e:
+            message = f"Error processing or upserting prediction for fixture ID {fixture_id}: {e}"
+            self.logger.error(message)
+            print(message)
+            return False
 
     def get_fixture_ids_without_predictions(self) -> list[int]:
         """
         Retrieves fixture IDs from PostgreSQL where predictions do not exist.
-        
+
         Returns:
             List[int]: List of fixture IDs without predictions.
         """
@@ -876,7 +1025,7 @@ class ApiFootball:
                         if team_data["results"] > 0:
                             team = team_data["response"][0]
                             venue = team["venue"]
-                            
+
                             # Upsert to venues table
                             upsert_query = text("""
                                 INSERT INTO api_football.venues (
@@ -920,12 +1069,12 @@ class ApiFootball:
                                 "venue_capacity": venue["capacity"],
                                 "venue_surface": venue["surface"],
                                 "venue_image": venue["image"],
-                                "updated_at": datetime.now()
+                                "updated_at": datetime.now(),
                             }
 
                             with engine.begin() as conn:
                                 conn.execute(upsert_query, params)
-                                
+
                             self.logger.info(f"Updated venue data for team ID: {team_id}")
                     else:
                         self.logger.error(
@@ -942,24 +1091,30 @@ class ApiFootball:
         try:
             # Calculate cutoff date (7 days ago)
             cutoff_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-            
+
             # First count the number of fixtures that match criteria
             with engine.connect() as conn:
-                result = conn.execute(text("""
+                result = conn.execute(
+                    text("""
                     SELECT COUNT(*) 
                     FROM api_football.fixtures 
                     WHERE date < :cutoff_date AND home_goals IS NULL
-                """), {"cutoff_date": cutoff_date})
+                """),
+                    {"cutoff_date": cutoff_date},
+                )
                 count = result.scalar()
-                
+
             self.logger.info(f"Found {count} old unscored fixtures to delete")
-            
+
             # Then delete them
             with engine.begin() as conn:
-                result = conn.execute(text("""
+                result = conn.execute(
+                    text("""
                     DELETE FROM api_football.fixtures 
                     WHERE date < :cutoff_date AND home_goals IS NULL
-                """), {"cutoff_date": cutoff_date})
+                """),
+                    {"cutoff_date": cutoff_date},
+                )
                 deleted_count = result.rowcount
 
             self.logger.info(f"Deleted {deleted_count} old unscored fixtures")
@@ -968,10 +1123,12 @@ class ApiFootball:
         except Exception as e:
             self.logger.error(f"Error deleting old unscored fixtures: {e}")
 
-    def _map_api_event_to_row(self, event_data: dict, fixture_id_context: int) -> dict:
+    def _map_api_event_to_row(self, event_data: dict, fixture_id_context: int) -> Optional[dict]:
         """Maps a single event object from the API response to a dictionary for the fixture_events table."""
         if not event_data or not isinstance(event_data, dict):
-            self.logger.warning(f"_map_api_event_to_row: Invalid event_data for fixture_id {fixture_id_context}")
+            self.logger.warning(
+                f"_map_api_event_to_row: Invalid event_data for fixture_id {fixture_id_context}"
+            )
             return None
 
         # Helper to safely access nested dictionary keys
@@ -985,24 +1142,27 @@ class ApiFootball:
         # Get the raw event detail
         raw_event_detail = safe_get(event_data, "detail")
         event_type = safe_get(event_data, "type")
-        
+
         # Handle missing event_detail with appropriate defaults based on event type
         if raw_event_detail is None and event_type:
             # Map event types to default details when API doesn't provide them
             default_details = {
-                "Var": "VAR Check",
-                "var": "VAR Check",  # Handle case variations
-                "VAR": "VAR Check",
+                "Var": VAR_CHECK_DETAIL,
+                "var": VAR_CHECK_DETAIL,  # Handle case variations
+                "VAR": VAR_CHECK_DETAIL,
                 "Goal": "Goal",
                 "Card": "Card",
                 "subst": "Substitution",
-                "Substitution": "Substitution"
+                "Substitution": "Substitution",
             }
-            
-            event_detail = default_details.get(event_type, f"{event_type} Event")
-            
+
+            event_type_str = str(event_type) if event_type is not None else ""
+            event_detail = default_details.get(event_type_str, f"{event_type_str} Event")
+
             # Log when we apply a default value for tracking
-            self.logger.info(f"Applied default event_detail '{event_detail}' for event_type '{event_type}' in fixture {fixture_id_context}")
+            self.logger.info(
+                f"Applied default event_detail '{event_detail}' for event_type '{event_type}' in fixture {fixture_id_context}"
+            )
         else:
             event_detail = raw_event_detail
 
@@ -1019,18 +1179,22 @@ class ApiFootball:
             "event_type": event_type,
             "event_detail": event_detail,
             "event_comments": safe_get(event_data, "comments"),
-            "updated_at": datetime.now()
+            "updated_at": datetime.now(),
         }
-        
+
         if not mapped_event["team_id"] or not mapped_event["event_type"]:
-            self.logger.warning(f"Essential event data missing for fixture {fixture_id_context}: {event_data}")
+            self.logger.warning(
+                f"Essential event data missing for fixture {fixture_id_context}: {event_data}"
+            )
             return None
-            
+
         # Final validation that event_detail is not None (database constraint)
         if mapped_event["event_detail"] is None:
-            self.logger.warning(f"Could not determine event_detail for event_type '{event_type}' in fixture {fixture_id_context}. Original data: {event_data}")
+            self.logger.warning(
+                f"Could not determine event_detail for event_type '{event_type}' in fixture {fixture_id_context}. Original data: {event_data}"
+            )
             return None
-            
+
         return mapped_event
 
     def get_and_upsert_fixture_events(self, fixture_id: int) -> bool:
@@ -1044,13 +1208,15 @@ class ApiFootball:
         """
         endpoint = "fixtures/events"
         params = {"fixture": fixture_id}
-        
+
         self.logger.info(f"Fetching events for fixture_id: {fixture_id}")
         api_response = self._get_request(endpoint, params)
 
         if not api_response or "response" not in api_response or not api_response["response"]:
-            self.logger.warning(f"No event data found in API response for fixture ID: {fixture_id}. API Response: {api_response}")
-            return True 
+            self.logger.warning(
+                f"No event data found in API response for fixture ID: {fixture_id}. API Response: {api_response}"
+            )
+            return True
 
         events_from_api = api_response["response"]
         events_to_insert = []
@@ -1059,27 +1225,37 @@ class ApiFootball:
             mapped_row = self._map_api_event_to_row(event_data, fixture_id)
             if mapped_row:
                 events_to_insert.append(mapped_row)
-        
+
         if not events_to_insert:
-            self.logger.info(f"No valid events parsed to insert for fixture_id: {fixture_id} after mapping.")
-            return True # No valid events to insert, consider it done.
+            self.logger.info(
+                f"No valid events parsed to insert for fixture_id: {fixture_id} after mapping."
+            )
+            return True  # No valid events to insert, consider it done.
 
         try:
             with engine.begin() as conn:
                 # Delete existing events for this fixture_id to prevent duplicates/stale data
-                delete_stmt = delete(fixture_events_table).where(fixture_events_table.c.fixture_id == fixture_id)
+                delete_stmt = delete(fixture_events_table).where(
+                    fixture_events_table.c.fixture_id == fixture_id
+                )
                 delete_result = conn.execute(delete_stmt)
-                self.logger.info(f"Deleted {delete_result.rowcount} existing event(s) for fixture_id: {fixture_id}")
+                self.logger.info(
+                    f"Deleted {delete_result.rowcount} existing event(s) for fixture_id: {fixture_id}"
+                )
 
                 # Bulk insert the new events
                 conn.execute(fixture_events_table.insert(), events_to_insert)
-                self.logger.info(f"Successfully inserted {len(events_to_insert)} events for fixture_id: {fixture_id}")
+                self.logger.info(
+                    f"Successfully inserted {len(events_to_insert)} events for fixture_id: {fixture_id}"
+                )
             return True
         except SQLAlchemyError as e:
             self.logger.error(f"Database error processing events for fixture_id {fixture_id}: {e}")
             return False
         except Exception as e:
-            self.logger.error(f"Unexpected error processing events for fixture_id {fixture_id}: {e}")
+            self.logger.error(
+                f"Unexpected error processing events for fixture_id {fixture_id}: {e}"
+            )
             return False
 
     def get_events_for_missing_fixtures(self):
@@ -1087,8 +1263,10 @@ class ApiFootball:
         Identifies finished fixtures without events and fetches/stores their event data.
         Includes API rate limiting.
         """
-        self.logger.info("Starting to get fixture events for finished fixtures missing event data...")
-        
+        self.logger.info(
+            "Starting to get fixture events for finished fixtures missing event data..."
+        )
+
         fixtures_to_query = []
         try:
             query = text("""
@@ -1099,7 +1277,7 @@ class ApiFootball:
                     AND f.date <= NOW() 
                     AND e.fixture_id IS NULL;
             """)
-            
+
             with engine.connect() as conn:
                 result = conn.execute(query)
                 fixtures_to_query = [row.fixture_id for row in result]
@@ -1108,7 +1286,9 @@ class ApiFootball:
                 self.logger.info("No finished fixtures found missing event data.")
                 return
 
-            self.logger.info(f"Found {len(fixtures_to_query)} finished fixtures missing event data.")
+            self.logger.info(
+                f"Found {len(fixtures_to_query)} finished fixtures missing event data."
+            )
 
         except SQLAlchemyError as e:
             self.logger.error(f"DB error querying for fixtures missing events: {e}")
@@ -1122,35 +1302,44 @@ class ApiFootball:
         rate_limit_threshold_per_batch = 250  # As used in get_team_stats_for_fixtures
         pause_duration = 60  # Seconds
         batch_start_time = time.time()
-        
+
         processed_count = 0
         for fixture_id in fixtures_to_query:
             if api_calls_in_current_batch >= rate_limit_threshold_per_batch:
                 elapsed_time_in_batch = time.time() - batch_start_time
                 if elapsed_time_in_batch < pause_duration:
                     sleep_time = pause_duration - elapsed_time_in_batch
-                    self.logger.info(f"Event fetching rate limit: Sleeping for {sleep_time:.1f} seconds.")
+                    self.logger.info(
+                        f"Event fetching rate limit: Sleeping for {sleep_time:.1f} seconds."
+                    )
                     time.sleep(sleep_time)
                 api_calls_in_current_batch = 0
                 batch_start_time = time.time()
 
             success = self.get_and_upsert_fixture_events(fixture_id)
-            api_calls_in_current_batch += 1 
-            api_call_count_total +=1
-            
+            api_calls_in_current_batch += 1
+            api_call_count_total += 1
+
             if success:
                 processed_count += 1
             else:
-                self.logger.warning(f"Failed to get/upsert events for fixture_id: {fixture_id}. Will not retry in this run.")
+                self.logger.warning(
+                    f"Failed to get/upsert events for fixture_id: {fixture_id}. Will not retry in this run."
+                )
 
             if (api_call_count_total % 10 == 0) or (api_call_count_total == len(fixtures_to_query)):
-                self.logger.info(f"--- Event Fetching Progress: Attempted {api_call_count_total}/{len(fixtures_to_query)} fixtures. "
-                                f"Successfully processed: {processed_count}. ---")
-            
-            time.sleep(0.1) # Small delay between individual fixture event calls
+                self.logger.info(
+                    f"--- Event Fetching Progress: Attempted {api_call_count_total}/{len(fixtures_to_query)} fixtures. "
+                    f"Successfully processed: {processed_count}. ---"
+                )
 
-        self.logger.info(f"Finished getting fixture events. Total API calls: {api_call_count_total}. "
-                        f"Successfully processed fixtures with events: {processed_count}.")
+            time.sleep(0.1)  # Small delay between individual fixture event calls
+
+        self.logger.info(
+            f"Finished getting fixture events. Total API calls: {api_call_count_total}. "
+            f"Successfully processed fixtures with events: {processed_count}."
+        )
+
 
 def main():
     api_key = os.getenv("API_FOOTBALL_API_KEY")
@@ -1166,5 +1355,7 @@ def main():
     api_football.get_team_stats_for_fixtures()
     api_football.get_events_for_missing_fixtures()
     api_football.update_venues()
+
+
 if __name__ == "__main__":
     main()

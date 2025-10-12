@@ -43,6 +43,7 @@ from utils.logger import ExperimentLogger
 
 logger = ExperimentLogger(experiment_name="hypertuner_utils")
 
+
 def predict(model: Any, X: Union[pd.DataFrame, np.ndarray], threshold: float = 0.5) -> np.ndarray:
     """
     Generate binary predictions using a trained model.
@@ -284,5 +285,3 @@ def calculate_feature_importance(
     except Exception as e:
         logger.error(f"Error extracting feature importance: {str(e)}")
         return pd.DataFrame(columns=["Feature", "Importance"])
-
-

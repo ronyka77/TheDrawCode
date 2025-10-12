@@ -33,7 +33,7 @@ try:
     sys.path.append(str(project_root))
 except Exception as e:
     print(f"Error setting project root path: {e}")
-    sys.path.append(os.getcwd().parent)
+    sys.path.append(str(Path(os.getcwd()).parent))
 
 # Import ExperimentLogger and evaluation set creation
 from utils.create_evaluation_set import (
@@ -54,7 +54,7 @@ class EnhancedFeatureSelector(BaseEstimator):
         target_features: tuple[int, int] = (50, 80),
         random_state: int = 42,
         experiment_name: str = "feature_selection_optimization",
-        logger: ExperimentLogger = None,
+        logger: Optional[ExperimentLogger] = None,
     ):
         """Initialize feature selector.
 
@@ -110,70 +110,95 @@ class EnhancedFeatureSelector(BaseEstimator):
         """
         self.logger.info("Starting composite weight optimization")
 
-        # Default weight grid if none provided
+        weight_grid = self._get_default_weight_grid(weight_grid)
+        weight_combinations = self._generate_weight_combinations(weight_grid)
+        best_weights, best_score = self._evaluate_weight_combinations(X, y, model, weight_combinations)
+
+        return self._finalize_optimization_results(best_weights, best_score)
+
+    def _get_default_weight_grid(self, weight_grid: Optional[dict[str, list[float]]]) -> dict[str, list[float]]:
+        """Get default weight grid if none provided."""
         if weight_grid is None:
-            weight_grid = {
+            return {
                 "gain": [0.4, 0.5, 0.6],
                 "weight": [0.2, 0.3, 0.4],
                 "cover": [0.1, 0.2, 0.3],
             }
+        return weight_grid
 
-        best_score = -np.inf
-        best_weights = None
-
-        # Generate all weight combinations
-        weight_combinations = []
+    def _generate_weight_combinations(self, weight_grid: dict[str, list[float]]) -> list[tuple[float, float, float]]:
+        """Generate all valid weight combinations that sum to 1."""
+        combinations = []
         for gain in weight_grid["gain"]:
             for weight in weight_grid["weight"]:
                 for cover in weight_grid["cover"]:
                     if abs(gain + weight + cover - 1.0) < 1e-10:  # Sum to 1
-                        weight_combinations.append((gain, weight, cover))
+                        combinations.append((gain, weight, cover))
+        return combinations
 
-        # Evaluate each combination
+    def _evaluate_weight_combinations(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        model: xgb.XGBClassifier,
+        weight_combinations: list[tuple[float, float, float]]
+    ) -> tuple[Optional[dict[str, float]], float]:
+        """Evaluate all weight combinations and return the best."""
+        best_score = -np.inf
+        best_weights = None
+
         for gain, weight, cover in weight_combinations:
             try:
-                # Calculate composite scores
-                importance_scores = self._calculate_composite_scores(
-                    X, y, model, {"gain": gain, "weight": weight, "cover": cover}
-                )
-
-                # Convert scores to DataFrame for proper indexing
-                scores_df = pd.DataFrame.from_dict(
-                    importance_scores, orient="index", columns=["score"]
-                )
-
-                # Select top features based on scores
-                top_features = self._select_top_features(
-                    scores_df["score"].to_dict(),  # Convert back to dict with proper indexing
-                    X,
-                    min_features=self.target_features[0],
-                )
-
-                # Evaluate feature set
-                score = self._evaluate_feature_set(X[top_features], y, model)
-
-                # Log to MLflow
-                mlflow.log_metrics({"cv_score": score, "n_features": len(top_features)})
-
+                score = self._evaluate_single_weight_combination(X, y, model, gain, weight, cover)
                 if score > best_score:
                     best_score = score
                     best_weights = {"gain": gain, "weight": weight, "cover": cover}
-
-                    # Log best weights
-                    mlflow.log_metrics(
-                        {
-                            "best_gain_weight": gain,
-                            "best_weight_weight": weight,
-                            "best_cover_weight": cover,
-                            "best_cv_score": score,
-                        }
-                    )
-
             except Exception as e:
                 self.logger.error(f"Error evaluating weights {(gain, weight, cover)}: {str(e)}")
                 continue
 
-        # Handle case where no valid weights are found
+        return best_weights, best_score
+
+    def _evaluate_single_weight_combination(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        model: xgb.XGBClassifier,
+        gain: float,
+        weight_val: float,
+        cover: float
+    ) -> float:
+        """Evaluate a single weight combination."""
+        weights = {"gain": gain, "weight": weight_val, "cover": cover}
+
+        # Calculate composite scores
+        importance_scores = self._calculate_composite_scores(pd.DataFrame(X), y, model, weights)  # type: ignore[arg-type]
+
+        # Select top features
+        top_features = self._select_top_features(
+            importance_scores, X, min_features=self.target_features[0]
+        )
+
+        # Evaluate feature set
+        score = self._evaluate_feature_set(pd.DataFrame(X[top_features]), y, model)  # type: ignore
+
+        # Log to MLflow
+        mlflow.log_metrics({"cv_score": score, "n_features": len(top_features)})
+
+        # Log best weights
+        mlflow.log_metrics({
+            "best_gain_weight": gain,
+            "best_weight_weight": weight_val,
+            "best_cover_weight": cover,
+            "best_cv_score": score,
+        })
+
+        return score
+
+    def _finalize_optimization_results(
+        self, best_weights: Optional[dict[str, float]], best_score: float
+    ) -> dict[str, float]:
+        """Finalize optimization results and handle edge cases."""
         if best_weights is None:
             self.logger.warning("No valid weights found, using defaults")
             best_weights = {"gain": 0.5, "weight": 0.3, "cover": 0.2}
@@ -198,6 +223,9 @@ class EnhancedFeatureSelector(BaseEstimator):
         Returns:
             Dictionary of composite scores for each feature
         """
+        # Ensure X is a DataFrame
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
         model.fit(X, y)
 
         # Get importance scores for each metric
@@ -212,7 +240,8 @@ class EnhancedFeatureSelector(BaseEstimator):
         normalized_metrics = {}
         for metric, scores in importance_metrics.items():
             # Convert to DataFrame for normalization
-            score_df = pd.DataFrame.from_dict(scores, orient="index", columns=[metric])
+            score_df = pd.DataFrame.from_dict(scores, orient="index")
+            score_df.columns = [metric]
             normalized_metrics[metric] = pd.DataFrame(
                 scaler.fit_transform(score_df), index=score_df.index
             )
@@ -265,6 +294,9 @@ class EnhancedFeatureSelector(BaseEstimator):
         Returns:
             Mean cross-validation score
         """
+        # Ensure X is a DataFrame
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
         try:
             # Create a fresh model instance for cross-validation
             cv_model = xgb.XGBClassifier(
@@ -293,7 +325,7 @@ class EnhancedFeatureSelector(BaseEstimator):
             List of correlated feature groups
         """
         # Calculate correlation matrix
-        correlation_matrix = X[selected_features].corr()
+        correlation_matrix = X[selected_features].corr()  # type: ignore
 
         # Find highly correlated features
         correlated_groups = []
@@ -338,23 +370,24 @@ class EnhancedFeatureSelector(BaseEstimator):
         """
         self.logger.info(f"Starting stability selection with {self.n_bootstrap} iterations")
 
-        feature_counts = {feature: 0 for feature in X.columns}
-        feature_scores = {feature: [] for feature in X.columns}
+        feature_counts = dict.fromkeys(X.columns, 0)
+        feature_scores = dict.fromkeys(X.columns, [])
 
         for i in range(self.n_bootstrap):
             try:
                 # Create bootstrap sample
-                indices = np.random.choice(len(X), size=len(X), replace=True)
-                X_boot = X.iloc[indices]
+                rng = np.random.default_rng(42)
+                indices = rng.choice(len(X), size=len(X), replace=True)
+                x_boot = X.iloc[indices]
                 y_boot = y.iloc[indices]
 
                 # Calculate feature importance for this bootstrap
                 # Note: eval_metric removed from fit() calls in _calculate_composite_scores
-                importance_scores = self._calculate_composite_scores(X_boot, y_boot, model, weights)
+                importance_scores = self._calculate_composite_scores(x_boot, y_boot, model, weights)
 
                 # Select top features
                 selected = self._select_top_features(
-                    importance_scores, X_boot, min_features=self.target_features[0]
+                    importance_scores, x_boot, min_features=self.target_features[0]
                 )
 
                 # Update counts and scores
@@ -388,7 +421,7 @@ class EnhancedFeatureSelector(BaseEstimator):
         mlflow.log_metrics(
             {
                 "n_stable_features": len(stable_features),
-                "mean_stability_score": np.mean(list(stability_scores.values())),
+                "mean_stability_score": float(np.mean(list(stability_scores.values()))),
             }
         )
 
@@ -430,7 +463,7 @@ class EnhancedFeatureSelector(BaseEstimator):
         while len(remaining_features) > min_features:
             try:
                 # Evaluate current feature set
-                score = self._evaluate_feature_set(X[remaining_features], y, model, cv=cv)
+                score = self._evaluate_feature_set(X[remaining_features], y, model, cv=cv)  # type: ignore[arg-type]
                 scores_history.append((len(remaining_features), score))
 
                 # Update best score and features
@@ -440,7 +473,7 @@ class EnhancedFeatureSelector(BaseEstimator):
 
                 # Calculate feature importance
                 importance_scores = self._calculate_composite_scores(
-                    X[remaining_features],
+                    X[remaining_features],  # type: ignore[arg-type]
                     y,
                     model,
                     weights={"gain": 0.5, "weight": 0.3, "cover": 0.2},
@@ -505,7 +538,7 @@ class EnhancedFeatureSelector(BaseEstimator):
             ]
 
             # 4. Analyze correlations among stable features
-            correlation_groups = self.analyze_correlations(X[stable_features], stable_features)
+            correlation_groups = self.analyze_correlations(pd.DataFrame(X[stable_features]), stable_features)
 
             # 5. Remove redundant features from each correlation group
             unique_features = []
@@ -521,7 +554,7 @@ class EnhancedFeatureSelector(BaseEstimator):
             unique_features.extend(uncorrelated)
 
             # 6. Perform iterative elimination on remaining features
-            final_features = self.perform_iterative_elimination(X[unique_features], y, model)
+            final_features = self.perform_iterative_elimination(pd.DataFrame(X[unique_features]), y, model)
 
             # Store selected features
             self.selected_features = final_features
@@ -540,7 +573,7 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
         self,
         min_recall: float = 0.20,
         target_precision: float = 0.50,
-        logger: ExperimentLogger = None,
+        logger: Optional[ExperimentLogger] = None,
         handle_imbalance: bool = True,
         calibrate_probas: bool = True,
     ):
@@ -585,7 +618,8 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
 
             self.logger.info("Applying SMOTE for class imbalance")
             smote = SMOTE(random_state=42)
-            X_resampled, y_resampled = smote.fit_resample(X, y)
+            result = smote.fit_resample(X, y)
+            x_resampled, y_resampled = result[0], result[1]
 
             self.logger.info(
                 f"Original class distribution: {pd.Series(y).value_counts(normalize=True)}"
@@ -594,7 +628,7 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
                 f"Resampled class distribution: {pd.Series(y_resampled).value_counts(normalize=True)}"
             )
 
-            return pd.DataFrame(X_resampled, columns=X.columns), pd.Series(y_resampled)
+            return pd.DataFrame(x_resampled, columns=X.columns), pd.Series(y_resampled)
 
         except Exception as e:
             self.logger.error(f"Error in class imbalance handling: {str(e)}")
@@ -626,35 +660,29 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
         self,
         model: xgb.XGBClassifier,
         feature_names: list[str],
-        X_val: pd.DataFrame,
+        x_val: pd.DataFrame,
         y_val: pd.Series,
     ) -> pd.DataFrame:
         """Analyze feature importance with enhanced precision focus."""
         try:
             self.logger.info("Handling class imbalance")
-            X_balanced, y_balanced = self._handle_class_imbalance(X_val, y_val)
+            x_balanced, y_balanced = self._handle_class_imbalance(x_val, y_val)
 
             self.logger.info("Calibrating model if enabled")
-            calibrated_model = self._calibrate_model(model, X_balanced, y_balanced)
+            calibrated_model = self._calibrate_model(model, x_balanced, y_balanced)
 
             self.logger.info("Getting base importance scores")
             importance_base = model.feature_importances_
 
             self.logger.info("Calculating precision impact scores with balanced data")
             precision_impact = self._calculate_precision_impact(
-                calibrated_model, X_balanced, y_balanced, feature_names
+                calibrated_model, x_balanced, y_balanced, feature_names
             )
-
-            # self.logger.info("Calculating interaction importance")
-            # interaction_importance = self._calculate_interaction_importance(
-            #     calibrated_model, X_balanced, y_balanced, feature_names
-            # )
 
             self.logger.info("Combining scores with updated weights")
             combined_scores = (
                 0.5 * precision_impact  # Increased weight for precision impact
                 + 0.3 * importance_base  # Base importance
-                # 0.2 * interaction_importance  # New interaction component
             )
 
             self.logger.info("Creating and sorting importance DataFrame")
@@ -663,7 +691,6 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
                     "feature": feature_names,
                     "importance": importance_base,
                     "precision_impact": precision_impact,
-                    # 'interaction_importance': interaction_importance,
                     "combined_score": combined_scores,
                 }
             ).sort_values("combined_score", ascending=False)
@@ -685,13 +712,13 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
                 for feature2 in feature_names[i + 1 :]:
                     # Create interaction feature
                     interaction_name = f"{feature1}_{feature2}"
-                    X_interaction = X.copy()
-                    X_interaction[interaction_name] = X[feature1] * X[feature2]
+                    x_interaction = X.copy()
+                    x_interaction[interaction_name] = X[feature1] * X[feature2]
                     self.created_interactions.add(interaction_name)
 
                     # Get predictions with interaction
                     base_score = model.score(X, y)
-                    interaction_score = model.score(X_interaction, y)
+                    interaction_score = model.score(x_interaction, y)
 
                     # Add interaction impact to both features
                     impact = interaction_score - base_score
@@ -731,14 +758,14 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
         for i, feature in enumerate(feature_names):
             try:
                 # Create copy of X without the current feature
-                X_reduced = X.drop(columns=[feature])
+                x_reduced = X.drop(columns=[feature])
 
                 # Retrain model on reduced feature set
                 reduced_model = xgb.XGBClassifier(tree_method="hist", device="cpu", random_state=42)
-                reduced_model.fit(X_reduced, y)
+                reduced_model.fit(x_reduced, y)
 
                 # Calculate precision with reduced feature set
-                reduced_precision = precision_score(y, reduced_model.predict(X_reduced))
+                reduced_precision = precision_score(y, reduced_model.predict(x_reduced))
 
                 # Calculate precision impact
                 precision_impact[i] = baseline_precision - reduced_precision
@@ -756,19 +783,19 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
         return precision_impact
 
     def select_features(
-        self, importance_df: pd.DataFrame, X_val: pd.DataFrame, correlation_threshold: float = 0.85
+        self, importance_df: pd.DataFrame, x_val: pd.DataFrame, correlation_threshold: float = 0.85
     ) -> list[str]:
         """Select optimal feature set with enhanced precision focus."""
         try:
             # Először ellenőrizzük az adatok minőségét
-            self._validate_data_quality(X_val)
+            self._validate_data_quality(x_val)
 
             # Candidate features validálása
             candidate_features = importance_df.sort_values("combined_score", ascending=False)[
                 "feature"
             ].tolist()
 
-            valid_features = self._get_valid_features(X_val, candidate_features)
+            valid_features = self._get_valid_features(x_val, candidate_features)
 
             if not valid_features:
                 raise ValueError("No valid features found after validation")
@@ -788,7 +815,7 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
                         continue
 
                     # Biztonságos korrelációszámítás
-                    correlations = self._calculate_safe_correlations(X_val, selected, feature)
+                    correlations = self._calculate_safe_correlations(x_val, selected, feature)
 
                     # Feature csoportosítás
                     self._group_feature(
@@ -810,21 +837,29 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
             self.logger.error(f"Error in feature selection: {str(e)}")
             raise
 
+    def _get_valid_features(self, X: pd.DataFrame, candidate_features: list[str]) -> list[str]:
+        """Get valid features that exist in the DataFrame and have valid data."""
+        valid_features = []
+        for feature in candidate_features:
+            if feature in X.columns and X[feature].notna().any():  # type: ignore
+                valid_features.append(feature)
+        return valid_features
+
     def _validate_data_quality(self, X: pd.DataFrame) -> None:
         """Validate data quality and handle problematic values."""
         # Ellenőrizzük a NaN értékeket
         nan_cols = X.isna().sum()
-        if nan_cols.any():
+        if (nan_cols > 0).any():
             self.logger.warning(f"Columns with NaN values: {nan_cols[nan_cols > 0]}")
 
         # Ellenőrizzük a konstans oszlopokat
         constant_cols = X.std() == 0
-        if constant_cols.any():
+        if constant_cols.any():  # type: ignore
             self.logger.warning(f"Constant columns detected: {X.columns[constant_cols].tolist()}")
 
         # Ellenőrizzük a végtelen értékeket
         inf_cols = np.isinf(X).sum()
-        if inf_cols.any():
+        if (inf_cols > 0).any():
             self.logger.warning(f"Columns with infinite values: {inf_cols[inf_cols > 0]}")
 
     def _calculate_safe_correlations(
@@ -833,17 +868,17 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
         """Calculate correlations safely handling numerical issues."""
         try:
             # Kezeljük a NaN és végtelen értékeket
-            X_clean = X.copy()
-            X_clean = X_clean.replace([np.inf, -np.inf], np.nan)
+            x_clean = X.copy()
+            x_clean = x_clean.replace([np.inf, -np.inf], np.nan)
 
             # Töltsük ki a hiányzó értékeket az oszlop mediánjával
             for col in [feature] + selected:
-                if X_clean[col].isna().any():
-                    median_val = X_clean[col].median()
-                    X_clean[col].fillna(median_val, inplace=True)
+                if x_clean[col].isna().any():  # type: ignore
+                    median_val = x_clean[col].median()
+                    x_clean[col].fillna(median_val, inplace=True)
 
             # Számítsuk ki a korrelációkat
-            correlations = abs(X_clean[selected].corrwith(X_clean[feature]))
+            correlations = abs(x_clean[selected].corrwith(x_clean[feature]))
 
             # Ellenőrizzük az eredményeket
             if correlations.isna().any():
@@ -896,7 +931,7 @@ class PrecisionFocusedFeatureSelector(BaseEstimator):
         return final_features
 
 
-def run_feature_selection(experiment_name: str = "feature_selection_optimization") -> list[str]:
+def run_feature_selection(experiment_name: str = "feature_selection_optimization") -> list[str]:  # type: ignore
     """Run the complete feature selection process with precision focus.
 
     Args:
@@ -910,11 +945,19 @@ def run_feature_selection(experiment_name: str = "feature_selection_optimization
     try:
         # Load data
         logger.info("Loading and preparing data")
-        X_train, y_train, X_test, y_test = import_feature_select_draws_api()
-        X_val, y_val = create_evaluation_sets_draws_api(use_selected_columns=False)
-        X_train, X_val, X_test = align_columns(logger, X_train, X_val, X_test)
+        x_train_raw, y_train_raw, x_test_raw, _ = import_feature_select_draws_api()
+        x_val_raw, y_val_raw = create_evaluation_sets_draws_api(use_selected_columns=False)
+
+        # Ensure correct types
+        X_train = pd.DataFrame(x_train_raw)
+        y_train = pd.Series(y_train_raw)
+        X_test = pd.DataFrame(x_test_raw)
+        x_val = pd.DataFrame(x_val_raw)
+        y_val = pd.Series(y_val_raw)
+
+        X_train, x_val, X_test = align_columns(logger, X_train, x_val, X_test)
         logger.info(
-            f"Loaded data shapes - Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}"
+            f"Loaded data shapes - Train: {X_train.shape}, Val: {x_val.shape}, Test: {X_test.shape}"
         )
 
         # Initialize both feature selectors
@@ -947,20 +990,20 @@ def run_feature_selection(experiment_name: str = "feature_selection_optimization
             model.fit(
                 X_train[standard_features],
                 y_train,
-                eval_set=[(X_val[standard_features], y_val)],
+                eval_set=[(x_val[standard_features], y_val)],
                 verbose=False,
             )
 
             # Now analyze precision impact
             logger.info("Analyzing precision impact of features")
             importance_df = precision_selector.analyze_feature_importance(
-                model, standard_features, X_val[standard_features], y_val
+                model, standard_features, pd.DataFrame(x_val[standard_features]), y_val
             )
 
             # Select final feature set
             logger.info("Selecting final feature set with precision focus")
             final_features = precision_selector.select_features(
-                importance_df, X_val, correlation_threshold=0.85
+                importance_df, x_val, correlation_threshold=0.85
             )
 
             # Log results
@@ -992,11 +1035,11 @@ def run_feature_selection(experiment_name: str = "feature_selection_optimization
             def evaluate_feature_set(features):
                 model = xgb.XGBClassifier(tree_method="hist", device="cpu", random_state=42)
                 model.fit(
-                    X_train[features], y_train, eval_set=[(X_val[features], y_val)], verbose=False
+                    X_train[features], y_train, eval_set=[(x_val[features], y_val)], verbose=False
                 )
 
                 # Get predictions
-                val_probs = model.predict_proba(X_val[features])[:, 1]
+                val_probs = model.predict_proba(x_val[features])[:, 1]
                 val_preds = (val_probs >= 0.5).astype(int)
 
                 return {
@@ -1010,10 +1053,10 @@ def run_feature_selection(experiment_name: str = "feature_selection_optimization
 
             mlflow.log_metrics(
                 {
-                    "standard_precision": standard_metrics["precision"],
-                    "standard_recall": standard_metrics["recall"],
-                    "precision_focused_precision": precision_metrics["precision"],
-                    "precision_focused_recall": precision_metrics["recall"],
+                    "standard_precision": float(standard_metrics["precision"]),
+                    "standard_recall": float(standard_metrics["recall"]),
+                    "precision_focused_precision": float(precision_metrics["precision"]),
+                    "precision_focused_recall": float(precision_metrics["recall"]),
                 }
             )
 
@@ -1037,7 +1080,7 @@ def run_feature_selection(experiment_name: str = "feature_selection_optimization
 
 def align_columns(
     logger: ExperimentLogger, train_df: pd.DataFrame, test_df: pd.DataFrame, eval_df: pd.DataFrame
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Aligns the columns of the evaluation set with the training set by dropping
     columns that are missing in either DataFrame.
@@ -1058,13 +1101,13 @@ def align_columns(
 
     # Drop columns that are missing in either DataFrame
     # Preserve the original column order from the training set
-    ordered_columns = [col for col in common_columns]
+    ordered_columns = list(common_columns)
     logger.info(f"Aligned columns: {ordered_columns}")
-    train_df = train_df[ordered_columns]
-    test_df = test_df[ordered_columns]
-    eval_df = eval_df[ordered_columns]
+    train_aligned = pd.DataFrame(train_df[ordered_columns])
+    test_aligned = pd.DataFrame(test_df[ordered_columns])
+    eval_aligned = pd.DataFrame(eval_df[ordered_columns])
 
-    return train_df, test_df, eval_df
+    return train_aligned, test_aligned, eval_aligned
 
 
 def verify_interactions(train_df, test_df, eval_df, feature_names):

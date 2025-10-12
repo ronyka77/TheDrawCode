@@ -11,8 +11,17 @@ from src.utils.logger import ExperimentLogger
 
 
 def compute_precision_focused_weights_optimized(
-    p_xgb, p_tabnet, p_lgb, p_extra, p_mlp, p_pytorch, p_svm,
-    y_true, target_precision, required_recalls, logger=None
+    p_xgb,
+    p_tabnet,
+    p_lgb,
+    p_extra,
+    p_mlp,
+    p_pytorch,
+    p_svm,
+    y_true,
+    target_precision,
+    required_recalls,
+    logger=None,
 ):
     """
     Compute weights with strong focus on precision, including MLP, PyTorch and SVM models.
@@ -22,12 +31,14 @@ def compute_precision_focused_weights_optimized(
         logger = ExperimentLogger(experiment_name="ensemble_weights_0412")
 
     logger.info("Computing precision-focused weights for 7 models...")
-    
+
     # Ensure required_recalls has 7 elements
     num_models = 7
     if len(required_recalls) != num_models:
-        raise ValueError(f"Expected required_recalls list to have {num_models} elements, got {len(required_recalls)}")
-        
+        raise ValueError(
+            f"Expected required_recalls list to have {num_models} elements, got {len(required_recalls)}"
+        )
+
     xgb_recall = required_recalls[0]
     lgb_recall = required_recalls[1]
     tabnet_recall = required_recalls[2]
@@ -76,15 +87,29 @@ def compute_precision_focused_weights_optimized(
     svm_weight = svm_metrics["precision"] ** 2
 
     # Ensure minimum contribution from each model (e.g., 5% -> 1/num_models? Let's keep 5% for now)
-    min_contrib = 0.05 
-    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight + mlp_weight + pytorch_weight + svm_weight
-    if total_weight <= 0: # Avoid division by zero if all precisions are 0
+    min_contrib = 0.05
+    total_weight = (
+        xgb_weight
+        + tabnet_weight
+        + lgb_weight
+        + extra_weight
+        + mlp_weight
+        + pytorch_weight
+        + svm_weight
+    )
+    if total_weight <= 0:  # Avoid division by zero if all precisions are 0
         logger.warning("All base model precisions are zero. Assigning equal weights.")
-        weights = {m: 1.0/num_models for m in ["xgb", "tabnet", "lgb", "extra", "mlp", "pytorch", "svm"]}
+        weights = {
+            m: 1.0 / num_models for m in ["xgb", "tabnet", "lgb", "extra", "mlp", "pytorch", "svm"]
+        }
         thresholds = {
-            "xgb": xgb_threshold, "tabnet": tabnet_threshold, "lgb": lgb_threshold,
-            "extra": extra_threshold, "mlp": mlp_threshold, "pytorch": pytorch_threshold,
-            "svm": svm_threshold
+            "xgb": xgb_threshold,
+            "tabnet": tabnet_threshold,
+            "lgb": lgb_threshold,
+            "extra": extra_threshold,
+            "mlp": mlp_threshold,
+            "pytorch": pytorch_threshold,
+            "svm": svm_threshold,
         }
         return weights, thresholds
 
@@ -97,7 +122,15 @@ def compute_precision_focused_weights_optimized(
     svm_weight = max(min_contrib, svm_weight / total_weight)
 
     # Renormalize
-    total_weight = xgb_weight + tabnet_weight + lgb_weight + extra_weight + mlp_weight + pytorch_weight + svm_weight
+    total_weight = (
+        xgb_weight
+        + tabnet_weight
+        + lgb_weight
+        + extra_weight
+        + mlp_weight
+        + pytorch_weight
+        + svm_weight
+    )
     weights = {
         "xgb": xgb_weight / total_weight,
         "tabnet": tabnet_weight / total_weight,

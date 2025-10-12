@@ -73,7 +73,7 @@ base_params = {
     "probability": True,  # MUST be True for predict_proba
     "class_weight": "balanced",  # Good for imbalanced classes
     "random_state": SEED,
-    'kernel': 'rbf', # Can be fixed here or tuned
+    "kernel": "rbf",  # Can be fixed here or tuned
     "verbose": False,  # Set to True for more SVC logs
 }
 
@@ -101,8 +101,13 @@ def load_hyperparameter_space_svm():
         },
         "cache_size": {"type": "int", "low": 3000, "high": 10000, "step": 50},
         # 'kernel': {'type': 'categorical', 'choices': ['rbf', 'poly', 'sigmoid']},
-        'degree': {'type': 'int', 'low': 3, 'high': 6}, # Only if kernel='poly'
-        'coef0': {'type': 'float', 'low': 0.4, 'high': 1.0, 'log': True}, # Only if kernel='poly' or 'sigmoid'
+        "degree": {"type": "int", "low": 3, "high": 6},  # Only if kernel='poly'
+        "coef0": {
+            "type": "float",
+            "low": 0.4,
+            "high": 1.0,
+            "log": True,
+        },  # Only if kernel='poly' or 'sigmoid'
         "tol": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True},
     }
     return hyperparameter_space
@@ -147,7 +152,9 @@ def train_model_svm(X_train_scaled, y_train, X_eval_scaled, y_eval, model_params
 
 
 # --- Optuna Objective ---
-def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space, best_score):
+def objective(
+    trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space, best_score
+):
     """
     Objective function for Optuna hyperparameter optimization.
     Uses SCALED data.
@@ -169,18 +176,14 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
                     param_name, param_config["low"], param_config["high"]
                 )
             elif param_config["type"] == "categorical":
-                params[param_name] = trial.suggest_categorical(
-                    param_name, param_config["choices"]
-                )
+                params[param_name] = trial.suggest_categorical(param_name, param_config["choices"])
             # --- Preprocessing --- (Scale the data)
         # X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(
         #     X_train, X_test, X_eval
         # )
         # Train model and get metrics
         # Pass only the suggested params, train_model_svm combines with base_params
-        model, metrics = train_model_svm(
-            X_train_scaled, y_train, X_eval_scaled, y_eval, params
-        )
+        model, metrics = train_model_svm(X_train_scaled, y_train, X_eval_scaled, y_eval, params)
 
         recall = metrics.get("recall", 0.0)
         precision = metrics.get("precision", 0.0)
@@ -284,22 +287,22 @@ def optimize_hyperparameters_svm(
             sampler=sampler,
         )
         logger.info(
-            f"Starting Optuna batch {batch+1}/{num_batches} (Sampler: {type(sampler).__name__})"
+            f"Starting Optuna batch {batch + 1}/{num_batches} (Sampler: {type(sampler).__name__})"
         )
 
         study.optimize(
-            objective_func, 
-            n_trials=batch_size, 
-            show_progress_bar=True, 
+            objective_func,
+            n_trials=batch_size,
+            show_progress_bar=True,
             callbacks=[callback],
-            n_jobs=8  # Use all available CPU cores for parallel trials
+            n_jobs=8,  # Use all available CPU cores for parallel trials
         )
 
         # Update overall best score from the study instance after batch
         if study.best_trial and study.best_value > best_score:
             best_score = study.best_value
             best_params_from_hpo = study.best_params
-            logger.info(f"Batch {batch+1} completed. New overall best score: {best_score:.4f}")
+            logger.info(f"Batch {batch + 1} completed. New overall best score: {best_score:.4f}")
 
     logger.info("Optuna optimization finished for SVM.")
     if best_params_from_hpo:
@@ -328,16 +331,14 @@ def log_top_trials_svm(trials_list, title="Top SVM Trials"):
         score_str = f"{score:.4f}" if score is not None else "N/A"
         prec_str = f"{precision:.4f}" if precision is not None else "N/A"
         rec_str = f"{recall:.4f}" if recall is not None else "N/A"
-        logger.info(f"| {i+1} | {number} | {score_str} | {prec_str} | {rec_str} | {params} |")
+        logger.info(f"| {i + 1} | {number} | {score_str} | {prec_str} | {rec_str} | {params} |")
 
 
 # --- MLflow Logging ---
 def log_to_mlflow_svm(model, metrics, params, fitted_scaler, input_example):
     """Logs parameters, metrics, scaler, and model to MLflow."""
     logger.info("Logging results to MLflow for SVM...")
-    with mlflow.start_run(
-        run_name=f"svm_fixed_params_{datetime.now().strftime('%Y%m%d_%H%M')}"
-    ):
+    with mlflow.start_run(run_name=f"svm_fixed_params_{datetime.now().strftime('%Y%m%d_%H%M')}"):
         run_id = mlflow.active_run().info.run_id
 
         # Log combined final parameters used for the model
@@ -355,7 +356,7 @@ def log_to_mlflow_svm(model, metrics, params, fitted_scaler, input_example):
                 pickle.dump(fitted_scaler, f)
             mlflow.log_artifact(scaler_path)
             logger.info(f"Scaler artifact logged as {scaler_path}")
-            os.remove(scaler_path) # Clean up local scaler file
+            os.remove(scaler_path)  # Clean up local scaler file
         except Exception as e:
             logger.error(f"Failed to save or log scaler artifact: {e}")
 
@@ -366,7 +367,7 @@ def log_to_mlflow_svm(model, metrics, params, fitted_scaler, input_example):
             try:
                 # Ensure dtypes are float for numeric cols
                 num_cols = input_example.select_dtypes(include=np.number).columns
-                input_example[num_cols] = input_example[num_cols].astype('float64')
+                input_example[num_cols] = input_example[num_cols].astype("float64")
                 logger.info("Created input_example from DataFrame for signature.")
 
                 model_prediction = model.predict(input_example)
@@ -375,7 +376,9 @@ def log_to_mlflow_svm(model, metrics, params, fitted_scaler, input_example):
 
             except Exception as sig_err:
                 logger.error(f"Error inferring model signature: {sig_err}")
-                logger.error(f"Input example details:\n{input_example.head()}\n{input_example.dtypes}")
+                logger.error(
+                    f"Input example details:\n{input_example.head()}\n{input_example.dtypes}"
+                )
 
         # Define registered model name
         model_name_suffix = datetime.now().strftime("%Y%m%d_%H%M")
@@ -392,6 +395,7 @@ def log_to_mlflow_svm(model, metrics, params, fitted_scaler, input_example):
         logger.info(f"MLflow Run ID: {run_id}")
         logger.info(f"Scikit-learn SVM model logged successfully as {registered_model_name}.")
         mlflow.end_run()
+
 
 # --- Main Hypertuning Orchestration ---
 def hypertune_svm(X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_name: str):
@@ -422,6 +426,7 @@ def hypertune_svm(X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_n
         logger.error(f"Error in hypertune_svm: {str(e)}")
         return None, None
 
+
 # --- (Optional) Precision Target Training ---
 def train_with_precision_target_svm(
     X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_name: str
@@ -441,9 +446,9 @@ def train_with_precision_target_svm(
 
         # Define fixed parameters (Update these based on prior tuning or best guess)
         fixed_params = {
-            'C': 10.0,
-            'gamma': 0.01,
-            'tol': 0.001,
+            "C": 10.0,
+            "gamma": 0.01,
+            "tol": 0.001,
             # Add other relevant fixed params like kernel if not 'rbf'
         }
         model_params = base_params.copy()
@@ -454,9 +459,13 @@ def train_with_precision_target_svm(
         logger.info("Combining scaled training and test sets...")
         if isinstance(X_train_scaled, pd.DataFrame) and isinstance(X_test_scaled, pd.DataFrame):
             X_train_combined_scaled = pd.concat([X_train_scaled, X_test_scaled], ignore_index=True)
-        else: # Assume numpy arrays
+        else:  # Assume numpy arrays
             X_train_combined_scaled = np.vstack((X_train_scaled, X_test_scaled))
-        y_train_combined = pd.concat([y_train, y_test], ignore_index=True) if isinstance(y_train, pd.Series) else np.concatenate((y_train, y_test))
+        y_train_combined = (
+            pd.concat([y_train, y_test], ignore_index=True)
+            if isinstance(y_train, pd.Series)
+            else np.concatenate((y_train, y_test))
+        )
         logger.info(f"Combined scaled training set shape: {X_train_combined_scaled.shape}")
 
         # --- Create and Train Model ---
@@ -485,9 +494,7 @@ def train_with_precision_target_svm(
 
             # --- Log to MLflow ---
             input_example_data = X_eval_scaled[:5]
-            log_to_mlflow_svm(
-                model, metrics, fixed_params, scaler, input_example_data
-            )
+            log_to_mlflow_svm(model, metrics, fixed_params, scaler, input_example_data)
 
             return model, metrics
 
@@ -517,26 +524,26 @@ if __name__ == "__main__":
             features = import_selected_features_ensemble(model_type="all")
             if not features:
                 logger.error("Failed to load any features. Exiting.")
-                sys.exit(1) # Or handle differently
+                sys.exit(1)  # Or handle differently
 
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
         try:
-            with open('src/models/scalers/scaler_svm.pkl', 'rb') as f:
+            with open("src/models/scalers/scaler_svm.pkl", "rb") as f:
                 scaler = pickle.load(f)
         except Exception as e:
             logger.error(f"Error loading SVM scaler: {str(e)}")
             scaler = StandardScaler()
             logger.info("Created new SVM scaler")
             scaler.fit(X_train)
-            with open('src/models/scalers/scaler_svm.pkl', 'wb') as f:
+            with open("src/models/scalers/scaler_svm.pkl", "wb") as f:
                 pickle.dump(scaler, f)
-        
+
         X_train_scaled = scaler.transform(X_train)
         X_test_scaled = scaler.transform(X_test)
         X_eval_scaled = scaler.transform(X_eval)
-        
+
         # Log data shapes
         logger.info(f"Training data shape after selection: {X_train.shape}")
         logger.info(f"Testing data shape after selection: {X_test.shape}")
@@ -547,7 +554,7 @@ if __name__ == "__main__":
 
         # --- Choose Mode: hypertune or fixed params ---
         # mode = "hypertune"
-        mode = "hypertune" # Or "hypertune"
+        mode = "hypertune"  # Or "hypertune"
 
         best_model_params = None
         final_metrics = None
@@ -565,7 +572,7 @@ if __name__ == "__main__":
                 X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_name
             )
             if final_model:
-                best_model_params = final_model.get_params() # Get params from trained model
+                best_model_params = final_model.get_params()  # Get params from trained model
         else:
             logger.error(f"Invalid mode selected: {mode}")
 

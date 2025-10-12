@@ -16,6 +16,7 @@ except KeyError as e:
 
 load_dotenv()
 
+
 class PostgreSQLFeatures:
     """
     A class to interact with PostgreSQL and retrieve fixtures data.
@@ -28,15 +29,15 @@ class PostgreSQLFeatures:
         self.db_name = os.getenv("POSTGRES_DB")
         self.db_user = os.getenv("POSTGRES_USER")
         self.db_password = os.getenv("POSTGRES_PASSWORD")
-        self.db_port = os.getenv("POSTGRES_PORT", "5432") # Default port for PostgreSQL                       
+        self.db_port = os.getenv("POSTGRES_PORT", "5432")  # Default port for PostgreSQL
 
         self.conn = None
         self._connect_db()
 
         # Placeholder for other collections/tables until schemas are provided
-        self.predictions_table_name = "api_football.predictions" 
-        self.venues_collection = "api_football.venues" 
-        self.team_stats_collection = "api_football.team_stats" 
+        self.predictions_table_name = "api_football.predictions"
+        self.venues_collection = "api_football.venues"
+        self.team_stats_collection = "api_football.team_stats"
 
     def _connect_db(self):
         """Establishes a connection to the PostgreSQL database."""
@@ -47,7 +48,7 @@ class PostgreSQLFeatures:
                     database=self.db_name,
                     user=self.db_user,
                     password=self.db_password,
-                    port=self.db_port
+                    port=self.db_port,
                 )
                 if self.logger:
                     self.logger.info("Successfully connected to PostgreSQL database.")
@@ -105,29 +106,35 @@ class PostgreSQLFeatures:
         df = pd.DataFrame()
         try:
             df = pd.read_sql_query(sql_query, self.conn)
-            
+
             # Add match_outcome based on goals
-            df['match_outcome'] = df.apply(lambda x: 
-                '1' if x['home_goals'] > x['away_goals']
-                else '3' if x['home_goals'] < x['away_goals'] 
-                else '2', axis=1)
-            
+            df["match_outcome"] = df.apply(
+                lambda x: "1"
+                if x["home_goals"] > x["away_goals"]
+                else "3"
+                if x["home_goals"] < x["away_goals"]
+                else "2",
+                axis=1,
+            )
+
             # Rename passes_accurate columns to passes_accuracy
-            df = df.rename(columns={
-                'home_total_passes': 'home_passes',
-                'away_total_passes': 'away_passes',
-                'home_goalkeeper_saves': 'home_saves',
-                'away_goalkeeper_saves': 'away_saves',
-                'home_corner_kicks': 'home_corners',
-                'away_corner_kicks': 'away_corners'
-            })
-            
+            df = df.rename(
+                columns={
+                    "home_total_passes": "home_passes",
+                    "away_total_passes": "away_passes",
+                    "home_goalkeeper_saves": "home_saves",
+                    "away_goalkeeper_saves": "away_saves",
+                    "home_corner_kicks": "home_corners",
+                    "away_corner_kicks": "away_corners",
+                }
+            )
+
             print(f"Found {len(df)} fixtures matching criteria from PostgreSQL.")
             if self.logger:
                 self.logger.info(f"Found {len(df)} fixtures matching criteria from PostgreSQL.")
-            
+
             return df
-            
+
         except psycopg2.Error as e:
             print(f"Error executing query in get_fixtures_with_home_stats: {e}")
             if self.logger:
@@ -217,23 +224,42 @@ class PostgreSQLFeatures:
             if self.logger:
                 self.logger.info("Data Collected, Start Cleaning and Feature Engineering...")
             # Drop irrelevant columns
-            data = data.drop(columns=["prediction_outcome", "period_first", "period_second", "timestamp", "status_short", "status_elapsed", "status_extra", "status_elapsed", "league_logo", "league_flag", 
-            "home_team_logo", "away_team_logo", "league_standings", "timezone", "model_prediction", "venue_city"], errors="ignore")
+            data = data.drop(
+                columns=[
+                    "prediction_outcome",
+                    "period_first",
+                    "period_second",
+                    "timestamp",
+                    "status_short",
+                    "status_elapsed",
+                    "status_extra",
+                    "status_elapsed",
+                    "league_logo",
+                    "league_flag",
+                    "home_team_logo",
+                    "away_team_logo",
+                    "league_standings",
+                    "timezone",
+                    "model_prediction",
+                    "venue_city",
+                ],
+                errors="ignore",
+            )
 
             # Type conversions and extracting date components
             data["home_advantage"] = 1
-            data["Date"] = pd.to_datetime(data["date"], errors="coerce") 
+            data["Date"] = pd.to_datetime(data["date"], errors="coerce")
             # Drop the 'date' column since we have 'Date'
-            data = data.drop(columns=['date'], errors='ignore')
+            data = data.drop(columns=["date"], errors="ignore")
             data["year"] = data["Date"].dt.year
             data["month"] = data["Date"].dt.month
             data["day_of_month"] = data["Date"].dt.day
             data["day_of_week"] = data["Date"].dt.dayofweek
             data["week_of_year"] = data["Date"].dt.isocalendar().week
-            
+
             # Ensure match_outcome is numeric before use
-            if 'match_outcome' in data.columns:
-                data["match_outcome"] = pd.to_numeric(data["match_outcome"], errors='coerce')
+            if "match_outcome" in data.columns:
+                data["match_outcome"] = pd.to_numeric(data["match_outcome"], errors="coerce")
 
             # Label encoding for categorical variables
             le = LabelEncoder()
@@ -248,22 +274,22 @@ class PostgreSQLFeatures:
             data = data.sort_values(by=["fixture_id"])
 
             shot_on_goal_weight = 0.20
-            shot_inside_box_weight = 0.10 # Value for shots from dangerous areas
+            shot_inside_box_weight = 0.10  # Value for shots from dangerous areas
             corner_kick_weight = 0.03
 
-            data['home_xG'] = (
-                data.get('home_shots_on_goal', 0) * shot_on_goal_weight +
-                data.get('home_shots_insidebox', 0) * shot_inside_box_weight +
-                data.get('home_corner_kicks', 0) * corner_kick_weight
+            data["home_xG"] = (
+                data.get("home_shots_on_goal", 0) * shot_on_goal_weight
+                + data.get("home_shots_insidebox", 0) * shot_inside_box_weight
+                + data.get("home_corner_kicks", 0) * corner_kick_weight
             )
-            data['away_xG'] = (
-                data.get('away_shots_on_goal', 0) * shot_on_goal_weight +
-                data.get('away_shots_insidebox', 0) * shot_inside_box_weight +
-                data.get('away_corner_kicks', 0) * corner_kick_weight
+            data["away_xG"] = (
+                data.get("away_shots_on_goal", 0) * shot_on_goal_weight
+                + data.get("away_shots_insidebox", 0) * shot_inside_box_weight
+                + data.get("away_corner_kicks", 0) * corner_kick_weight
             )
             # Ensure xG is not negative (though unlikely with positive weights and counts)
-            data['home_xG'] = data['home_xG'].clip(lower=0)
-            data['away_xG'] = data['away_xG'].clip(lower=0)
+            data["home_xG"] = data["home_xG"].clip(lower=0)
+            data["away_xG"] = data["away_xG"].clip(lower=0)
 
             print("Start possession and shooting...")
             if self.logger:
@@ -304,20 +330,28 @@ class PostgreSQLFeatures:
             data["home_saves_accuracy"] = data["home_saves"] / data["away_shots_on_goal"]
             data["away_saves_accuracy"] = data["away_saves"] / data["home_shots_on_goal"]
             # Fill NaN values with 0 for defensive stats before calculating activity
-            defensive_cols = ['home_blocked_shots', 'home_yellow_cards', 'home_red_cards', 'home_saves',
-                            'away_blocked_shots', 'away_yellow_cards', 'away_red_cards', 'away_saves']
+            defensive_cols = [
+                "home_blocked_shots",
+                "home_yellow_cards",
+                "home_red_cards",
+                "home_saves",
+                "away_blocked_shots",
+                "away_yellow_cards",
+                "away_red_cards",
+                "away_saves",
+            ]
             data[defensive_cols] = data[defensive_cols].fillna(0)
-            
+
             data["home_defensive_activity"] = (
                 data["home_blocked_shots"].astype(float)
-                + data["home_yellow_cards"].astype(float) 
+                + data["home_yellow_cards"].astype(float)
                 + data["home_red_cards"].astype(float)
                 + data["home_saves"].astype(float)
             )
             data["away_defensive_activity"] = (
                 data["away_blocked_shots"].astype(float)
                 + data["away_yellow_cards"].astype(float)
-                + data["away_red_cards"].astype(float) 
+                + data["away_red_cards"].astype(float)
                 + data["away_saves"].astype(float)
             )
             # Set-piece threat and foul impact
@@ -369,7 +403,7 @@ class PostgreSQLFeatures:
 
     def get_future_matches(self) -> pd.DataFrame:
         """
-        Retrieves all future fixtures (next 14 days, no scores) from the PostgreSQL 
+        Retrieves all future fixtures (next 14 days, no scores) from the PostgreSQL
         api_football.fixtures table and returns them as a pandas DataFrame.
         Args:
         Used to potentially merge some common columns.
@@ -381,15 +415,23 @@ class PostgreSQLFeatures:
         two_weeks_date = today + timedelta(days=14)
         two_weeks_str = two_weeks_date.strftime("%Y-%m-%d %H:%M:%S")
         today_str = today.strftime("%Y-%m-%d %H:%M:%S")
-        
-        
+
         query_columns = [
-            "fixture_id", "date", "league_id", "league_name", "league_season", 
-            "referee", "venue_id", "venue_name", 
-            "home_team_id", "home_team_name", "away_team_id", "away_team_name",
-            "league_round" 
+            "fixture_id",
+            "date",
+            "league_id",
+            "league_name",
+            "league_season",
+            "referee",
+            "venue_id",
+            "venue_name",
+            "home_team_id",
+            "home_team_name",
+            "away_team_id",
+            "away_team_name",
+            "league_round",
         ]
-        select_cols_str = ", ".join([f'\"{col}\"' if col == "date" else col for col in query_columns])
+        select_cols_str = ", ".join([f'"{col}"' if col == "date" else col for col in query_columns])
 
         sql_query = f"""
         SELECT {select_cols_str}
@@ -400,27 +442,39 @@ class PostgreSQLFeatures:
         df_future = pd.DataFrame()
         try:
             df_future = pd.read_sql_query(sql_query, self.conn)
-            print(f"Found {len(df_future)} future fixtures from PostgreSQL (next 14 days, no scores).")
+            print(
+                f"Found {len(df_future)} future fixtures from PostgreSQL (next 14 days, no scores)."
+            )
             if self.logger:
                 self.logger.info(f"Found {len(df_future)} future fixtures from PostgreSQL.")
 
             if df_future.empty:
-                return pd.DataFrame() # Return empty if no future matches found
+                return pd.DataFrame()  # Return empty if no future matches found
 
-            df_future = df_future.rename(columns={"date": "Date"}) 
+            df_future = df_future.rename(columns={"date": "Date"})
 
             # Ensure essential columns exist, fill with None or a sensible default if not from query
             expected_cols = [
-                "fixture_id", "Date", "league_id", "league_season", "league_name", "referee",
-                "venue_name", "venue_id", "home_team_id", "home_team_name", 
-                "away_team_id", "away_team_name", "league_round"
+                "fixture_id",
+                "Date",
+                "league_id",
+                "league_season",
+                "league_name",
+                "referee",
+                "venue_name",
+                "venue_id",
+                "home_team_id",
+                "home_team_name",
+                "away_team_id",
+                "away_team_name",
+                "league_round",
             ]
             for col in expected_cols:
                 if col not in df_future.columns:
-                    df_future[col] = None # or np.nan or appropriate default
-            
+                    df_future[col] = None  # or np.nan or appropriate default
+
             # Ensure correct dtype for fixture_id if it was read as float from DB with NaNs (not typical for PK)
-            if 'fixture_id' in df_future.columns:
+            if "fixture_id" in df_future.columns:
                 df_future["fixture_id"] = df_future["fixture_id"].astype(int)
 
         except (Exception, psycopg2.Error) as e:
@@ -428,7 +482,7 @@ class PostgreSQLFeatures:
             if self.logger:
                 self.logger.error(f"Error retrieving future matches: {e}")
             # self._close_db() # Keep connection open
-            return pd.DataFrame() # Return empty on error
+            return pd.DataFrame()  # Return empty on error
 
         export_path = "data/Create_data/data_files/base/api_future_matches.xlsx"
         try:
@@ -460,8 +514,10 @@ class PostgreSQLFeatures:
             df = pd.read_sql_query(sql_query, self.conn)
             print(f"Successfully retrieved {len(df)} venue records from api_football.venues.")
             if self.logger:
-                self.logger.info(f"Successfully retrieved {len(df)} venue records from api_football.venues.")
-            
+                self.logger.info(
+                    f"Successfully retrieved {len(df)} venue records from api_football.venues."
+                )
+
             for col in df.columns:
                 if df[col].isnull().any():
                     # print(f"Missing values found in column: {col}") # Optional: for debugging
@@ -514,7 +570,9 @@ class PostgreSQLFeatures:
             df = pd.read_sql_query(sql_query, self.conn)
             print(f"Successfully retrieved {len(df)} records from api_football.team_stats.")
             if self.logger:
-                self.logger.info(f"Successfully retrieved {len(df)} records from api_football.team_stats.")
+                self.logger.info(
+                    f"Successfully retrieved {len(df)} records from api_football.team_stats."
+                )
         except (Exception, psycopg2.Error) as e:
             error_message = f"Error retrieving data from api_football.team_stats: {e}"
             print(error_message)
@@ -527,12 +585,12 @@ class PostgreSQLFeatures:
         """
         Retrieves and exports events data from the PostgreSQL api_football.events table in batches.
         Exports each batch to Excel and returns the complete DataFrame.
-        
+
         Returns:
             pd.DataFrame: Complete DataFrame containing all events data.
         """
         self._connect_db()
-        
+
         # Base SQL query
         sql_query = """
         SELECT 
@@ -542,45 +600,48 @@ class PostgreSQLFeatures:
         FROM api_football.events e
         left join api_football.fixtures f on e.fixture_id = f.fixture_id;
         """
-        
+
         all_events = pd.DataFrame()
-        
+
         try:
             # Fetch batch
             df_batch = pd.read_sql_query(sql_query, self.conn)
-            
-                
+
             # Append to complete dataset
             all_events = pd.concat([all_events, df_batch], ignore_index=True)
             # Add time_extra to time_elapsed where time_extra is not null
-            all_events['time_elapsed'] = all_events.apply(
-                lambda x: x['time_elapsed'] + x['time_extra'] if pd.notnull(x['time_extra']) else x['time_elapsed'], 
-                axis=1
+            all_events["time_elapsed"] = all_events.apply(
+                lambda x: x["time_elapsed"] + x["time_extra"]
+                if pd.notnull(x["time_extra"])
+                else x["time_elapsed"],
+                axis=1,
             )
             # Drop time_extra column after adding it to time_elapsed
-            all_events = all_events.drop(columns=['time_extra'])
-            
+            all_events = all_events.drop(columns=["time_extra"])
+
             print(f"Successfully retrieved and exported {len(all_events)} total events records")
-            
+
             # Export complete dataset
             complete_path = "data/Create_data/data_files/base/api_events_complete.xlsx"
             export_to_xlsx_fast(all_events, complete_path)
             print(f"Exported complete events dataset to {complete_path}")
-            
+
         except (Exception, psycopg2.Error) as e:
             error_message = f"Error exporting events data: {e}"
             print(error_message)
             if self.logger:
                 self.logger.error(error_message)
-                
+
         return all_events
+
 
 def export_to_xlsx_fast(df, path):
     # Replace NaN/None with empty string
-    df = df.fillna('')
+    df = df.fillna("")
     wb = Workbook()
     wb.new_sheet("Sheet1", data=[df.columns.tolist()] + df.values.tolist())
     wb.save(path)
+
 
 def main():
     postgresql_features = PostgreSQLFeatures()
@@ -613,6 +674,7 @@ def main():
     export_path = "data/Create_data/data_files/base/api_team_stats.xlsx"
     export_to_xlsx_fast(team_stats, export_path)
     print(f"Team stats shape: {team_stats.shape}")
+
 
 if __name__ == "__main__":
     main()

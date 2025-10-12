@@ -35,7 +35,7 @@ def prepare_data(X: pd.DataFrame, selected_features: list[str]) -> pd.DataFrame:
     X_selected = X[selected_features].copy()
     # Handle infinite values
     X = X.replace([np.inf, -np.inf], np.nan)
-    
+
     # Fill NaN values
     X = X.fillna(0.0)
     # Fill missing values with appropriate strategies
@@ -51,8 +51,9 @@ def prepare_data(X: pd.DataFrame, selected_features: list[str]) -> pd.DataFrame:
             raise ValueError(f"Error in filling missing values: {str(e)} for column: {col}") from e
     # Convert all columns to float64 to ensure consistent data types
     X_selected = X_selected.astype("float64")
-    
+
     return X_selected
+
 
 def apply_adasyn_resampling(
     X_train: pd.DataFrame,
@@ -132,6 +133,7 @@ def apply_adasyn_resampling(
     except Exception as e:
         logger.error(f"ADASYN resampling failed: {str(e)}. Using original data.")
         return X_train, y_train
+
 
 def balance_and_clean_dataset(
     X_train: pd.DataFrame,
@@ -250,6 +252,7 @@ def balance_and_clean_dataset(
     except Exception as e:
         logger.error(f"Dataset balancing failed: {str(e)}. Using cleaned data without balancing.")
         return X_clean, y_clean
+
 
 def select_features_by_importance(
     X: pd.DataFrame,
