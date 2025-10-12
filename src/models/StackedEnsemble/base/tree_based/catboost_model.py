@@ -8,7 +8,6 @@ threshold tuning, and MLflow integration for experiment tracking.
 The implementation focuses on high precision while maintaining a minimum recall threshold.
 """
 
-import gc
 import os
 import random
 import time
@@ -19,7 +18,6 @@ import mlflow
 import numpy as np
 import optuna
 import pandas as pd
-import torch
 from catboost import Pool
 from sklearn.feature_selection import RFECV
 from sklearn.model_selection import StratifiedKFold
@@ -81,11 +79,29 @@ def load_hyperparameter_space():
         "learning_rate": {"type": "float", "low": 0.060, "high": 0.25, "log": False, "step": 0.005},
         "depth": {"type": "int", "low": 5, "high": 12, "log": False, "step": 1},
         "min_data_in_leaf": {"type": "int", "low": 50, "high": 500, "log": False, "step": 10},
-        "colsample_bylevel": {"type": "float", "low": 0.50, "high": 0.75, "log": False, "step": 0.01},
+        "colsample_bylevel": {
+            "type": "float",
+            "low": 0.50,
+            "high": 0.75,
+            "log": False,
+            "step": 0.01,
+        },
         "subsample": {"type": "float", "low": 0.40, "high": 0.75, "log": False, "step": 0.005},
-        "bagging_temperature": {"type": "float", "low": 0.5, "high": 10.0, "log": False, "step": 0.05},
+        "bagging_temperature": {
+            "type": "float",
+            "low": 0.5,
+            "high": 10.0,
+            "log": False,
+            "step": 0.05,
+        },
         "reg_lambda": {"type": "float", "low": 2.0, "high": 20.0, "log": False, "step": 0.1},
-        "leaf_estimation_iterations": {"type": "int", "low": 2, "high": 14, "log": False, "step": 1},
+        "leaf_estimation_iterations": {
+            "type": "int",
+            "low": 2,
+            "high": 14,
+            "log": False,
+            "step": 1,
+        },
         "early_stopping_rounds": {"type": "int", "low": 50, "high": 1500, "log": False, "step": 10},
         "scale_pos_weight": {"type": "float", "low": 1.8, "high": 3.5, "log": False, "step": 0.01},
         "max_bin": {"type": "int", "low": 32, "high": 256, "log": False, "step": 16},
@@ -140,7 +156,7 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         # Create Pool objects for CatBoost
         train_pool = Pool(X_combined, y_combined)
         eval_pool = Pool(X_eval, y_eval)
-        
+
         # Extract early stopping rounds
         early_stopping_rounds = model_params.pop("early_stopping_rounds", 100)
 
@@ -236,7 +252,7 @@ def optimize_hyperparameters(
 
             if score > 0.36 and score > best_score:
                 log_to_mlflow(model, metrics, params, experiment_name)
-            
+
             return score
 
         except Exception as e:
@@ -310,7 +326,9 @@ def optimize_hyperparameters(
         logger.info(
             f"Starting batch {batch + 1}/{num_batches} with new sampler (seed={random_seed})"
         )
-        study.optimize(objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback], n_jobs=1)
+        study.optimize(
+            objective, n_trials=batch_size, show_progress_bar=True, callbacks=[callback], n_jobs=1
+        )
 
         # Merge current batch's top trials with global_top_trials
         for trial_record in top_trials:
@@ -364,9 +382,7 @@ def hypertune_catboost():
 
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
-        model, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, best_params
-        )
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, best_params)
 
         return best_params, metrics
 
@@ -482,7 +498,7 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
-        compute_permutation_importance(model, X_eval, y_eval, metrics['threshold'])
+        compute_permutation_importance(model, X_eval, y_eval, metrics["threshold"])
 
         return model, metrics
 
@@ -490,9 +506,10 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
 
+
 def compute_permutation_importance(
     model,
-    X_val: pd.DataFrame, 
+    X_val: pd.DataFrame,
     y_val: np.ndarray,
     threshold: float = 0.3,
     n_repeats: int = 50,
@@ -525,13 +542,15 @@ def compute_permutation_importance(
         drops = []
         for i in range(n_repeats):
             feat_idx = feature_names.index(feat) + 1
-            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i+1}")
+            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i + 1}")
             X_shuffled = X_val.copy()
             X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
             probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
             preds_shuffled = (probs_shuffled >= threshold).astype(int)
             # Calculate precision directly instead of using metric parameter
-            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (
+                np.sum(preds_shuffled == 1)
+            )
             drop = baseline - precision
             drops.append(drop)
         mean_drop = np.mean(drops)
@@ -544,7 +563,10 @@ def compute_permutation_importance(
     logger.info(df_importance.head(number_of_features).to_string(index=False))
     return df_importance
 
-def select_features_rfecv(X, y, logger, min_features=150, step=1, scoring='roc_auc', random_state=19):
+
+def select_features_rfecv(
+    X, y, logger, min_features=150, step=1, scoring="roc_auc", random_state=19
+):
     """
     Perform RFECV-based feature selection using CatBoost.
     Args:
@@ -558,7 +580,9 @@ def select_features_rfecv(X, y, logger, min_features=150, step=1, scoring='roc_a
     Returns:
         tuple: (List[str], pd.DataFrame)
     """
-    logger.info(f"Starting RFECV feature selection with min_features={min_features}, step={step}, scoring={scoring}")
+    logger.info(
+        f"Starting RFECV feature selection with min_features={min_features}, step={step}, scoring={scoring}"
+    )
     params = base_params.copy()
     params.update(
         {
@@ -591,39 +615,42 @@ def select_features_rfecv(X, y, logger, min_features=150, step=1, scoring='roc_a
         scoring=scoring,
         min_features_to_select=min_features,
         n_jobs=-1,
-        verbose=2
+        verbose=2,
     )
     selector.fit(X, y)
     selected_features = X.columns[selector.support_].tolist()
     importances = selector.estimator_.feature_importances_
-    feature_importance_df = pd.DataFrame({
-        'feature': selected_features,
-        'importance': importances
-    }).sort_values('importance', ascending=False)
+    feature_importance_df = pd.DataFrame(
+        {"feature": selected_features, "importance": importances}
+    ).sort_values("importance", ascending=False)
     logger.info(f"RFECV selected {len(selected_features)} features:")
-    for feat, imp in zip(feature_importance_df['feature'], feature_importance_df['importance']):
+    for feat, imp in zip(feature_importance_df["feature"], feature_importance_df["importance"]):
         logger.info(f"  - {feat}: {imp}")
     return selected_features, feature_importance_df
 
-def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+
+def hypertune_with_feature_importance(
+    X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50
+):
     """
     Perform hyperparameter optimization with Optuna while tracking feature importances.
-    
+
     Args:
         X_train (pd.DataFrame): Training features
-        y_train (pd.Series): Training labels 
+        y_train (pd.Series): Training labels
         X_test (pd.DataFrame): Test features
         y_test (pd.Series): Test labels
         n_trials (int): Number of optimization trials
-        
+
     Returns:
         tuple: (best_params, feature_importance_df)
     """
     logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
-    
+
     # Store feature importances across trials
     feature_importances = []
     hyperparameter_space = load_hyperparameter_space()
+
     def objective(trial):
         params = base_params.copy()
         # Add hyperparameters from config with step size if provided
@@ -657,56 +684,54 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
                         param_name, param_config["low"], param_config["high"]
                     )
             elif param_config["type"] == "categorical":
-                params[param_name] = trial.suggest_categorical(
-                    param_name, param_config["choices"]
-                )
+                params[param_name] = trial.suggest_categorical(param_name, param_config["choices"])
 
-        
         # Train model
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
-        
+
         # Store feature importances for this trial
         importance_dict = dict(zip(X_train.columns, model.feature_importances_))
         feature_importances.append(importance_dict)
-        
-        return metrics['precision']
-    
+
+        return metrics["precision"]
+
     # Create and run study
-    study = optuna.create_study(direction='maximize')
+    study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials)
-    
+
     # Calculate average feature importance across all trials
     avg_importances = {}
     for feature in X_train.columns:
         importance_values = [trial_imp[feature] for trial_imp in feature_importances]
         avg_importances[feature] = np.mean(importance_values)
-    
+
     # Create DataFrame and sort by importance
-    importance_df = pd.DataFrame({
-        'feature': list(avg_importances.keys()),
-        'importance': list(avg_importances.values())
-    })
-    importance_df = importance_df.sort_values('importance', ascending=False)
-    
+    importance_df = pd.DataFrame(
+        {"feature": list(avg_importances.keys()), "importance": list(avg_importances.values())}
+    )
+    importance_df = importance_df.sort_values("importance", ascending=False)
+
     # Get top 100 features
     top_100_features = importance_df.head(100)
-    
+
     logger.info("Top 100 features by average importance across trials:")
     for idx, row in top_100_features.iterrows():
         logger.info(f"{row['feature']}: {row['importance']:.4f} id: {idx}")
-    
+
     return study.best_params, importance_df
+
 
 # Calculate class weights based on your data
 def calculate_class_weights(y):
     pos_count = np.sum(y == 1)
     neg_count = np.sum(y == 0)
     total = len(y)
-    
+
     weight_pos = total / pos_count
     weight_neg = total / neg_count
-    
+
     return [weight_neg, weight_pos]
+
 
 def main():
     """
@@ -715,7 +740,7 @@ def main():
     try:
         logger.info("Starting CatBoost model training")
         global X_train, y_train, X_test, y_test, X_eval, y_eval, class_weights
-        
+
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()

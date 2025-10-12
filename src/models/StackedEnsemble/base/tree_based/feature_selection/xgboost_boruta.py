@@ -2,7 +2,6 @@ import os
 import random
 
 import numpy as np
-import pandas as pd
 import xgboost as xgb
 from BorutaShap import BorutaShap
 
@@ -31,7 +30,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 
 try:
     logger.info("Starting XGBoost model training")
-    
+
     # Load data
     dataloader = DataLoader()
     X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
@@ -53,39 +52,39 @@ try:
     # Define your XGBoost model
     params = {
         "alpha": 55.8,
-        "colsample_bytree": 0.885, 
-        "eval_metric": ['aucpr', 'error', 'logloss'],
+        "colsample_bytree": 0.885,
+        "eval_metric": ["aucpr", "error", "logloss"],
         "gamma": 4.43,
         "lambda": 6.94,
         "learning_rate": 0.15,
         "max_depth": 10,
         "min_child_weight": 635,
         "scale_pos_weight": 2.7,
-        "subsample": 0.795
+        "subsample": 0.795,
     }
     xgb_clf = xgb.XGBClassifier(**params)
 
     # Run BorutaShap
     feature_selector = BorutaShap(
         model=xgb_clf,
-        importance_measure='shap',  # or 'gini'
+        importance_measure="shap",  # or 'gini'
         classification=True,
-        pvalue=0.10
+        pvalue=0.10,
     )
     feature_selector.fit(
         X=X_train,
         y=y_train,
         n_trials=500,  # Number of Boruta iterations
         sample=False,  # Set to True for large datasets
-        train_or_test='train',  # Use test set for SHAP values
-        verbose=True
+        train_or_test="train",  # Use test set for SHAP values
+        verbose=True,
     )
 
     # Get selected features
     selected_features = feature_selector.Subset().columns.tolist()
     print("Selected features:", selected_features)
 
-    feature_selector.results_to_csv(filename='feature_importance')
+    feature_selector.results_to_csv(filename="feature_importance")
     # Optionally, transform your data
     X_train_selected = feature_selector.transform(X_train)
 except Exception as e:
@@ -94,4 +93,3 @@ except Exception as e:
     logger.error("Failed to run XGBoost model training")
     logger.error("Please check the data and model parameters")
     logger.error("Exiting the program")
-

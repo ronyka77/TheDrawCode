@@ -4,28 +4,26 @@ import sys
 import time
 from functools import wraps
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, cast
 
 import numpy as np
 import pandas as pd
-from openpyxl import Workbook
-from pyexcelerate import Workbook
 from sklearn.calibration import LabelEncoder
 from sklearn.model_selection import train_test_split
 
 # Add project root to Python path
+project_root = Path(__file__).parent.parent.parent
+current_dir = Path(os.getcwd()).parent
+project_root_error = None
 try:
-    project_root = Path(__file__).parent.parent.parent
     if not project_root.exists():
         # Handle network path by using raw string
         project_root = Path(r"\\".join(str(project_root).split("\\")))
     sys.path.append(str(project_root))
-    print(f"Project root create_evaluation_set: {project_root}")
 except Exception as e:
-    print(f"Error setting project root path: {str(e)}")
+    project_root_error = str(e)
     # Fallback to current directory if path resolution fails
-    sys.path.append(os.getcwd().parent)
-    print(f"Fallback to current directory: {os.getcwd().parent}")
+    sys.path.append(str(current_dir))
 
 from src.utils.advanced_goal_features import AdvancedGoalFeatureEngineer
 from src.utils.K_factor_calculation import calculate_draw_k_factor
@@ -35,6 +33,13 @@ from src.utils.mlflow_utils import MLFlowManager
 logger = ExperimentLogger(
     experiment_name="create_evaluation_set", log_dir="logs/create_evaluation_set"
 )
+
+# Log project root setup after logger is initialized
+if project_root_error:
+    logger.info(f"Error setting project root path: {project_root_error}")
+    logger.info(f"Fallback to current directory: {current_dir}")
+else:
+    logger.info(f"Project root create_evaluation_set: {project_root}")
 
 
 # Error codes for standardized logging
@@ -57,6 +62,38 @@ class DataProcessingError:
     # External services
     MONGODB_CONNECTION_ERROR = "E301"
     MLFLOW_ERROR = "E302"
+
+
+# Constants for commonly used file paths and messages
+class FilePaths:
+    API_TRAINING_FINAL_XLSX = "data/api_training_final.xlsx"
+    API_TRAINING_FINAL_PARQUET = "data/api_training_final.parquet"
+    API_PREDICTION_DATA_XLSX = "data/prediction/api_prediction_data.xlsx"
+    API_PREDICTION_DATA_NEW_XLSX = "data/prediction/api_prediction_data_new.xlsx"
+    API_PREDICTION_EVAL_XLSX = "data/prediction/api_prediction_eval.xlsx"
+    API_PREDICTION_EVAL_PARQUET = "data/prediction/api_prediction_eval.parquet"
+    API_PREDICTIONS_DATA_PARQUET = "data/prediction/api_predictions_data.parquet"
+    NEW_API_TRAINING_FINAL_XLSX = "data/new_api_training_final.xlsx"
+    NEW_API_TRAINING_FINAL_PARQUET = "data/new_api_training_final.parquet"
+    NEW_API_PREDICTION_DATA_XLSX = "data/prediction/new_api_prediction_data.xlsx"
+    NEW_API_PREDICTION_EVAL_XLSX = "data/prediction/new_api_prediction_eval.xlsx"
+    NEW_API_PREDICTION_EVAL_PARQUET = "data/prediction/new_api_prediction_eval.parquet"
+    NEW_API_PREDICTIONS_DATA_XLSX = "data/prediction/new_api_predictions_data.xlsx"
+    NEW_API_PREDICTIONS_DATA_PARQUET = "data/prediction/new_api_predictions_data.parquet"
+
+
+class Messages:
+    LOADED_DATASET_EMPTY = "Loaded dataset is empty"
+    DATASET_EMPTY = "Dataset is empty"
+    STARTING_NUMERIC_CONVERSION = "Starting numeric conversion"
+    DATA_NOT_DATAFRAME_SKIP_PARQUET = "data is not a DataFrame, skipping parquet creation"
+    IS_DRAW_COLUMN_NOT_FOUND = "is_draw column not found in parquet file, creating target variable"
+    X_TRAIN_MUST_BE_DATAFRAME = "X_train must be DataFrame"
+    X_TEST_MUST_BE_DATAFRAME = "X_test must be DataFrame"
+    Y_TRAIN_MUST_BE_SERIES = "y_train must be Series"
+    Y_TEST_MUST_BE_SERIES = "y_test must be Series"
+    DATE_ENCODED_MUST_BE_SERIES = "date_encoded must be Series"
+    EVALUATION_DATA_MUST_BE_DATAFRAME = "evaluation_data must be DataFrame"
 
 
 # Retry decorator for file operations
@@ -125,6 +162,8 @@ def convert_numeric_columns(
     # If no columns specified, use all columns
     if columns is None:
         columns = df.columns.tolist()
+    # Ensure columns is a list at this point
+    assert isinstance(columns, list), "columns must be a list or None"
 
     # Track problematic columns
     failed_columns = []
@@ -179,10 +218,13 @@ def convert_numeric_columns(
                     )  # Handle negatives
                 )
 
-                # Try converting to numeric
+                # Try converting to numeric with type guard
                 numeric_series = pd.to_numeric(series, errors="coerce")
+                assert isinstance(numeric_series, pd.Series), (
+                    f"pd.to_numeric must return Series, got {type(numeric_series)}"
+                )
 
-                # Check if conversion was successful
+                # Check if conversion was successful - ensure proper Series typing
                 if numeric_series.isna().all():
                     if verbose:
                         logger.info(f"Column {col} contains no valid numeric values")
@@ -191,10 +233,12 @@ def convert_numeric_columns(
                         columns_to_drop.append(col)
                     continue
 
-                # Apply the conversion
+                # Apply the conversion with proper type annotations for pandas operations
                 df[col] = numeric_series.replace([np.inf, -np.inf], fill_value).fillna(fill_value)
 
-                if verbose and df[col].isna().any():
+                # Type guard for DataFrame operations
+                has_na = bool(df[col].isna().any())
+                if verbose and has_na:
                     logger.info(f"Warning: Column {col} contains NaN values after conversion")
 
         except Exception as e:
@@ -347,13 +391,13 @@ def update_api_training_data_for_draws():
     """
     try:
         # Load existing training data
-        data_path = "data/api_training_final.xlsx"
+        data_path = FilePaths.API_TRAINING_FINAL_XLSX
         data = pd.read_excel(data_path)
         # Initialize the feature engineer
         feature_engineer = AdvancedGoalFeatureEngineer()
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
-        logger.info(updated_data.shape)
+        logger.info(f"Updated data shape: {updated_data.shape}")
         # Save updated data back to Excel
         updated_data.to_excel(data_path, index=False)
     except Exception as e:
@@ -366,14 +410,14 @@ def update_api_data_for_draws():
     """
     try:
         # Load existing training data
-        data_path = "data/prediction/api_prediction_data.xlsx"
-        data_path_new = "data/prediction/api_prediction_data_new.xlsx"
+        data_path = FilePaths.API_PREDICTION_DATA_XLSX
+        data_path_new = FilePaths.API_PREDICTION_DATA_NEW_XLSX
         data = pd.read_excel(data_path)
         # Initialize the feature engineer
         feature_engineer = AdvancedGoalFeatureEngineer()
         # Add advanced goal features
         updated_data = feature_engineer.add_goal_features(data)
-        logger.info(updated_data.shape)
+        logger.info(f"Updated data shape: {updated_data.shape}")
 
         # Filter data for dates before 2024-11-01
         api_training_data = updated_data[updated_data["Date"] < "2025-03-01"]
@@ -385,8 +429,13 @@ def update_api_data_for_draws():
             (updated_data["Date"] >= "2025-03-01") & (updated_data["match_outcome"].notna())
         ]
         # Filter data for dates after 2024-11-01 where match_outcome is blank
+        # Add type guard for pandas Series operations
+        match_outcome_series = updated_data["match_outcome"]
+        assert isinstance(match_outcome_series, pd.Series), (
+            f"match_outcome must be Series, got {type(match_outcome_series)}"
+        )
         api_prediction_data = updated_data[
-            (updated_data["Date"] >= "2025-03-01") & (updated_data["match_outcome"].isna())
+            (updated_data["Date"] >= "2025-03-01") & (match_outcome_series.isna())
         ]
 
         logger.info(f"api_prediction_data.shape: {api_prediction_data.shape}")
@@ -396,22 +445,38 @@ def update_api_data_for_draws():
         updated_data = pd.concat([api_prediction_eval, api_prediction_data], ignore_index=True)
 
         # Export df_before_2024_11_01 to data/api_training_final.xlsx and .parquet
-        save_data_to_excel(api_training_data, "data/api_training_final.xlsx", "api_training_final")
-        create_parquet_files(api_training_data, "data/api_training_final.parquet")
+        save_data_to_excel(api_training_data, FilePaths.API_TRAINING_FINAL_XLSX, "api_training_final")
+        # Ensure api_training_data is a DataFrame
+        if isinstance(api_training_data, pd.DataFrame):
+            create_parquet_files(api_training_data, FilePaths.API_TRAINING_FINAL_PARQUET)
+        else:
+            logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
         logger.info("api_training_final.xlsx and .parquet updated")
 
         # Export df_after_2024_11_01_not_blank to data/prediction/api_predictions_eval.xlsx and .parquet
         save_data_to_excel(
-            api_prediction_eval, "data/prediction/api_prediction_eval.xlsx", "api_prediction_eval"
+            api_prediction_eval, FilePaths.API_PREDICTION_EVAL_XLSX, "api_prediction_eval"
         )
-        create_parquet_files(api_prediction_eval, "data/prediction/api_prediction_eval.parquet")
+        # Ensure api_prediction_eval is a DataFrame
+        if isinstance(api_prediction_eval, pd.DataFrame):
+            create_parquet_files(api_prediction_eval, FilePaths.API_PREDICTION_EVAL_PARQUET)
+        else:
+            logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
         logger.info("api_prediction_eval.xlsx and .parquet updated")
 
         # Export df_after_2024_11_01_blank to data/prediction/api_predictions_data.xlsx and .parquet
+        # Note: This appears to be a typo in the original code - should be api_predictions_data.xlsx
+        api_predictions_data_xlsx = "data/prediction/api_predictions_data.xlsx"
         save_data_to_excel(
-            api_prediction_data, "data/prediction/api_predictions_data.xlsx", "api_prediction_data"
+            api_prediction_data, api_predictions_data_xlsx, "api_prediction_data"
         )
-        create_parquet_files(api_prediction_data, "data/prediction/api_predictions_data.parquet")
+        # Ensure api_prediction_data is a DataFrame
+        if isinstance(api_prediction_data, pd.DataFrame):
+            create_parquet_files(
+                api_prediction_data, FilePaths.API_PREDICTIONS_DATA_PARQUET
+            )
+        else:
+            logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
         logger.info("api_predictions_data.xlsx and .parquet updated")
         # Save updated data back to Excel
         updated_data.to_excel(data_path_new, index=False)
@@ -576,13 +641,13 @@ def import_training_data_draws_api() -> tuple[pd.DataFrame, pd.Series, pd.DataFr
         ValueError: If data validation fails
         Exception: For other processing errors
     """
-    data_path = "data/api_training_final.xlsx"
+    data_path = FilePaths.API_TRAINING_FINAL_XLSX
     logger.info(f"Loading training data from: {data_path}")
     # Get selected columns
     selected_columns = get_selected_api_columns_draws()
 
     try:
-        parquet_path = "data/api_training_final.parquet"
+        parquet_path = FilePaths.API_TRAINING_FINAL_PARQUET
         if os.path.exists(parquet_path):
             data = pd.read_parquet(parquet_path)
             logger.info(f"Loaded data from Parquet: {parquet_path}")
@@ -590,8 +655,8 @@ def import_training_data_draws_api() -> tuple[pd.DataFrame, pd.Series, pd.DataFr
             # Load data with retry mechanism
             data = pd.read_excel(data_path)
             if data.empty:
-                logger.info("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
-                raise ValueError("Dataset is empty")
+                logger.info(Messages.LOADED_DATASET_EMPTY, error_code=DataProcessingError.EMPTY_DATASET)
+                raise ValueError(Messages.DATASET_EMPTY)
 
             logger.info(f"Successfully loaded data with shape: {data.shape}")
 
@@ -607,12 +672,13 @@ def import_training_data_draws_api() -> tuple[pd.DataFrame, pd.Series, pd.DataFr
                 )
                 raise ValueError(f"Missing required columns: {missing_columns}")
 
-            # Replace inf and nan values
+            # Replace inf and nan values with type guard
+            assert isinstance(data, pd.DataFrame), f"data must be DataFrame, got {type(data)}"
             data = data.replace([np.inf, -np.inf], np.nan)
             logger.info("Replaced infinite values with NaN")
 
             # Convert numeric columns
-            logger.info("Starting numeric conversion")
+            logger.info(Messages.STARTING_NUMERIC_CONVERSION)
             data = convert_numeric_columns(
                 data=data,
                 columns=data.columns.tolist(),
@@ -660,18 +726,37 @@ def import_training_data_draws_api() -> tuple[pd.DataFrame, pd.Series, pd.DataFr
                     error_code=DataProcessingError.INVALID_DATA_TYPE,
                 )
                 raise ValueError(f"Non-numeric columns found: {object_columns}")
-            create_parquet_files(data, "data/api_training_final.parquet")
+            # Ensure data is a DataFrame
+            if isinstance(data, pd.DataFrame):
+                create_parquet_files(data, FilePaths.API_TRAINING_FINAL_PARQUET)
+            else:
+                logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
 
         # Split into train and test sets
         logger.info("Splitting data into train and test sets")
         train_data, test_data = train_test_split(
             data, test_size=0.2, random_state=42, stratify=data["is_draw"]
         )
+        # Convert back to DataFrames since train_test_split returns numpy arrays
+        train_data = pd.DataFrame(train_data, columns=data.columns)
+        test_data = pd.DataFrame(test_data, columns=data.columns)
         # Select features and target
-        X_train = train_data[selected_columns]
+        if isinstance(selected_columns, list) and len(selected_columns) > 0:
+            X_train = train_data[selected_columns]
+            X_test = test_data[selected_columns]
+            # Ensure they are DataFrames
+            assert isinstance(X_train, pd.DataFrame), Messages.X_TRAIN_MUST_BE_DATAFRAME
+            assert isinstance(X_test, pd.DataFrame), Messages.X_TEST_MUST_BE_DATAFRAME
+        else:
+            # If selected_columns is not a valid list, use all columns except target
+            X_train = train_data.drop(columns=["is_draw"], errors="ignore")
+            X_test = test_data.drop(columns=["is_draw"], errors="ignore")
+
         y_train = train_data["is_draw"]
-        X_test = test_data[selected_columns]
         y_test = test_data["is_draw"]
+        # Ensure targets are Series
+        assert isinstance(y_train, pd.Series), Messages.Y_TRAIN_MUST_BE_SERIES
+        assert isinstance(y_test, pd.Series), Messages.Y_TEST_MUST_BE_SERIES
         # Final validation
         logger.info(f"Training set shape: {X_train.shape}")
         logger.info(f"Test set shape: {X_test.shape}")
@@ -697,7 +782,7 @@ def import_training_data_draws_api() -> tuple[pd.DataFrame, pd.Series, pd.DataFr
 
 def import_feature_select_draws_api():
     """Import training data for draw predictions."""
-    data_path = "data/api_training_final.xlsx"
+    data_path = FilePaths.API_TRAINING_FINAL_XLSX
     data = pd.read_excel(data_path)
     # Create target variable
     data["is_draw"] = (data["match_outcome"] == 2).astype(int)
@@ -749,10 +834,19 @@ def import_feature_select_draws_api():
     train_data, test_data = train_test_split(
         data, test_size=0.2, random_state=42, stratify=data["is_draw"]
     )
+    # Convert back to DataFrames since train_test_split returns numpy arrays
+    train_data = pd.DataFrame(train_data, columns=data.columns)
+    test_data = pd.DataFrame(test_data, columns=data.columns)
+    # Select features and target
     X_train = train_data.drop(columns="is_draw", errors="ignore")
     y_train = train_data["is_draw"]
     X_test = test_data.drop(columns="is_draw", errors="ignore")
     y_test = test_data["is_draw"]
+    # Ensure proper types
+    assert isinstance(X_train, pd.DataFrame), Messages.X_TRAIN_MUST_BE_DATAFRAME
+    assert isinstance(y_train, pd.Series), Messages.Y_TRAIN_MUST_BE_SERIES
+    assert isinstance(X_test, pd.DataFrame), Messages.X_TEST_MUST_BE_DATAFRAME
+    assert isinstance(y_test, pd.Series), Messages.Y_TEST_MUST_BE_SERIES
     # Add verification of dtypes
     logger.info("\nVerifying final dtypes:")
     non_numeric_cols = X_train.select_dtypes(include=["object"]).columns
@@ -783,21 +877,23 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
         ValueError: If data validation fails
         Exception: For other processing errors
     """
-    file_path = "data/prediction/api_prediction_eval.xlsx"
+    file_path = FilePaths.API_PREDICTION_EVAL_XLSX
     logger.info(f"Loading evaluation data from: {file_path}")
 
     try:
         # Load data from the Excel file
         data = pd.read_excel(file_path)
         if data.empty:
-            logger.info("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
-            raise ValueError("Dataset is empty")
+            logger.info(Messages.LOADED_DATASET_EMPTY, error_code=DataProcessingError.EMPTY_DATASET)
+            raise ValueError(Messages.DATASET_EMPTY)
 
         logger.info(f"Successfully loaded data with shape: {data.shape}")
         # Filter data where match_outcome is not NA
         data = data.dropna(subset=["match_outcome"])
         logger.info(f"Data shape after filtering NA match outcomes: {data.shape}")
         # Replace inf and nan values
+        # Add type guard for DataFrame operations
+        assert isinstance(data, pd.DataFrame), f"data must be DataFrame, got {type(data)}"
         data = data.replace([np.inf, -np.inf], np.nan)
         logger.info("Replaced infinite values with NaN")
         # Get selected columns if needed
@@ -861,7 +957,7 @@ def create_evaluation_sets_draws_api(use_selected_columns: bool = True):
                         error_code=DataProcessingError.NUMERIC_CONVERSION_FAILED,
                     )
         # Convert numeric columns
-        logger.info("Starting numeric conversion")
+        logger.info(Messages.STARTING_NUMERIC_CONVERSION)
         data = convert_numeric_columns(
             data=data, columns=selected_columns, drop_errors=False, fill_value=0.0, verbose=True
         )
@@ -920,15 +1016,15 @@ def create_prediction_set_api() -> pd.DataFrame:
         ValueError: If data validation fails
         Exception: For other processing errors
     """
-    file_path = "data/prediction/api_prediction_data_new.xlsx"
+    file_path = FilePaths.API_PREDICTION_DATA_NEW_XLSX
     logger.info(f"Loading prediction data from: {file_path}")
 
     try:
         # Load data from the Excel file
         data = pd.read_excel(file_path)
         if data.empty:
-            logger.info("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
-            raise ValueError("Dataset is empty")
+            logger.info(Messages.LOADED_DATASET_EMPTY, error_code=DataProcessingError.EMPTY_DATASET)
+            raise ValueError(Messages.DATASET_EMPTY)
 
         logger.info(f"Successfully loaded data with shape: {data.shape}")
         # Get selected columns
@@ -962,7 +1058,7 @@ def create_prediction_set_api() -> pd.DataFrame:
             data = data.drop(columns=["Away"])
         logger.info("Dropped Date, Home, and Away columns from data")
         # Convert numeric columns
-        logger.info("Starting numeric conversion")
+        logger.info(Messages.STARTING_NUMERIC_CONVERSION)
         data = convert_numeric_columns(
             data=data,
             columns=None,  # Convert all columns
@@ -978,7 +1074,12 @@ def create_prediction_set_api() -> pd.DataFrame:
             data["Away"] = data_copy["Away"]
             logger.info("Restored Date, Home, and Away columns from original data")
         # Select only the required columns
-        X = data[selected_columns]
+        if isinstance(selected_columns, list) and len(selected_columns) > 0:
+            X = data[selected_columns].copy()
+        else:
+            X = data.copy()
+        # Ensure X is a DataFrame
+        assert isinstance(X, pd.DataFrame), "X must be DataFrame"
         # Final validation
         logger.info(f"Final feature set shape: {X.shape}")
         logger.info("Feature set ready for prediction")
@@ -1029,7 +1130,10 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
         with open(json_path) as f:
             features = json.load(f)
         # Validate loaded data structure
-        if not all(key in features for key in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm"]):
+        if not all(
+            key in features
+            for key in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm"]
+        ):
             raise ValueError("JSON file missing required model keys")
         # Return specific model type if requested
         if model_type is not None:
@@ -1047,7 +1151,17 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
                 common_features = features["all"]
                 logger.info("Returning features common to all models")
                 return common_features
-            elif model_type not in ["xgb", "cat", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm", "all"]:
+            elif model_type not in [
+                "xgb",
+                "cat",
+                "lgbm",
+                "rf",
+                "tabnet",
+                "mlp",
+                "pytorch",
+                "svm",
+                "all",
+            ]:
                 raise ValueError(
                     f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'cat', 'lgbm', 'rf', 'tabnet', 'mlp', 'pytorch', 'svm', 'all'"
                 )
@@ -1075,15 +1189,14 @@ def import_selected_features_ensemble(model_type: Optional[str] = None) -> Union
         raise
 
 
-def create_ensemble_evaluation_set() -> pd.DataFrame:
+def create_ensemble_evaluation_set() -> tuple[pd.DataFrame, pd.Series]:
     """Create evaluation set for ensemble training with selected features and evaluation columns.
     This function creates a dataset containing all features from selected_features_ensemble.json
     along with the target variable (is_draw) and an evaluator column for model comparison.
     Returns:
-        pd.DataFrame: DataFrame containing:
-            - All features from selected_features_ensemble
-            - is_draw: Target variable (1 for draw, 0 otherwise)
-            - evaluator: Column for model evaluation tracking
+        tuple[pd.DataFrame, pd.Series]: A tuple containing:
+            - x_val (pd.DataFrame): Features for evaluation
+            - y_val (pd.Series): Target variable (1 for draw, 0 for non-draw)
     Raises:
         FileNotFoundError: If required data files are not found
         ValueError: If data validation fails
@@ -1137,22 +1250,29 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
             )
             raise ValueError(f"Missing required features: {missing_features}")
         # Select features and add evaluator column
-        evaluation_data = data[selected_features].copy()
+        selected_data = data[selected_features]
+        evaluation_data = selected_data.copy()
         evaluation_data["is_draw"] = data["is_draw"]
         # Convert numeric columns
+        # Ensure evaluation_data is DataFrame before conversion
+        assert isinstance(evaluation_data, pd.DataFrame), Messages.EVALUATION_DATA_MUST_BE_DATAFRAME
         evaluation_data = convert_numeric_columns(
             data=evaluation_data, columns=None, drop_errors=True, fill_value=0.0, verbose=True
         )
+        assert isinstance(evaluation_data, pd.DataFrame), Messages.EVALUATION_DATA_MUST_BE_DATAFRAME
         # Split into features and target
-        X_val = evaluation_data.drop(columns=["is_draw"])
+        x_val = evaluation_data.drop(columns=["is_draw"])
         y_val = evaluation_data["is_draw"]
+        # Ensure proper types
+        assert isinstance(x_val, pd.DataFrame), "x_val must be DataFrame"
+        assert isinstance(y_val, pd.Series), "y_val must be Series"
         # Final validation
         logger.info(f"Ensemble evaluation set created with shape: {evaluation_data.shape}")
         logger.info(f"Draw rate: {evaluation_data['is_draw'].mean():.2%}")
-        logger.info(f"Train set shape: {X_val.shape}")
+        logger.info(f"Train set shape: {x_val.shape}")
         logger.info(f"Test set shape: {y_val.shape}")
 
-        return X_val, y_val
+        return x_val, y_val
     except FileNotFoundError as e:
         logger.info(f"Data file not found: {str(e)}", error_code=DataProcessingError.FILE_NOT_FOUND)
         raise
@@ -1171,8 +1291,8 @@ def create_ensemble_evaluation_set() -> pd.DataFrame:
 
 def import_training_data_ensemble():
     """Import training data for draw predictions."""
-    parquet_path = os.path.join(project_root, "data", "api_training_final.parquet")
-    data_path = os.path.join(project_root, "data", "api_training_final.xlsx")
+    parquet_path = os.path.join(project_root, FilePaths.API_TRAINING_FINAL_PARQUET)
+    data_path = os.path.join(project_root, FilePaths.API_TRAINING_FINAL_XLSX)
 
     # Check if parquet file exists and is valid
     if os.path.exists(parquet_path):
@@ -1180,7 +1300,7 @@ def import_training_data_ensemble():
             data = pd.read_parquet(parquet_path)
             logger.info(f"Loaded training data from parquet: {parquet_path}")
             if "is_draw" not in data.columns:
-                logger.info("is_draw column not found in parquet file, creating target variable")
+                logger.info(Messages.IS_DRAW_COLUMN_NOT_FOUND)
                 data["is_draw"] = (data["match_outcome"] == 2).astype(int)
         except Exception as e:
             logger.info(f"Failed to load parquet file, falling back to Excel: {str(e)}")
@@ -1242,32 +1362,45 @@ def import_training_data_ensemble():
             if col in data.columns:
                 data[col] = data[col].astype("int64")
         # Export processed data to parquet for efficient storage and retrieval
-        create_parquet_files(data, "data/api_training_final.parquet")
+        # Ensure data is a DataFrame
+        if isinstance(data, pd.DataFrame):
+            create_parquet_files(data, FilePaths.API_TRAINING_FINAL_PARQUET)
+        else:
+            logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
         logger.info("Exported processed training data to parquet format")
     # Split into train and test sets
     train_data, test_data = train_test_split(
         data, test_size=0.3, random_state=42, stratify=data["is_draw"]
     )
+    # Convert back to DataFrames since train_test_split returns numpy arrays
+    train_data = pd.DataFrame(train_data, columns=data.columns)
+    test_data = pd.DataFrame(test_data, columns=data.columns)
+    # Select features and target
     X_train = train_data.drop(columns="is_draw", errors="ignore")
     y_train = train_data["is_draw"]
     X_test = test_data.drop(columns="is_draw", errors="ignore")
     y_test = test_data["is_draw"]
+    # Ensure proper types
+    assert isinstance(X_train, pd.DataFrame), Messages.X_TRAIN_MUST_BE_DATAFRAME
+    assert isinstance(y_train, pd.Series), Messages.Y_TRAIN_MUST_BE_SERIES
+    assert isinstance(X_test, pd.DataFrame), Messages.X_TEST_MUST_BE_DATAFRAME
+    assert isinstance(y_test, pd.Series), Messages.Y_TEST_MUST_BE_SERIES
     return X_train, y_train, X_test, y_test
 
 
-def save_data_to_excel(df, output_path, type):
-        # Replace NaN/None with empty string
-    df = df.fillna('')
-    wb = Workbook()
-    wb.new_sheet("Sheet1", data=[df.columns.tolist()] + df.values.tolist())
-    wb.save(output_path)
+def save_data_to_excel(df, output_path, sheet_name="Sheet1"):
+    # Replace NaN/None with empty string with type guard
+    assert isinstance(df, pd.DataFrame), f"df must be DataFrame, got {type(df)}"
+    df = df.fillna("")
+    # Use pandas to_excel which is more reliable
+    df.to_excel(output_path, sheet_name=sheet_name, index=False)
     return df
 
 
 @retry_on_error(max_retries=3, delay=1.0)
 def create_prediction_set_ensemble() -> pd.DataFrame:
     """Optimized data loading and preprocessing for predictions."""
-    file_path = os.path.join(project_root, "data", "prediction", "new_api_prediction_data.xlsx")
+    file_path = os.path.join(project_root, FilePaths.NEW_API_PREDICTION_DATA_XLSX)
     logger.info(f"Loading prediction data from: {file_path}")
     import_selected_features_ensemble_new("all")
     try:
@@ -1276,7 +1409,7 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
         # Validate early
         if data.empty:
             logger.info("Empty dataset loaded", error_code=DataProcessingError.EMPTY_DATASET)
-            raise ValueError("Dataset is empty")
+            raise ValueError(Messages.DATASET_EMPTY)
 
         logger.info(f"Initial data shape: {data.shape}")
         data_copy = data.copy()
@@ -1292,10 +1425,14 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
         # Date handling
         if "date_encoded" not in data.columns:
             try:
-                data["date_encoded"] = (
+                date_encoded_series = (
                     pd.to_datetime(data["Date"], errors="coerce") - pd.Timestamp("2020-08-11")
                 ).dt.days
-                data["date_encoded"] = data["date_encoded"].fillna(0).astype("int64")
+                # Add type guard for pandas Series operations
+                assert isinstance(date_encoded_series, pd.Series), (
+                    Messages.DATE_ENCODED_MUST_BE_SERIES
+                )
+                data["date_encoded"] = date_encoded_series.fillna(0).astype("int64")
             except Exception as e:
                 logger.info(
                     f"Date encoding failed: {str(e)}",
@@ -1303,11 +1440,12 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
                 )
                 raise
         # Optimized column dropping
-        cols_to_drop = {"Date", "Home", "Away", "league_name"}
-        if cols_to_drop:
-            data = data.drop(columns=cols_to_drop)
+        cols_to_drop = ["Date", "Home", "Away", "league_name"]
+        existing_cols_to_drop = [col for col in cols_to_drop if col in data.columns]
+        if existing_cols_to_drop:
+            data = data.drop(columns=existing_cols_to_drop)
             logger.info(f"Dropped columns: {cols_to_drop}")
-        print(f"data.columns: {data.shape}")
+        logger.info(f"Data shape before numeric conversion: {data.shape}")
         # Numeric conversion with parallel processing
         data = convert_numeric_columns(data=data, drop_errors=True, fill_value=0.0, verbose=False)
         # Restore columns using vectorized merge
@@ -1315,10 +1453,15 @@ def create_prediction_set_ensemble() -> pd.DataFrame:
             restore_cols = data_copy[["fixture_id", "Date", "Home", "Away", "league_name"]]
             # Only merge columns that don't already exist in data
             cols_to_restore = [col for col in restore_cols.columns if col not in data.columns]
-            print(f"cols_to_restore: {cols_to_restore}")
+            logger.info(f"Columns to restore: {cols_to_restore}")
             if cols_to_restore:
+                merge_columns = ["fixture_id"] + cols_to_restore
+                merge_data = restore_cols[merge_columns]
+                # Ensure merge_data is a DataFrame
+                if not isinstance(merge_data, pd.DataFrame):
+                    merge_data = pd.DataFrame(merge_data)
                 data = data.merge(
-                    restore_cols[["fixture_id"] + cols_to_restore],
+                    merge_data,
                     on="fixture_id",
                     how="left",
                     validate="one_to_one",  # Ensure no duplicate fixture_ids
@@ -1342,21 +1485,27 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
         ValueError: If data validation fails
         Exception: For other processing errors
     """
-    file_path = os.path.join(project_root, "data", "prediction", "new_api_prediction_eval.xlsx")
+    file_path = os.path.join(project_root, FilePaths.NEW_API_PREDICTION_EVAL_XLSX)
     logger.info(f"Loading match results from: {file_path}")
     try:
         # Load Excel file
         df = pd.read_excel(file_path)
         if df.empty:
-            logger.info("Loaded dataset is empty", error_code=DataProcessingError.EMPTY_DATASET)
-            raise ValueError("Dataset is empty")
+            logger.info(Messages.LOADED_DATASET_EMPTY, error_code=DataProcessingError.EMPTY_DATASET)
+            raise ValueError(Messages.DATASET_EMPTY)
 
         logger.info(f"Successfully loaded data with shape: {df.shape}")
         # Filter rows where match_outcome is not NA
         df = df.dropna(subset=["match_outcome"])
         logger.info(f"Data shape after filtering NA match outcomes: {df.shape}")
         # Convert fixture_id column to integer type
-        df["fixture_id"] = pd.to_numeric(df["fixture_id"], errors="coerce").astype("Int64")
+        fixture_id_numeric = pd.to_numeric(df["fixture_id"], errors="coerce")
+        # Ensure it's a Series and handle potential NaN values
+        if isinstance(fixture_id_numeric, pd.Series):
+            df["fixture_id"] = fixture_id_numeric.fillna(-1).astype(int)
+        else:
+            # Fallback if conversion didn't return a Series
+            df["fixture_id"] = df["fixture_id"].astype(int)
 
         # Create new column for is_draw based on match_outcome
         df["is_draw"] = (df["match_outcome"] == 2).astype(int)
@@ -1364,7 +1513,10 @@ def get_real_api_scores_from_excel() -> pd.DataFrame:
         # Select and rename relevant columns
         results_df = df[
             ["fixture_id", "Home", "Away", "Date", "league_name", "match_outcome", "is_draw"]
-        ].rename(
+        ]
+        # Ensure results_df is a DataFrame before renaming
+        assert isinstance(results_df, pd.DataFrame), "results_df must be DataFrame"
+        results_df = results_df.rename(
             columns={
                 "Home": "home_team",
                 "Away": "away_team",
@@ -1404,18 +1556,18 @@ def update_api_data_new_for_draws():
     """
     try:
         # Load existing training data
-        data_path = "data/prediction/new_api_prediction_data.xlsx"
-        data_path_new = "data/prediction/new_api_prediction_data.xlsx"
+        data_path = FilePaths.NEW_API_PREDICTION_DATA_XLSX
+        data_path_new = FilePaths.NEW_API_PREDICTION_DATA_XLSX
         data = pd.read_excel(data_path)
-        
+
         logger.info(f"Loaded initial data with shape: {data.shape}")
-        
+
         # Extract year and month from Date column
-        data['Date'] = pd.to_datetime(data['Date'])
-        data['year'] = data['Date'].dt.year.astype(int)
-        data['month'] = data['Date'].dt.month.astype(int)
+        data["Date"] = pd.to_datetime(data["Date"])
+        data["year"] = data["Date"].dt.year.astype(int)
+        data["month"] = data["Date"].dt.month.astype(int)
         logger.info("Added year and month columns from Date")
-        
+
         # Initialize the feature engineer
         feature_engineer = AdvancedGoalFeatureEngineer()
         # Add advanced goal features
@@ -1435,74 +1587,114 @@ def update_api_data_new_for_draws():
         api_training_data = api_training_data.copy()
         api_training_data["is_draw"] = (api_training_data["match_outcome"] == 2).astype(int)
         logger.info("Added is_draw column to training data")
-        
+
         # Filter data for dates after 2025-04-15 where match_outcome is not blank (evaluation data)
         api_prediction_eval = updated_data[
             (updated_data["Date"] >= "2025-04-15") & (updated_data["match_outcome"].notna())
         ]
-        
+
         # Filter data for dates after 2025-04-15 where match_outcome is blank (prediction data)
+        # Add type guard for pandas Series operations
+        match_outcome_series_2 = updated_data["match_outcome"]
+        assert isinstance(match_outcome_series_2, pd.Series), (
+            f"match_outcome must be Series, got {type(match_outcome_series_2)}"
+        )
         api_prediction_data = updated_data[
-            (updated_data["Date"] >= "2025-04-15") & (updated_data["match_outcome"].isna())
+            (updated_data["Date"] >= "2025-04-15") & (match_outcome_series_2.isna())
         ]
 
         logger.info("Data split summary:")
         logger.info(f"  - Training data shape: {api_training_data.shape}")
         logger.info(f"  - Evaluation data shape: {api_prediction_eval.shape}")
         logger.info(f"  - Prediction data shape: {api_prediction_data.shape}")
-        
+
         # Check if featuretools features are present in the splits
-        ft_features_in_data = [col for col in updated_data.columns if col.startswith('ft_')]
+        ft_features_in_data = [col for col in updated_data.columns if col.startswith("ft_")]
         if ft_features_in_data:
-            for dataset_name, dataset in [("Training", api_training_data), ("Evaluation", api_prediction_eval), ("Prediction", api_prediction_data)]:
+            for dataset_name, dataset in [
+                ("Training", api_training_data),
+                ("Evaluation", api_prediction_eval),
+                ("Prediction", api_prediction_data),
+            ]:
                 ft_features_present = [f for f in ft_features_in_data if f in dataset.columns]
-                logger.info(f"  - {dataset_name} data has {len(ft_features_present)} featuretools features")
-        
+                logger.info(
+                    f"  - {dataset_name} data has {len(ft_features_present)} featuretools features"
+                )
+
         # Concatenate the filtered dataframes for final output
         updated_data = pd.concat([api_prediction_eval, api_prediction_data], ignore_index=True)
 
         # Export training data
-        save_data_to_excel(api_training_data, "data/new_api_training_final.xlsx", "api_training_final")
-        create_parquet_files(api_training_data, "data/new_api_training_final.parquet")
+        save_data_to_excel(
+            api_training_data, FilePaths.NEW_API_TRAINING_FINAL_XLSX, "api_training_final"
+        )
+        # Ensure api_training_data is a DataFrame
+        if isinstance(api_training_data, pd.DataFrame):
+            create_parquet_files(api_training_data, FilePaths.NEW_API_TRAINING_FINAL_PARQUET)
+        else:
+            logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
         logger.info("api_training_final.xlsx and .parquet updated with featuretools features")
 
         # Export evaluation data
         save_data_to_excel(
-            api_prediction_eval, "data/prediction/new_api_prediction_eval.xlsx", "api_prediction_eval"
+            api_prediction_eval,
+            FilePaths.NEW_API_PREDICTION_EVAL_XLSX,
+            "api_prediction_eval",
         )
-        create_parquet_files(api_prediction_eval, "data/prediction/new_api_prediction_eval.parquet")
+        # Ensure api_prediction_eval is a DataFrame
+        if isinstance(api_prediction_eval, pd.DataFrame):
+            create_parquet_files(
+                api_prediction_eval, FilePaths.NEW_API_PREDICTION_EVAL_PARQUET
+            )
+        else:
+            logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
         logger.info("api_prediction_eval.xlsx and .parquet updated with featuretools features")
 
         # Export prediction data
         save_data_to_excel(
-            api_prediction_data, "data/prediction/new_api_predictions_data.xlsx", "api_prediction_data"
+            api_prediction_data,
+            FilePaths.NEW_API_PREDICTIONS_DATA_XLSX,
+            "api_prediction_data",
         )
-        create_parquet_files(api_prediction_data, "data/prediction/new_api_predictions_data.parquet")
+        # Ensure api_prediction_data is a DataFrame
+        if isinstance(api_prediction_data, pd.DataFrame):
+            create_parquet_files(
+                api_prediction_data, FilePaths.NEW_API_PREDICTIONS_DATA_PARQUET
+            )
+        else:
+            logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
         logger.info("api_predictions_data.xlsx and .parquet updated with featuretools features")
-        
+
         # Save updated data back to Excel
         updated_data.to_excel(data_path_new, index=False)
-        
+
         logger.info("=== Data Update Complete ===")
         logger.info(f"Final data shape: {updated_data.shape}")
-        
+
         # Feature summary
         if ft_features_in_data:
-            logger.info(f"Successfully integrated {len(ft_features_in_data)} automated features from featuretools")
-            logger.info("Your ensemble models can now use these enhanced features for better performance")
+            logger.info(
+                f"Successfully integrated {len(ft_features_in_data)} automated features from featuretools"
+            )
+            logger.info(
+                "Your ensemble models can now use these enhanced features for better performance"
+            )
         else:
-            logger.info("Data updated with existing feature engineering (featuretools features not added)")
-            
+            logger.info(
+                "Data updated with existing feature engineering (featuretools features not added)"
+            )
+
     except Exception as e:
-        logger.error(f"Error updating training data for draws: {str(e)}")
+        logger.info(f"Error updating training data for draws: {str(e)}")
         import traceback
+
         traceback.print_exc()
 
 
 def import_training_data_ensemble_new():
     """Import training data for draw predictions."""
-    parquet_path = os.path.join(project_root, "data", "new_api_training_final.parquet")
-    data_path = os.path.join(project_root, "data", "new_api_training_final.xlsx")
+    parquet_path = os.path.join(project_root, FilePaths.NEW_API_TRAINING_FINAL_PARQUET)
+    data_path = os.path.join(project_root, FilePaths.NEW_API_TRAINING_FINAL_XLSX)
 
     # Check if parquet file exists and is valid
     if os.path.exists(parquet_path):
@@ -1510,7 +1702,7 @@ def import_training_data_ensemble_new():
             data = pd.read_parquet(parquet_path)
             logger.info(f"Loaded training data from parquet: {parquet_path}")
             if "is_draw" not in data.columns:
-                logger.info("is_draw column not found in parquet file, creating target variable")
+                logger.info(Messages.IS_DRAW_COLUMN_NOT_FOUND)
                 data["is_draw"] = (data["match_outcome"] == 2).astype(int)
             # Drop rows where home_failed_to_score_away is NA
             # data = data.dropna(subset=['home_failed_to_score_away'])
@@ -1573,12 +1765,20 @@ def import_training_data_ensemble_new():
             if col in data.columns:
                 data[col] = data[col].astype("int64")
         # Export processed data to parquet for efficient storage and retrieval
-        create_parquet_files(data, "data/new_api_training_final.parquet")
+        # Ensure data is a DataFrame
+        if isinstance(data, pd.DataFrame):
+            create_parquet_files(data, "data/new_api_training_final.parquet")
+        else:
+            logger.warning(Messages.DATA_NOT_DATAFRAME_SKIP_PARQUET)
         logger.info("Exported processed training data to parquet format")
     # Split into train and test sets
     train_data, test_data = train_test_split(
         data, test_size=0.2, random_state=42, stratify=data["is_draw"]
     )
+    # Convert back to DataFrames since train_test_split returns numpy arrays
+    train_data = pd.DataFrame(train_data, columns=data.columns)
+    test_data = pd.DataFrame(test_data, columns=data.columns)
+    # Select features and target
     X_train = train_data.drop(columns="is_draw", errors="ignore")
     y_train = train_data["is_draw"]
     X_test = test_data.drop(columns="is_draw", errors="ignore")
@@ -1586,7 +1786,7 @@ def import_training_data_ensemble_new():
     return X_train, y_train, X_test, y_test
 
 
-def create_evaluation_set_new() -> pd.DataFrame:
+def create_evaluation_set_new() -> tuple[pd.DataFrame, pd.Series]:
     """Create evaluation set for ensemble training with selected features and evaluation columns.
     This function creates a dataset containing all features from selected_features_ensemble.json
     along with the target variable (is_draw) and an evaluator column for model comparison.
@@ -1602,7 +1802,9 @@ def create_evaluation_set_new() -> pd.DataFrame:
     """
     try:
         # Load training data
-        data_path = os.path.join(project_root, "data", "prediction", "new_api_prediction_eval.parquet")
+        data_path = os.path.join(
+            project_root, FilePaths.NEW_API_PREDICTION_EVAL_PARQUET
+        )
         logger.info(f"Loading training data from: {data_path}")
         data = pd.read_parquet(data_path)
         # Create target variable
@@ -1648,22 +1850,30 @@ def create_evaluation_set_new() -> pd.DataFrame:
             )
             raise ValueError(f"Missing required features: {missing_features}")
         # Select features and add evaluator column
-        evaluation_data = data[selected_features].copy()
+        selected_data = data[selected_features]
+        evaluation_data = selected_data.copy()
         evaluation_data["is_draw"] = data["is_draw"]
         # Convert numeric columns
+        # Ensure evaluation_data is DataFrame before conversion
+        assert isinstance(evaluation_data, pd.DataFrame), Messages.EVALUATION_DATA_MUST_BE_DATAFRAME
         evaluation_data = convert_numeric_columns(
             data=evaluation_data, columns=None, drop_errors=True, fill_value=0.0, verbose=True
         )
+        assert isinstance(evaluation_data, pd.DataFrame), Messages.EVALUATION_DATA_MUST_BE_DATAFRAME
         # Split into features and target
-        X_val = evaluation_data.drop(columns=["is_draw"])
+        x_val = evaluation_data.drop(columns=["is_draw"])
         y_val = evaluation_data["is_draw"]
+        # Ensure proper types
+        assert isinstance(x_val, pd.DataFrame), "x_val must be DataFrame"
+        assert isinstance(y_val, pd.Series), "y_val must be Series"
         # Final validation
         logger.info(f"Ensemble evaluation set created with shape: {evaluation_data.shape}")
         logger.info(f"Draw rate: {evaluation_data['is_draw'].mean():.2%}")
-        logger.info(f"Train set shape: {X_val.shape}")
+        logger.info(f"Train set shape: {x_val.shape}")
         logger.info(f"Test set shape: {y_val.shape}")
 
-        return X_val, y_val
+        return x_val, y_val
+
     except FileNotFoundError as e:
         logger.info(f"Data file not found: {str(e)}", error_code=DataProcessingError.FILE_NOT_FOUND)
         raise
@@ -1709,7 +1919,10 @@ def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> U
         with open(json_path) as f:
             features = json.load(f)
         # Validate loaded data structure
-        if not all(key in features for key in ["xgb", "catboost", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm"]):
+        if not all(
+            key in features
+            for key in ["xgb", "catboost", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm"]
+        ):
             raise ValueError("JSON file missing required model keys")
         # Return specific model type if requested
         if model_type is not None:
@@ -1717,7 +1930,17 @@ def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> U
                 common_features = features["all"]
                 logger.info("Returning features common to all models")
                 return common_features
-            elif model_type not in ["xgb", "catboost", "lgbm", "rf", "tabnet", "mlp", "pytorch", "svm", "all"]:
+            elif model_type not in [
+                "xgb",
+                "catboost",
+                "lgbm",
+                "rf",
+                "tabnet",
+                "mlp",
+                "pytorch",
+                "svm",
+                "all",
+            ]:
                 raise ValueError(
                     f"Invalid model_type: {model_type}. Must be one of: 'xgb', 'catboost', 'lgbm', 'rf', 'tabnet', 'mlp', 'pytorch', 'svm', 'all'"
                 )
@@ -1745,129 +1968,244 @@ def import_selected_features_ensemble_new(model_type: Optional[str] = None) -> U
         raise
 
 
+def _clean_base_encoded_columns(data):
+    """Clean NaN, inf, and -inf values in base encoded columns."""
+    data_clean = data.copy()
+
+    base_encoded_columns = [
+        "home_encoded",
+        "away_encoded",
+        "venue_encoded",
+        "league_encoded",
+        "season_encoded",
+        "referee_encoded",
+        "away_league_position",
+        "home_league_position",
+    ]
+
+    for col in base_encoded_columns:
+        if col in data_clean.columns:
+            # Replace NaN, inf, and -inf with 0
+            # Add type guards for pandas Series operations
+            col_series = data_clean[col]
+            assert isinstance(col_series, pd.Series), (
+                f"data_clean[{col}] must be Series, got {type(col_series)}"
+            )
+            data_clean[col] = col_series.replace([np.inf, -np.inf], np.nan).fillna(0)
+            # Ensure integer type for encoded columns
+            data_clean[col] = data_clean[col].astype(int)
+
+    logger.info("Replaced NaN, inf, and -inf values in base encoded columns with 0")
+    return data_clean
+
+
+def _add_team_league_interactions(data):
+    """Add team-league interaction features."""
+    if "home_encoded" not in data.columns or "league_encoded" not in data.columns:
+        return data
+
+    encoder = LabelEncoder()
+    data_copy = data.copy()
+
+    data_copy["home_team_league"] = (
+        data_copy["home_encoded"].astype(str) + "_" + data_copy["league_encoded"].astype(str)
+    )
+    data_copy["away_team_league"] = (
+        data_copy["away_encoded"].astype(str) + "_" + data_copy["league_encoded"].astype(str)
+    )
+    data_copy["home_team_league_encoded"] = encoder.fit_transform(data_copy["home_team_league"])
+    data_copy["away_team_league_encoded"] = encoder.fit_transform(data_copy["away_team_league"])
+
+    return data_copy
+
+
+def _add_team_matchup_features(data):
+    """Add team matchup features capturing historical team dynamics."""
+    if "home_encoded" not in data.columns or "away_encoded" not in data.columns:
+        return data
+
+    encoder = LabelEncoder()
+    data_copy = data.copy()
+
+    # Create consistent team pair identifier (smaller ID first)
+    data_copy["team_pair"] = data_copy.apply(
+        lambda row: f"{min(row['home_encoded'], row['away_encoded'])}_{max(row['home_encoded'], row['away_encoded'])}",
+        axis=1,
+    )
+    data_copy["team_pair_encoded"] = encoder.fit_transform(data_copy["team_pair"])
+
+    return data_copy
+
+
+def _add_season_league_context(data):
+    """Add season-league context features."""
+    if "season_encoded" not in data.columns or "league_encoded" not in data.columns:
+        return data
+
+    encoder = LabelEncoder()
+    data_copy = data.copy()
+
+    data_copy["season_league"] = (
+        data_copy["season_encoded"].astype(str) + "_" + data_copy["league_encoded"].astype(str)
+    )
+    data_copy["season_league_encoded"] = encoder.fit_transform(data_copy["season_league"])
+
+    return data_copy
+
+
+def _add_venue_league_context(data):
+    """Add venue-league context features capturing venue effects within leagues."""
+    if "venue_encoded" not in data.columns or "league_encoded" not in data.columns:
+        return data
+
+    encoder = LabelEncoder()
+    data_copy = data.copy()
+
+    data_copy["venue_league"] = (
+        data_copy["venue_encoded"].astype(str) + "_" + data_copy["league_encoded"].astype(str)
+    )
+    data_copy["venue_league_encoded"] = encoder.fit_transform(data_copy["venue_league"])
+
+    return data_copy
+
+
+def _add_temporal_features(data):
+    """Add temporal features for seasonality."""
+    if "year" not in data.columns or "month" not in data.columns:
+        return data
+
+    encoder = LabelEncoder()
+    data_copy = data.copy()
+
+    data_copy["year_month"] = data_copy["year"].astype(str) + "_" + data_copy["month"].astype(str)
+    data_copy["year_month_encoded"] = encoder.fit_transform(data_copy["year_month"])
+
+    return data_copy
+
+
+def _get_strength_tier(position):
+    """Convert league position to strength tier."""
+    if pd.isna(position):
+        return 0  # Unknown/missing position
+    elif position <= 4:
+        return 1  # Elite (top 4)
+    elif position <= 8:
+        return 2  # Strong (5-8)
+    elif position <= 12:
+        return 3  # Medium (9-12)
+    else:
+        return 4  # Weak (13+)
+
+
+def _add_strength_tier_features(data):
+    """Add team strength tier features based on league positions."""
+    if "home_league_position" not in data.columns or "away_league_position" not in data.columns:
+        return data
+
+    data_copy = data.copy()
+
+    data_copy["home_strength_tier"] = data_copy["home_league_position"].apply(_get_strength_tier)
+    data_copy["away_strength_tier"] = data_copy["away_league_position"].apply(_get_strength_tier)
+
+    # Create strength difference feature (useful for predicting outcomes)
+    data_copy["strength_tier_difference"] = abs(
+        data_copy["home_strength_tier"] - data_copy["away_strength_tier"]
+    )
+
+    logger.info(
+        f"Home strength tier distribution: {data_copy['home_strength_tier'].value_counts().sort_index().to_dict()}"
+    )
+    logger.info(
+        f"Away strength tier distribution: {data_copy['away_strength_tier'].value_counts().sort_index().to_dict()}"
+    )
+    logger.info(
+        f"Strength difference distribution: {data_copy['strength_tier_difference'].value_counts().sort_index().to_dict()}"
+    )
+
+    return data_copy
+
+
+def _add_competitiveness_features(data):
+    """Add match competitiveness level features."""
+    if "home_strength_tier" not in data.columns or "away_strength_tier" not in data.columns:
+        return data
+
+    data_copy = data.copy()
+    # Create competitiveness as average of both team tiers: (home_tier + away_tier) / 2
+    data_copy["match_competitiveness"] = (
+        data_copy["home_strength_tier"] + data_copy["away_strength_tier"]
+    ) / 2
+
+    return data_copy
+
+
+def _log_new_features(data):
+    """Log information about newly created features."""
+    new_features = [
+        "home_team_league_encoded",
+        "away_team_league_encoded",
+        "team_pair_encoded",
+        "season_league_encoded",
+        "venue_league_encoded",
+        "year_month_encoded",
+        "home_strength_tier",
+        "away_strength_tier",
+        "match_competitiveness",
+    ]
+
+    logger.info("Enhanced categorical features created:")
+    for feature in new_features:
+        if feature in data.columns:
+            logger.info(f"  - {feature}: {data[feature].nunique()} unique values")
+
+
 def create_enhanced_categorical_features(data):
     """
     Create enhanced categorical features that leverage team, league, and temporal interactions.
-    
+
     Args:
-        X_train (pd.DataFrame): Training features
-        X_test (pd.DataFrame): Test features
-        X_eval (pd.DataFrame): Evaluation features
-        
+        data (pd.DataFrame): Input dataset
+
     Returns:
-        tuple: (X_train_enhanced, X_test_enhanced, X_eval_enhanced)
+        pd.DataFrame: Dataset with enhanced categorical features
     """
     logger.info("Creating enhanced categorical features for better model performance")
-    
-    # Create copies to avoid modifying original data
-    data_enh = data.copy()
 
-    # Handle NaN, inf, and -inf values in base encoded columns
-    base_encoded_columns = [
-        'home_encoded', 'away_encoded', 'venue_encoded', 'league_encoded', 
-        'season_encoded', 'referee_encoded','away_league_position','home_league_position'
-    ]
-    
-    for col in base_encoded_columns:
-        if col in data_enh.columns:
-            # Replace NaN, inf, and -inf with 0
-            data_enh[col] = data_enh[col].replace([np.inf, -np.inf], np.nan).fillna(0)
-            # Ensure integer type for encoded columns
-            data_enh[col] = data_enh[col].astype(int)
-    
-    logger.info("Replaced NaN, inf, and -inf values in base encoded columns with 0")
-    encoder = LabelEncoder()
-    
-    for df in [data_enh]:
-        # 1. Team-League Interaction Features
-        if 'home_encoded' in df.columns and 'league_encoded' in df.columns:
-            df['home_team_league'] = df['home_encoded'].astype(str) + '_' + df['league_encoded'].astype(str)
-            df['away_team_league'] = df['away_encoded'].astype(str) + '_' + df['league_encoded'].astype(str)
-            df['home_team_league_encoded'] = encoder.fit_transform(df['home_team_league'])
-            df['away_team_league_encoded'] = encoder.fit_transform(df['away_team_league'])
-        
-        # 2. Team Matchup Feature (captures historical team dynamics)
-        if 'home_encoded' in df.columns and 'away_encoded' in df.columns:
-            # Create consistent team pair identifier (smaller ID first)
-            df['team_pair'] = df.apply(
-                lambda row: f"{min(row['home_encoded'], row['away_encoded'])}_{max(row['home_encoded'], row['away_encoded'])}", 
-                axis=1
-            )
-            df['team_pair_encoded'] = encoder.fit_transform(df['team_pair'])
-        
-        # 3. Season-League Context
-        if 'season_encoded' in df.columns and 'league_encoded' in df.columns:
-            df['season_league'] = df['season_encoded'].astype(str) + '_' + df['league_encoded'].astype(str)
-            df['season_league_encoded'] = encoder.fit_transform(df['season_league'])
-        
-        # 4. Venue-League Context (captures venue effects within leagues)
-        if 'venue_encoded' in df.columns and 'league_encoded' in df.columns:
-            df['venue_league'] = df['venue_encoded'].astype(str) + '_' + df['league_encoded'].astype(str)
-            df['venue_league_encoded'] = encoder.fit_transform(df['venue_league'])
-        
-        # 5. Temporal Features for Seasonality
-        if 'year' in df.columns and 'month' in df.columns:
-            df['year_month'] = df['year'].astype(str) + '_' + df['month'].astype(str)
-            df['year_month_encoded'] = encoder.fit_transform(df['year_month'])
-        
-        # 6. Team Strength Tier (based on actual league positions)
-        if 'home_league_position' in df.columns and 'away_league_position' in df.columns:
-            # Create team strength tiers based on league positions
-            # 1-4: tier 1 (elite), 5-8: tier 2 (strong), 9-12: tier 3 (medium), 13+: tier 4 (weak)
-            def get_strength_tier(position):
-                if pd.isna(position):
-                    return 0  # Unknown/missing position
-                elif position <= 4:
-                    return 1  # Elite (top 4)
-                elif position <= 8:
-                    return 2  # Strong (5-8)
-                elif position <= 12:
-                    return 3  # Medium (9-12)
-                else:
-                    return 4  # Weak (13+)
-            
-            df['home_strength_tier'] = df['home_league_position'].apply(get_strength_tier)
-            df['away_strength_tier'] = df['away_league_position'].apply(get_strength_tier)
-            
-            # Create strength difference feature (useful for predicting outcomes)
-            df['strength_tier_difference'] = abs(df['home_strength_tier'] - df['away_strength_tier'])
-            
-            logger.info(f"Home strength tier distribution: {df['home_strength_tier'].value_counts().sort_index().to_dict()}")
-            logger.info(f"Away strength tier distribution: {df['away_strength_tier'].value_counts().sort_index().to_dict()}")
-            logger.info(f"Strength difference distribution: {df['strength_tier_difference'].value_counts().sort_index().to_dict()}")
-        
-        # 7. Match Competitiveness Level (average match quality)
-        if 'home_strength_tier' in df.columns and 'away_strength_tier' in df.columns:
-            # Create competitiveness as average of both team tiers: (home_tier + away_tier) / 2
-            df['match_competitiveness'] = (df['home_strength_tier'] + df['away_strength_tier']) / 2
-    
-    logger.info("Enhanced categorical features created:")
-    new_features = ['home_team_league_encoded', 'away_team_league_encoded', 'team_pair_encoded', 'season_league_encoded', 
-                    'venue_league_encoded', 'year_month_encoded', 'home_strength_tier', 'away_strength_tier', 
-                    'match_competitiveness']
-    
-    for feature in new_features:
-        if feature in data_enh.columns:
-            logger.info(f"  - {feature}: {data_enh[feature].nunique()} unique values")
-    
+    # Clean base encoded columns
+    data_enh = _clean_base_encoded_columns(data)
+
+    # Add various categorical feature enhancements
+    data_enh = _add_team_league_interactions(data_enh)
+    data_enh = _add_team_matchup_features(data_enh)
+    data_enh = _add_season_league_context(data_enh)
+    data_enh = _add_venue_league_context(data_enh)
+    data_enh = _add_temporal_features(data_enh)
+    data_enh = _add_strength_tier_features(data_enh)
+    data_enh = _add_competitiveness_features(data_enh)
+
+    # Log feature creation summary
+    _log_new_features(data_enh)
+
     return data_enh
+
 
 def calculate_league_draw_k_factors(data):
     """Calculate draw-specific K-factors for all leagues and add to data."""
     league_draw_k_factors = {}
-    
+
     unique_leagues = data["league_encoded"].unique()
     for league in unique_leagues:
         league_data = data[data["league_encoded"] == league]
         draw_k_factor = calculate_draw_k_factor(league_data, logger)
         league_draw_k_factors[league] = draw_k_factor
-        
+
         logger.info(f"League {league} - Draw K-factor: {draw_k_factor}")
-    
+
     # Add k_factor column to data based on league_encoded
-    data['k_factor'] = data['league_encoded'].map(league_draw_k_factors)
-    
+    data["k_factor"] = data["league_encoded"].map(league_draw_k_factors)
+
     return data
+
 
 @retry_on_error(max_retries=3, delay=1.0)
 def import_training_data_ensemble_date_stratified():
@@ -1876,13 +2214,15 @@ def import_training_data_ensemble_date_stratified():
     are selected as the validation set, ensuring temporal consistency and preventing
     data leakage while maintaining representative samples across all dates.
     """
-    parquet_path = os.path.join(project_root, "data", "new_api_training_final.parquet")
-    parquet_path_new = os.path.join(project_root, "data", "prediction", "new_api_prediction_eval.parquet")
-    data_path = os.path.join(project_root, "data", "new_api_training_final.xlsx")
-    data_path_new = os.path.join(project_root, "data", "prediction", "new_api_prediction_eval.xlsx")
+    parquet_path = os.path.join(project_root, FilePaths.NEW_API_TRAINING_FINAL_PARQUET)
+    parquet_path_new = os.path.join(
+        project_root, FilePaths.NEW_API_PREDICTION_EVAL_PARQUET
+    )
+    data_path = os.path.join(project_root, FilePaths.NEW_API_TRAINING_FINAL_XLSX)
+    data_path_new = os.path.join(project_root, FilePaths.NEW_API_PREDICTION_EVAL_XLSX)
 
     logger.info("Starting date-stratified training data import")
-    
+
     # Check if parquet file exists and is valid
     if os.path.exists(parquet_path):
         try:
@@ -1890,26 +2230,27 @@ def import_training_data_ensemble_date_stratified():
             data_val = pd.read_parquet(parquet_path_new)
             logger.info(f"Loaded training data from parquet: {parquet_path}")
             if "is_draw" not in data.columns:
-                logger.info("is_draw column not found in parquet file, creating target variable")
+                logger.info(Messages.IS_DRAW_COLUMN_NOT_FOUND)
                 data["is_draw"] = (data["match_outcome"] == 2).astype(int)
             if "is_draw" not in data_val.columns:
-                logger.info("is_draw column not found in parquet file, creating target variable")
+                logger.info(Messages.IS_DRAW_COLUMN_NOT_FOUND)
                 data_val["is_draw"] = (data_val["match_outcome"] == 2).astype(int)
         except Exception as e:
             logger.info(f"Failed to load parquet file, falling back to Excel: {str(e)}")
             data = pd.read_excel(data_path)
+            data_val = pd.read_excel(data_path_new)
     else:
         data = pd.read_excel(data_path)
         data_val = pd.read_excel(data_path_new)
         logger.info(f"Loaded training data from Excel: {data_path}")
-        
+
         # Create target variable
         data["is_draw"] = (data["match_outcome"] == 2).astype(int)
-        
+
         # Select features and target
-        columns_to_drop = [
+        columns_to_drop: list[str] = [
             "match_outcome",
-            "home_goals", 
+            "home_goals",
             "away_goals",
             "total_goals",
             "score",
@@ -1917,7 +2258,7 @@ def import_training_data_ensemble_date_stratified():
             "draw",
             "venue_name",
             "Home",
-            "Away", 
+            "Away",
             "away_win",
             "Date",
             "date",
@@ -1932,7 +2273,7 @@ def import_training_data_ensemble_date_stratified():
             "mid_season_factor",
         ]
         data = data.drop(columns=columns_to_drop, errors="ignore")
-        
+
         # Convert all numeric-like columns
         data = convert_numeric_columns(
             data=data,
@@ -1944,7 +2285,7 @@ def import_training_data_ensemble_date_stratified():
         # Define integer columns that should remain as int64
         int_columns = [
             "h2h_draws",
-            "home_h2h_wins", 
+            "home_h2h_wins",
             "h2h_matches",
             "Away_points_cum",
             "Home_points_cum",
@@ -1953,7 +2294,7 @@ def import_training_data_ensemble_date_stratified():
             "venue_encoded",
             "date_encoded",
         ]
-        
+
         # Convert integer columns back to int64
         for col in int_columns:
             data[col] = data[col].astype("int64")
@@ -1961,19 +2302,23 @@ def import_training_data_ensemble_date_stratified():
     common_columns = list(set(data.columns) & set(data_val.columns))
     data = data[common_columns]
     data_val = data_val[common_columns]
-    
+
     data = pd.concat([data, data_val], ignore_index=True)
+    # Ensure data is a DataFrame after concat
+    assert isinstance(data, pd.DataFrame), "data must be DataFrame after concat"
     logger.info(f"Merged training and validation data, total shape: {data.shape}")
     # Validate date_encoded column exists
     if "date_encoded" not in data.columns:
         logger.info(
             "date_encoded column not found in data",
-            error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS
+            error_code=DataProcessingError.MISSING_REQUIRED_COLUMNS,
         )
         raise ValueError("date_encoded column is required for date-stratified splitting")
-    
+
     # Analyze date distribution
-    date_counts = data['date_encoded'].value_counts().sort_index()
+    date_encoded_series = data["date_encoded"]
+    assert isinstance(date_encoded_series, pd.Series), "date_encoded must be a Series"
+    date_counts = date_encoded_series.value_counts().sort_index()
     logger.info(f"Found {len(date_counts)} unique dates in dataset")
     logger.info(f"Date range: {date_counts.index.min()} to {date_counts.index.max()}")
     logger.info(f"Average matches per date: {date_counts.mean():.1f}")
@@ -1981,49 +2326,64 @@ def import_training_data_ensemble_date_stratified():
     # Drop last 3 dates to prevent data leakage
     sorted_dates = sorted(date_counts.index)
     dates_to_drop = sorted_dates[-7:]  # Get the last 7 dates
-    
+
     if dates_to_drop:
         logger.info(f"Dropping last 3 dates to prevent data leakage: {dates_to_drop}")
-        data = data[~data['date_encoded'].isin(dates_to_drop)]
-        
+        data = data[~date_encoded_series.isin(dates_to_drop)]
+
         # Update date counts after dropping
-        date_counts = data['date_encoded'].value_counts().sort_index()
+        date_encoded_series = data["date_encoded"]
+        assert isinstance(date_encoded_series, pd.Series), "date_encoded must be a Series"
+        date_counts = date_encoded_series.value_counts().sort_index()
         logger.info(f"After dropping last 3 dates: {len(date_counts)} unique dates remaining")
         logger.info(f"New date range: {date_counts.index.min()} to {date_counts.index.max()}")
-        logger.info(f"Dropped {len(data) - data.shape[0] if 'original_shape' in locals() else 'unknown'} samples")
-    
+        logger.info(
+            f"Dropped {len(data) - data.shape[0] if 'original_shape' in locals() else 'unknown'} samples"
+        )
+
     # Check for dates with insufficient samples
     min_samples_per_date = 10  # Minimum to ensure at least 1 validation sample (15% of 7 = 1.05)
     insufficient_dates = date_counts[date_counts < min_samples_per_date]
     if len(insufficient_dates) > 0:
-        logger.info(f"Warning: {len(insufficient_dates)} dates have fewer than {min_samples_per_date} samples")
-    
+        logger.info(
+            f"Warning: {len(insufficient_dates)} dates have fewer than {min_samples_per_date} samples"
+        )
+
     # Perform date-stratified split
     train_indices = []
     val_indices = []
     error_date_count = 0
     for date_encoded in date_counts.index:
         # Get all samples for this date
-        date_mask = data['date_encoded'] == date_encoded
+        date_mask = data["date_encoded"] == date_encoded
         date_data = data[date_mask]
-        
+        # Ensure date_data is DataFrame
+        assert isinstance(date_data, pd.DataFrame), "date_data must be DataFrame"
+
         if len(date_data) < min_samples_per_date:
             # If too few samples, put all in training set
             train_indices.extend(date_data.index.tolist())
             continue
-        
+
         # Stratified split within this date to maintain draw rate
         try:
             date_train_idx, date_val_idx = train_test_split(
                 date_data.index,
                 test_size=0.30,  # 15% for validation
                 random_state=42,
-                stratify=date_data['is_draw']
+                stratify=date_data["is_draw"],
             )
-            train_indices.extend(date_train_idx.tolist())
-            val_indices.extend(date_val_idx.tolist())
-            
-        except ValueError as e:
+            # Convert indices to list format for extending
+            try:
+                train_indices.extend(date_train_idx.tolist())  # type: ignore
+            except AttributeError:
+                train_indices.extend(list(date_train_idx))
+            try:
+                val_indices.extend(date_val_idx.tolist())  # type: ignore
+            except AttributeError:
+                val_indices.extend(list(date_val_idx))
+
+        except ValueError:
             # logger.info(f"Stratification failed for date {date_encoded}")
             error_date_count += 1
             data_train_idx = date_data.index
@@ -2033,43 +2393,188 @@ def import_training_data_ensemble_date_stratified():
     # Create train and validation sets
     train_data = data.loc[train_indices]
     val_data = data.loc[val_indices]
-    
+
     # Split training data further to create test set (20% of training data)
-    X_train, X_test, y_train, y_test = train_test_split(
-        train_data.drop(columns="is_draw", errors="ignore"),
-        train_data["is_draw"],
+    x_train_full = train_data.drop(columns="is_draw", errors="ignore")
+    y_train_full = train_data["is_draw"]
+
+    x_train_split, x_test_split, y_train_split, y_test_split = train_test_split(
+        x_train_full,
+        y_train_full,
         test_size=0.2,
         random_state=42,
-        stratify=train_data["is_draw"]
+        stratify=y_train_full,
     )
-    
+
+    # Convert numpy arrays back to DataFrames/Series
+    x_train_split = pd.DataFrame(x_train_split, columns=x_train_full.columns)
+    x_test_split = pd.DataFrame(x_test_split, columns=x_train_full.columns)
+    y_train_split = pd.Series(y_train_split, name="is_draw")
+    y_test_split = pd.Series(y_test_split, name="is_draw")
+
     # Update train_data to be the reduced training set
-    train_data = pd.concat([X_train, y_train], axis=1)
-    test_data = pd.concat([X_test, y_test], axis=1)
+    train_data = pd.concat([x_train_split, y_train_split], axis=1)
+    test_data = pd.concat([x_test_split, y_test_split], axis=1)
     # Prepare features and targets
+    # Select features and target
     X_train = train_data.drop(columns="is_draw", errors="ignore")
     y_train = train_data["is_draw"]
     X_test = test_data.drop(columns="is_draw", errors="ignore")
     y_test = test_data["is_draw"]
-    X_val = val_data.drop(columns="is_draw", errors="ignore")
+    x_val = val_data.drop(columns="is_draw", errors="ignore")
     y_val = val_data["is_draw"]
-    
+
     # Log split statistics
     logger.info("Date-stratified split completed:")
-    logger.info(f"Training set: {len(X_train)} samples ({len(X_train)/len(data)*100:.1f}%)")
-    logger.info(f"Validation set: {len(X_val)} samples ({len(X_val)/len(data)*100:.1f}%)")
+    logger.info(f"Training set: {len(X_train)} samples ({len(X_train) / len(data) * 100:.1f}%)")
+    logger.info(f"Validation set: {len(x_val)} samples ({len(x_val) / len(data) * 100:.1f}%)")
     logger.info(f"Training draw rate: {y_train.mean():.2%}")
     logger.info(f"Validation draw rate: {y_val.mean():.2%}")
-    
+
     # Final validation
-    if len(X_val) == 0:
+    if len(x_val) == 0:
         logger.info(
             "Validation set is empty after date-stratified split",
-            error_code=DataProcessingError.INSUFFICIENT_SAMPLES
+            error_code=DataProcessingError.INSUFFICIENT_SAMPLES,
         )
-        raise ValueError("Validation set is empty - check date distribution and minimum sample requirements")
-    
-    return X_train, y_train, X_test, y_test, X_val, y_val
+        raise ValueError(
+            "Validation set is empty - check date distribution and minimum sample requirements"
+        )
+
+    return X_train, y_train, X_test, y_test, x_val, y_val
+
+
+def _load_and_validate_featuretools_data():
+    """Load training data and validate featuretools features are present."""
+    logger.info("Loading training data for feature evaluation...")
+    X_train, y_train, _, _, _, _ = import_training_data_ensemble_date_stratified()
+
+    ft_features = [col for col in X_train.columns if col.startswith("ft_")]
+
+    if not ft_features:
+        logger.warning("No featuretools features found in training data")
+        logger.info("Run update_api_data_new_for_draws() first to generate featuretools features")
+        return None, None, None
+
+    logger.info(f"Found {len(ft_features)} featuretools features in training data")
+    return X_train, y_train, ft_features
+
+
+def _evaluate_featuretools_features(X_train, y_train, ft_features):
+    """Evaluate featuretools features using multiple importance methods."""
+    from src.utils.featuretools_automated_features import SoccerFeaturetoolsEngineer
+
+    logger.info("Evaluating featuretools features using multiple methods...")
+
+    ft_engineer = SoccerFeaturetoolsEngineer(experiment_logger=logger)
+
+    # Get top features using different evaluation methods
+    top_features_mi = ft_engineer.evaluate_feature_importance(
+        X=X_train, y=y_train, new_feature_names=ft_features, method="mutual_info", top_k=50
+    )
+
+    top_features_corr = ft_engineer.evaluate_feature_importance(
+        X=X_train, y=y_train, new_feature_names=ft_features, method="correlation", top_k=50
+    )
+
+    top_features_combined = ft_engineer.evaluate_feature_importance(
+        X=X_train, y=y_train, new_feature_names=ft_features, method="combined", top_k=100
+    )
+
+    logger.info("Evaluation complete:")
+    logger.info(f"  - Top features by mutual info: {len(top_features_mi)}")
+    logger.info(f"  - Top features by correlation: {len(top_features_corr)}")
+    logger.info(f"  - Top features by combined score: {len(top_features_combined)}")
+
+    return top_features_mi, top_features_corr, top_features_combined
+
+
+def _get_model_feature_strategies(top_features_mi, top_features_corr, top_features_combined):
+    """Define model-specific feature selection strategies."""
+    return {
+        "xgb": top_features_combined[:25],  # XGBoost handles many features well
+        "catboost": top_features_mi[:20],  # CatBoost + mutual info for categorical handling
+        "lgbm": top_features_combined[:20],  # LightGBM similar to XGBoost
+        "rf": top_features_corr[:15],  # Random Forest + correlation
+        "tabnet": top_features_combined[:30],  # TabNet can handle complex interactions
+        "mlp": top_features_corr[:15],  # Neural networks + correlation for linear relationships
+        "pytorch": top_features_combined[:25],  # PyTorch can handle complex interactions
+        "svm": top_features_corr[:10],  # SVM + correlation for linear relationships
+    }
+
+
+def _update_model_selections(updated_selections, model_feature_strategies):
+    """Update feature selections for each model type."""
+    for model_name, selected_ft_features in model_feature_strategies.items():
+        if model_name in updated_selections:
+            # Remove duplicates while preserving order
+            new_model_features = []
+            existing_model_features = set(updated_selections[model_name])
+
+            for feature in selected_ft_features:
+                if feature not in existing_model_features:
+                    new_model_features.append(feature)
+                    existing_model_features.add(feature)
+
+            # Add new featuretools features to existing selection
+            updated_selections[model_name].extend(new_model_features)
+            logger.info(f"Added {len(new_model_features)} featuretools features to {model_name}")
+
+            if new_model_features:
+                logger.info(f"   {model_name} examples: {new_model_features[:3]}")
+
+
+def _update_all_selection(updated_selections, top_features_combined):
+    """Update the 'all' selection with top featuretools features."""
+    all_top_ft_features = list(dict.fromkeys(top_features_combined))  # Remove duplicates
+    existing_all_features = set(updated_selections.get("all", []))
+    new_all_features = [f for f in all_top_ft_features if f not in existing_all_features]
+
+    if "all" not in updated_selections:
+        updated_selections["all"] = []
+    updated_selections["all"].extend(new_all_features)
+
+    return new_all_features
+
+
+def _create_integration_report(ft_features, new_all_features):
+    """Create and log feature integration analysis report."""
+    logger.info("Integration summary:")
+    logger.info(f"  - Total featuretools features available: {len(ft_features)}")
+    logger.info(f"  - Featuretools features selected for 'all': {len(new_all_features)}")
+    logger.info(
+        f"  - Selection efficiency: {len(new_all_features)}/{len(ft_features)} = {len(new_all_features) / len(ft_features) * 100:.1f}%"
+    )
+
+    # Create feature analysis report
+    feature_analysis = {
+        "temporal_features": [f for f in ft_features if "ft_temporal_" in f],
+        "relational_features": [f for f in ft_features if "ft_relational_" in f],
+        "interaction_features": [
+            f
+            for f in ft_features
+            if f.startswith("ft_") and "temporal" not in f and "relational" not in f
+        ],
+        "selected_temporal": [f for f in new_all_features if "ft_temporal_" in f],
+        "selected_relational": [f for f in new_all_features if "ft_relational_" in f],
+        "selected_interaction": [
+            f
+            for f in new_all_features
+            if f.startswith("ft_") and "temporal" not in f and "relational" not in f
+        ],
+    }
+
+    logger.info("Feature type analysis:")
+    for feature_type, features in feature_analysis.items():
+        if "selected_" in feature_type:
+            original_type = feature_type.replace("selected_", "")
+            if original_type in feature_analysis:
+                original_count = len(feature_analysis[original_type])
+                selected_count = len(features)
+                if original_count > 0:
+                    logger.info(
+                        f"   {feature_type}: {selected_count}/{original_count} ({selected_count / original_count * 100:.1f}%)"
+                    )
 
 
 def integrate_featuretools_features_to_selection():
@@ -2079,197 +2584,105 @@ def integrate_featuretools_features_to_selection():
     using intelligent evaluation methods.
     """
     try:
-        from src.utils.featuretools_automated_features import SoccerFeaturetoolsEngineer
-        
         logger.info("=== Integrating Featuretools Features to Selection ===")
-        
-        # Load training data to evaluate featuretools features
-        logger.info("Loading training data for feature evaluation...")
-        X_train, y_train, _, _, _, _ = import_training_data_ensemble_date_stratified()
-        
-        # Check if featuretools features are present
-        ft_features = [col for col in X_train.columns if col.startswith('ft_')]
-        
-        if not ft_features:
-            logger.warning("No featuretools features found in training data")
-            logger.info("Run update_api_data_new_for_draws() first to generate featuretools features")
+
+        # Load and validate data
+        X_train, y_train, ft_features = _load_and_validate_featuretools_data()
+        if X_train is None:
             return
-        
-        logger.info(f"Found {len(ft_features)} featuretools features in training data")
-        
-        # Initialize featuretools engineer for feature evaluation
-        ft_engineer = SoccerFeaturetoolsEngineer(logger=logger, mlflow_tracking=False)
-        
-        # Evaluate featuretools features using multiple methods
-        logger.info("Evaluating featuretools features using multiple methods...")
-        
-        # Get top features using different evaluation methods
-        top_features_mi = ft_engineer.evaluate_feature_importance(
-            X=X_train, 
-            y=y_train, 
-            new_feature_names=ft_features,
-            method='mutual_info',
-            top_k=50
+
+        # Evaluate features
+        top_features_mi, top_features_corr, top_features_combined = _evaluate_featuretools_features(
+            X_train, y_train, ft_features
         )
-        
-        top_features_corr = ft_engineer.evaluate_feature_importance(
-            X=X_train, 
-            y=y_train, 
-            new_feature_names=ft_features,
-            method='correlation',
-            top_k=50
-        )
-        
-        top_features_combined = ft_engineer.evaluate_feature_importance(
-            X=X_train, 
-            y=y_train, 
-            new_feature_names=ft_features,
-            method='combined',
-            top_k=100
-        )
-        
-        logger.info("Evaluation complete:")
-        logger.info(f"  - Top features by mutual info: {len(top_features_mi)}")
-        logger.info(f"  - Top features by correlation: {len(top_features_corr)}")
-        logger.info(f"  - Top features by combined score: {len(top_features_combined)}")
-        
+
         # Load existing feature selections
         json_path = project_root / "src" / "utils" / "selected_features_ensemble_new.json"
-        
+
         if not json_path.exists():
-            logger.error(f"Feature selection file not found: {json_path}")
+            logger.info(f"Feature selection file not found: {json_path}")
             return
-        
+
         with open(json_path) as f:
             existing_selections = json.load(f)
-        
+
         logger.info("Loaded existing feature selections")
-        
-        # Model-specific feature selection strategy for featuretools features
-        model_feature_strategies = {
-            'xgb': top_features_combined[:25],        # XGBoost handles many features well
-            'catboost': top_features_mi[:20],         # CatBoost + mutual info for categorical handling
-            'lgbm': top_features_combined[:20],       # LightGBM similar to XGBoost
-            'rf': top_features_corr[:15],             # Random Forest + correlation
-            'tabnet': top_features_combined[:30],     # TabNet can handle complex interactions
-            'mlp': top_features_corr[:15],            # Neural networks + correlation for linear relationships
-            'pytorch': top_features_combined[:25],    # PyTorch can handle complex interactions
-            'svm': top_features_corr[:10]             # SVM + correlation for linear relationships
-        }
-        
-        # Create updated feature selections
+
+        # Get model strategies and update selections
+        model_feature_strategies = _get_model_feature_strategies(
+            top_features_mi, top_features_corr, top_features_combined
+        )
+
         updated_selections = existing_selections.copy()
-        
-        # Add strategically selected featuretools features to each model
-        for model_name, selected_ft_features in model_feature_strategies.items():
-            if model_name in updated_selections:
-                # Remove duplicates while preserving order
-                new_model_features = []
-                existing_model_features = set(updated_selections[model_name])
-                
-                for feature in selected_ft_features:
-                    if feature not in existing_model_features:
-                        new_model_features.append(feature)
-                        existing_model_features.add(feature)
-                
-                # Add new featuretools features to existing selection
-                updated_selections[model_name].extend(new_model_features)
-                logger.info(f"Added {len(new_model_features)} featuretools features to {model_name}")
-                
-                if new_model_features:
-                    logger.info(f"   {model_name} examples: {new_model_features[:3]}")
-        
-        # Update 'all' selection with all top featuretools features
-        all_top_ft_features = list(dict.fromkeys(top_features_combined))  # Remove duplicates
-        existing_all_features = set(updated_selections.get('all', []))
-        new_all_features = [f for f in all_top_ft_features if f not in existing_all_features]
-        
-        if 'all' not in updated_selections:
-            updated_selections['all'] = []
-        updated_selections['all'].extend(new_all_features)
-        
+        _update_model_selections(updated_selections, model_feature_strategies)
+
+        # Update 'all' selection
+        new_all_features = _update_all_selection(updated_selections, top_features_combined)
+        # Ensure new_all_features is a list (type guard for linter)
+        if not isinstance(new_all_features, list):
+            raise TypeError("new_all_features must be a list")
+        # Cast to help linter understand the type
+        new_all_features = cast(list[str], new_all_features)
+
         # Save updated selections with metadata
         output_data = {
-            'feature_selections': updated_selections,
-            'metadata': {
-                'last_updated': pd.Timestamp.now().isoformat(),
-                'featuretools_integration': {
-                    'total_ft_features_available': len(ft_features),
-                    'ft_features_selected': len(new_all_features),
-                    'selection_methods': ['mutual_info', 'correlation', 'combined'],
-                    'model_strategies': {
-                        'xgb': 'Combined score (handles many features)',
-                        'catboost': 'Mutual information (categorical handling)',
-                        'lgbm': 'Combined score (tree-based)',
-                        'rf': 'Correlation (ensemble method)',
-                        'tabnet': 'Combined score (deep tabular)',
-                        'mlp': 'Correlation (linear relationships)',
-                        'pytorch': 'Combined score (complex interactions)',
-                        'svm': 'Correlation (linear classifier)'
-                    }
-                }
-            }
+            "feature_selections": updated_selections,
+            "metadata": {
+                "last_updated": pd.Timestamp.now().isoformat(),
+                "featuretools_integration": {
+                    "total_ft_features_available": len(ft_features or []),  # type: ignore
+                    "ft_features_selected": len(new_all_features or []),  # type: ignore
+                    "selection_methods": ["mutual_info", "correlation", "combined"],
+                    "model_strategies": {
+                        "xgb": "Combined score (handles many features)",
+                        "catboost": "Mutual information (categorical handling)",
+                        "lgbm": "Combined score (tree-based)",
+                        "rf": "Correlation (ensemble method)",
+                        "tabnet": "Combined score (deep tabular)",
+                        "mlp": "Correlation (linear relationships)",
+                        "pytorch": "Combined score (complex interactions)",
+                        "svm": "Correlation (linear classifier)",
+                    },
+                },
+            },
         }
-        
-        # Backup original file
-        backup_path = json_path.with_suffix('.backup.json')
-        with open(backup_path, 'w') as f:
+
+        # Backup and save
+        backup_path = json_path.with_suffix(".backup.json")
+        with open(backup_path, "w") as f:
             json.dump(existing_selections, f, indent=2)
         logger.info(f"Backed up original selections to: {backup_path}")
-        
-        # Save updated selections
-        with open(json_path, 'w') as f:
+
+        with open(json_path, "w") as f:
             json.dump(output_data, f, indent=2)
-        
+
         logger.info(f"Updated feature selections saved to: {json_path}")
-        logger.info("Integration summary:")
-        logger.info(f"  - Total featuretools features available: {len(ft_features)}")
-        logger.info(f"  - Featuretools features selected for 'all': {len(new_all_features)}")
-        logger.info(f"  - Selection efficiency: {len(new_all_features)}/{len(ft_features)} = {len(new_all_features)/len(ft_features)*100:.1f}%")
-        
-        # Create feature analysis report
-        feature_analysis = {
-            'temporal_features': [f for f in ft_features if 'ft_temporal_' in f],
-            'relational_features': [f for f in ft_features if 'ft_relational_' in f],
-            'interaction_features': [f for f in ft_features if f.startswith('ft_') and 'temporal' not in f and 'relational' not in f],
-            'selected_temporal': [f for f in new_all_features if 'ft_temporal_' in f],
-            'selected_relational': [f for f in new_all_features if 'ft_relational_' in f],
-            'selected_interaction': [f for f in new_all_features if f.startswith('ft_') and 'temporal' not in f and 'relational' not in f]
-        }
-        
-        logger.info("Feature type analysis:")
-        for feature_type, features in feature_analysis.items():
-            if 'selected_' in feature_type:
-                original_type = feature_type.replace('selected_', '')
-                if original_type in feature_analysis:
-                    original_count = len(feature_analysis[original_type])
-                    selected_count = len(features)
-                    if original_count > 0:
-                        logger.info(f"   {feature_type}: {selected_count}/{original_count} ({selected_count/original_count*100:.1f}%)")
-        
+
+        # Create and log integration report
+        _create_integration_report(ft_features, new_all_features)
+
         logger.info("=== Featuretools Integration Complete ===")
-        
+
     except Exception as e:
-        logger.error(f"Error integrating featuretools features: {str(e)}")
+        logger.info(f"Error integrating featuretools features: {str(e)}")
         import traceback
+
         traceback.print_exc()
 
 
 def add_featuretools_features(updated_data):
     """
     Add featuretools automated features to the dataset.
-    
+
     Args:
         updated_data (pd.DataFrame): Input data to enhance with featuretools features
-        
+
     Returns:
         pd.DataFrame: Data enhanced with featuretools features
     """
     # Import the featuretools engineer
     from src.utils.featuretools_automated_features import SoccerFeaturetoolsEngineer
-    
-    
-    
+
     # Initialize with central logger
     logger = ExperimentLogger("soccer_features")
     # FEATURETOOLS INTEGRATION - Add automated feature engineering
@@ -2278,15 +2691,12 @@ def add_featuretools_features(updated_data):
         experiment_logger=logger,
         max_depth=2,
         chunk_size=5000,  # Automatically calculated if None
-        memory_limit_gb=4.0
+        memory_limit_gb=4.0,
     )
 
     # Run optimized feature engineering
-    enhanced_df, feature_defs = engineer.run_hybrid_feature_engineering(
-        df=updated_data,
-        include_temporal=True,
-        include_relational=True,
-        include_interactions=True
+    enhanced_df, _ = engineer.run_hybrid_feature_engineering(
+        df=updated_data, include_temporal=True, include_relational=True, include_interactions=True
     )
 
     # Get performance statistics
@@ -2294,15 +2704,14 @@ def add_featuretools_features(updated_data):
     logger.info("Feature engineering stats", extra=stats)
     return enhanced_df
 
+
 if __name__ == "__main__":
-    # update_api_training_data_for_draws()
-    # logger.info("Training data updated successfully")
-    # update_api_data_for_draws()
-    # logger.info("Prediction data updated successfully")
     update_api_data_new_for_draws()
     logger.info("New prediction data updated successfully")
 
-    X_train, y_train, X_test, y_test, X_val, y_val = import_training_data_ensemble_date_stratified()
-    logger.info(f"Ensemble evaluation set created with columns: {X_train.shape} and {y_train.shape}")
+    X_train, y_train, X_test, y_test, x_val, y_val = import_training_data_ensemble_date_stratified()
+    logger.info(
+        f"Ensemble evaluation set created with columns: {X_train.shape} and {y_train.shape}"
+    )
     logger.info(f"Ensemble evaluation set created with columns: {X_test.shape} and {y_test.shape}")
-    logger.info(f"Ensemble evaluation set created with columns: {X_val.shape} and {y_val.shape}")
+    logger.info(f"Ensemble evaluation set created with columns: {x_val.shape} and {y_val.shape}")

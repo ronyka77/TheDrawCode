@@ -23,6 +23,8 @@ from src.utils.logger import ExperimentLogger
 # Initialize logger
 logger = ExperimentLogger(experiment_name="mlflow_integration", log_dir="logs/mlflow_integration")
 project_root = Path(__file__).parent.parent
+
+
 class MLflowIntegration:
     """MLflow integration for experiment tracking and model management."""
 
@@ -335,31 +337,31 @@ def cleanup_deleted_runs(mlruns_dir="mlruns"):
             print(f"Error processing experiment {exp.name} (ID: {exp.experiment_id}): {str(e)}")
             continue
 
+
 def cleanup_empty_experiments(mlruns_dir="mlruns"):
     """Clean up experiments that have no runs.
-    
+
     Args:
         mlruns_dir: Path to mlruns directory. Defaults to 'mlruns'.
     """
     client = MlflowClient()
     experiments = client.search_experiments()
-    
+
     for exp in experiments:
         print(f"Checking Experiment: {exp.name} (ID: {exp.experiment_id})")
         try:
             # Search for all runs (active and deleted)
             runs = client.search_runs(
-                [exp.experiment_id],
-                run_view_type=mlflow.entities.ViewType.ALL
+                [exp.experiment_id], run_view_type=mlflow.entities.ViewType.ALL
             )
-            
+
             if len(runs) == 0:
                 print(f"Experiment {exp.name} has no runs - deleting...")
                 exp_path = os.path.join(mlruns_dir, exp.experiment_id)
-                
+
                 # Delete from tracking server
                 client.delete_experiment(exp.experiment_id)
-                
+
                 # Remove experiment directory if it exists
                 if os.path.exists(exp_path):
                     print(f"Removing experiment directory at {exp_path}")

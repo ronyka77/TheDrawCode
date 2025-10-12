@@ -97,62 +97,62 @@ def load_hyperparameter_space():
         },
         "early_stopping_rounds": {
             "type": "int",
-            "low": 100,   # Slightly below min
-            "high": 1000, # Slightly above max
+            "low": 100,  # Slightly below min
+            "high": 1000,  # Slightly above max
             "step": 10,
         },
         "learning_rate": {
             "type": "float",
-            "low": 0.02,   # Slightly below min
-            "high": 0.20,   # Slightly above max
+            "low": 0.02,  # Slightly below min
+            "high": 0.20,  # Slightly above max
             "step": 0.001,
         },
         "max_depth": {
             "type": "int",
-            "low": 5,      # At min
-            "high": 14,    # Slightly above max
+            "low": 5,  # At min
+            "high": 14,  # Slightly above max
             "step": 1,
         },
         "min_child_weight": {
             "type": "int",
-            "low": 100,    # Slightly below min
-            "high": 1000,   # Slightly above max
+            "low": 100,  # Slightly below min
+            "high": 1000,  # Slightly above max
             "step": 5,
         },
         "colsample_bytree": {
             "type": "float",
-            "low": 0.30,   # Slightly below min
+            "low": 0.30,  # Slightly below min
             "high": 0.98,  # Slightly above max
             "step": 0.005,
         },
         "subsample": {
             "type": "float",
-            "low": 0.65,   # Slightly below min
+            "low": 0.65,  # Slightly below min
             "high": 0.97,  # Slightly above max
             "step": 0.005,
         },
         "gamma": {
             "type": "float",
-            "low": 0.20,   # Slightly below min
-            "high": 7.5,   # Slightly above max
+            "low": 0.20,  # Slightly below min
+            "high": 7.5,  # Slightly above max
             "step": 0.01,
         },
         "lambda": {
             "type": "float",
-            "low": 4.0,    # Slightly below min
+            "low": 4.0,  # Slightly below min
             "high": 17.0,  # Slightly above max
             "step": 0.01,
         },
         "alpha": {
             "type": "float",
-            "low": 20.0,   # Slightly below min
+            "low": 20.0,  # Slightly below min
             "high": 75.0,  # Slightly above max
             "step": 0.1,
         },
         "scale_pos_weight": {
             "type": "float",
-            "low": 1.8,    # Slightly below min
-            "high": 3.2,   # Slightly above max
+            "low": 1.8,  # Slightly below min
+            "high": 3.2,  # Slightly above max
             "step": 0.01,
         },
     }
@@ -172,7 +172,7 @@ def create_model(model_params):
     """
     # Update with provided parameters
     model_params.update(base_params)
-        
+
     # Create model
     # Pass all params, including early_stopping_rounds, to the constructor
     model = xgb.XGBClassifier(**model_params)
@@ -251,7 +251,15 @@ def optimize_hyperparameters(
     def objective_func(trial):
         nonlocal best_score
         return objective(
-            trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space, best_score
+            trial,
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            X_eval,
+            y_eval,
+            hyperparameter_space,
+            best_score,
         )
 
     # Callback function defined outside the loop so that its modifications affect the outer scope.
@@ -321,9 +329,7 @@ def optimize_hyperparameters(
             f"Starting batch {batch + 1}/{num_batches} with new sampler (seed={random_seed})"
         )
         # Pass the lambda function wrapping objective
-        study.optimize(
-            objective_func, n_trials=batch_size, callbacks=[callback]
-        )
+        study.optimize(objective_func, n_trials=batch_size, callbacks=[callback])
 
         # Merge current batch's top trials with global_top_trials
         for trial_record in top_trials:
@@ -360,7 +366,9 @@ def optimize_hyperparameters(
 
 
 # Objective function now needs to accept the data explicitly
-def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space, best_score):
+def objective(
+    trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space, best_score
+):
     try:
         params = base_params.copy()
         # Extract early_stopping_rounds separately
@@ -409,16 +417,14 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
         # Pruning Callback - Monitor AUC PR on eval set (default name 'validation_0')
         XGBoostPruningCallback(trial, "validation_0-aucpr")
         # Train model and get metrics using DataFrames
-        model, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, params
-        )
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
 
         recall = metrics.get("recall", 0.0)
         precision = metrics.get("precision", 0.0)
         threshold = metrics.get("threshold", 0.5)
         # Optimize for precision while maintaining minimum recall
         score = precision if recall >= min_recall else 0.0
-        
+
         # Pruning: report the score back to Optuna
         trial.report(score, step=model.best_iteration if hasattr(model, "best_iteration") else 0)
         # if trial.should_prune():
@@ -430,7 +436,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
 
         for metric_name, metric_value in metrics.items():
             trial.set_user_attr(metric_name, metric_value)
-        
+
         if score > 0.33 and score > best_score:
             log_to_mlflow(model, metrics, params, experiment_name, X_eval)
         return score
@@ -575,7 +581,7 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.warning(
             "Training model with precision target - Ensure parameters are updated from HPO."
         )
-        
+
         params = base_params.copy()
         params.update(
             {
@@ -589,26 +595,25 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
                 "lambda": 11.69,
                 "alpha": 31.5,
                 "scale_pos_weight": 1.84,
-                "eval_metric": ['aucpr', 'error', 'logloss'],
+                "eval_metric": ["aucpr", "error", "logloss"],
             }
         )
         # Train final model with specific parameters
-        model, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, params
-        )
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
 
         # Log to MLflow using the DataFrame X_eval for signature
         # log_to_mlflow(model, metrics, params, experiment_name, X_eval)
-        top_features = compute_permutation_importance(model, X_eval, y_eval, metrics['threshold'])
+        top_features = compute_permutation_importance(model, X_eval, y_eval, metrics["threshold"])
         logger.info(f"Top features: {top_features}")
         return model, metrics
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
 
+
 def compute_permutation_importance(
     model,
-    X_val: pd.DataFrame, 
+    X_val: pd.DataFrame,
     y_val: np.ndarray,
     threshold: float = 0.3,
     n_repeats: int = 50,
@@ -641,13 +646,15 @@ def compute_permutation_importance(
         drops = []
         for i in range(n_repeats):
             feat_idx = feature_names.index(feat) + 1
-            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i+1}")
+            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i + 1}")
             X_shuffled = X_val.copy()
             X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
             probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
             preds_shuffled = (probs_shuffled >= threshold).astype(int)
             # Calculate precision directly instead of using metric parameter
-            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (
+                np.sum(preds_shuffled == 1)
+            )
             drop = baseline - precision
             drops.append(drop)
         mean_drop = np.mean(drops)
@@ -660,25 +667,29 @@ def compute_permutation_importance(
     logger.info(df_importance.head(number_of_features).to_string(index=False))
     return df_importance
 
-def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+
+def hypertune_with_feature_importance(
+    X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50
+):
     """
     Perform hyperparameter optimization with Optuna while tracking feature importances.
-    
+
     Args:
         X_train (pd.DataFrame): Training features
-        y_train (pd.Series): Training labels 
+        y_train (pd.Series): Training labels
         X_test (pd.DataFrame): Test features
         y_test (pd.Series): Test labels
         n_trials (int): Number of optimization trials
-        
+
     Returns:
         tuple: (best_params, feature_importance_df)
     """
     logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
-    
+
     # Store feature importances across trials
     feature_importances = []
     hyperparameter_space = load_hyperparameter_space()
+
     def objective(trial):
         params = base_params.copy()
         # Add hyperparameters from config with step size if provided
@@ -712,41 +723,40 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
                         param_name, param_config["low"], param_config["high"]
                     )
 
-        
         # Train model
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
-        
+
         # Store feature importances for this trial
         importance_dict = dict(zip(X_train.columns, model.feature_importances_))
         feature_importances.append(importance_dict)
-        
-        return metrics['precision']
-    
+
+        return metrics["precision"]
+
     # Create and run study
-    study = optuna.create_study(direction='maximize')
+    study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials)
-    
+
     # Calculate average feature importance across all trials
     avg_importances = {}
     for feature in X_train.columns:
         importance_values = [trial_imp[feature] for trial_imp in feature_importances]
         avg_importances[feature] = np.mean(importance_values)
-    
+
     # Create DataFrame and sort by importance
-    importance_df = pd.DataFrame({
-        'feature': list(avg_importances.keys()),
-        'importance': list(avg_importances.values())
-    })
-    importance_df = importance_df.sort_values('importance', ascending=False)
-    
+    importance_df = pd.DataFrame(
+        {"feature": list(avg_importances.keys()), "importance": list(avg_importances.values())}
+    )
+    importance_df = importance_df.sort_values("importance", ascending=False)
+
     # Get top 100 features
     top_100_features = importance_df.head(100)
-    
+
     logger.info("Top 100 features by average importance across trials:")
     for idx, row in top_100_features.iterrows():
         logger.info(f"{row['feature']}: {row['importance']:.4f} id: {idx}")
-    
+
     return study.best_params, importance_df
+
 
 def main():
     """
@@ -780,15 +790,10 @@ def main():
         # )
 
         # Run Hyperparameter Optimization
-        hypertune_xgboost(
-            X_train, y_train, X_test, y_test, X_eval, y_eval,
-            experiment_name
-        )
-        
+        hypertune_xgboost(X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_name)
+
         best_model, best_metrics = train_with_precision_target(
-            X_train, y_train,
-            X_test, y_test,
-            X_eval, y_eval
+            X_train, y_train, X_test, y_test, X_eval, y_eval
         )
 
     except Exception as e:

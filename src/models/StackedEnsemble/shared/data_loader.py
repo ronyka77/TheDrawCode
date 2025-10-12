@@ -1,4 +1,5 @@
 """Data loading utilities for the stacked ensemble."""
+
 import numpy as np
 import pandas as pd
 

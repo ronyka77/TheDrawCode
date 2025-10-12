@@ -21,7 +21,6 @@ import pandas as pd
 from sklearn.feature_selection import RFECV
 from sklearn.model_selection import StratifiedKFold
 
-from src.models.StackedEnsemble.base.tree_based.xgboost_model_outliers import apply_outlier_removal
 from src.utils.logger import ExperimentLogger
 
 experiment_name = "lightgbm_soccer_prediction_25"
@@ -83,18 +82,37 @@ def load_hyperparameter_space():
         "num_leaves": {"type": "int", "low": 10, "high": 250, "log": False, "step": 5},
         "max_depth": {"type": "int", "low": 7, "high": 13, "log": False, "step": 1},
         "min_child_samples": {"type": "int", "low": 100, "high": 1000, "log": False, "step": 10},
-        "feature_fraction": {"type": "float", "low": 0.25, "high": 0.80, "log": False, "step": 0.01},
-        "bagging_fraction": {"type": "float", "low": 0.25, "high": 0.80, "log": False, "step": 0.005},
+        "feature_fraction": {
+            "type": "float",
+            "low": 0.25,
+            "high": 0.80,
+            "log": False,
+            "step": 0.01,
+        },
+        "bagging_fraction": {
+            "type": "float",
+            "low": 0.25,
+            "high": 0.80,
+            "log": False,
+            "step": 0.005,
+        },
         "bagging_freq": {"type": "int", "low": 30, "high": 100, "log": False, "step": 1},
         "reg_alpha": {"type": "float", "low": 8.0, "high": 27.0, "log": False, "step": 0.1},
         "reg_lambda": {"type": "float", "low": 1.0, "high": 22.0, "log": False, "step": 0.1},
         "min_split_gain": {"type": "float", "low": 0.02, "high": 0.45, "log": False, "step": 0.005},
-        "early_stopping_rounds": {"type": "int", "low": 400, "high": 2000, "log": False, "step": 10},
+        "early_stopping_rounds": {
+            "type": "int",
+            "low": 400,
+            "high": 2000,
+            "log": False,
+            "step": 10,
+        },
         "path_smooth": {"type": "float", "low": 0.02, "high": 0.30, "log": False, "step": 0.005},
         "cat_smooth": {"type": "float", "low": 10.0, "high": 50.0, "log": False, "step": 0.1},
         "max_bin": {"type": "int", "low": 300, "high": 1000, "log": False, "step": 10},
     }
     return hyperparameter_space
+
 
 def create_model(model_params):
     """
@@ -116,6 +134,7 @@ def create_model(model_params):
     except Exception as e:
         logger.error(f"Error creating LightGBM model: {str(e)}")
         raise
+
 
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
@@ -165,6 +184,7 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     except Exception as e:
         logger.error(f"Error training LightGBM model: {str(e)}")
         raise
+
 
 def optimize_hyperparameters(
     X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
@@ -292,20 +312,24 @@ def optimize_hyperparameters(
     for batch in range(num_batches):
         # Feature reduction: Remove 2 features every batch
         if batch > 0:  # Skip feature reduction for the first batch
-            features_to_remove = min(1, X_train.shape[1] - 10)  # Ensure we don't go below 10 features
+            features_to_remove = min(
+                1, X_train.shape[1] - 10
+            )  # Ensure we don't go below 10 features
             if features_to_remove > 0:
                 # Always remove the first x features
                 features_to_drop = X_train.columns[:features_to_remove].tolist()
-                
-                logger.info(f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}")
+
+                logger.info(
+                    f"Batch {batch + 1}: Removing {features_to_remove} features: {features_to_drop}"
+                )
                 logger.info(f"Features before removal: {X_train.shape[1]}")
-                
+
                 # Remove features from all datasets
                 X_train = X_train.drop(columns=features_to_drop)
                 X_test = X_test.drop(columns=features_to_drop)
                 if X_eval is not None:
                     X_eval = X_eval.drop(columns=features_to_drop)
-                
+
                 logger.info(f"Features after removal: {X_train.shape[1]}")
         # Create a new sampler with a dynamic seed
         random_seed = int(time.time())
@@ -349,6 +373,7 @@ def optimize_hyperparameters(
 
     return best_params
 
+
 def hypertune_lightgbm(experiment_name: str):
     """
     Main training function with MLflow tracking.
@@ -376,15 +401,14 @@ def hypertune_lightgbm(experiment_name: str):
 
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
-        model, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, best_params
-        )
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, best_params)
 
         return best_params, metrics
 
     except Exception as e:
         logger.error(f"Error in hyperparameter tuning: {str(e)}")
         return None, None
+
 
 def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
     """
@@ -450,6 +474,7 @@ def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
         logger.error(f"Error logging to MLflow: {str(e)}")
         return None
 
+
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
     Train XGBoost model with focus on precision target.
@@ -494,7 +519,7 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
-        compute_permutation_importance(model, X_eval, y_eval, metrics['threshold'])
+        compute_permutation_importance(model, X_eval, y_eval, metrics["threshold"])
 
         return model, metrics
 
@@ -502,9 +527,10 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
 
+
 def compute_permutation_importance(
     model,
-    X_val: pd.DataFrame, 
+    X_val: pd.DataFrame,
     y_val: np.ndarray,
     threshold: float = 0.3,
     n_repeats: int = 50,
@@ -537,13 +563,15 @@ def compute_permutation_importance(
         drops = []
         for i in range(n_repeats):
             feat_idx = feature_names.index(feat) + 1
-            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i+1}")
+            logger.info(f"Shuffling feature: {feat} ({feat_idx}) - Repeat: {i + 1}")
             X_shuffled = X_val.copy()
             X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
             probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
             preds_shuffled = (probs_shuffled >= threshold).astype(int)
             # Calculate precision directly instead of using metric parameter
-            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (
+                np.sum(preds_shuffled == 1)
+            )
             drop = baseline - precision
             drops.append(drop)
         mean_drop = np.mean(drops)
@@ -556,7 +584,10 @@ def compute_permutation_importance(
     logger.info(df_importance.head(number_of_features).to_string(index=False))
     return df_importance
 
-def select_features_rfecv(X, y, logger, min_features=150, step=1, scoring='roc_auc', random_state=19):
+
+def select_features_rfecv(
+    X, y, logger, min_features=150, step=1, scoring="roc_auc", random_state=19
+):
     """
     Perform RFECV-based feature selection using LightGBM.
     Args:
@@ -570,7 +601,9 @@ def select_features_rfecv(X, y, logger, min_features=150, step=1, scoring='roc_a
     Returns:
         tuple: (List[str], pd.DataFrame)
     """
-    logger.info(f"Starting RFECV feature selection with min_features={min_features}, step={step}, scoring={scoring}")
+    logger.info(
+        f"Starting RFECV feature selection with min_features={min_features}, step={step}, scoring={scoring}"
+    )
     params = base_params.copy()
     params.update(
         {
@@ -604,39 +637,42 @@ def select_features_rfecv(X, y, logger, min_features=150, step=1, scoring='roc_a
         scoring=scoring,
         min_features_to_select=min_features,
         n_jobs=-1,
-        verbose=2
+        verbose=2,
     )
     selector.fit(X, y)
     selected_features = X.columns[selector.support_].tolist()
     importances = selector.estimator_.feature_importances_
-    feature_importance_df = pd.DataFrame({
-        'feature': selected_features,
-        'importance': importances
-    }).sort_values('importance', ascending=False)
+    feature_importance_df = pd.DataFrame(
+        {"feature": selected_features, "importance": importances}
+    ).sort_values("importance", ascending=False)
     logger.info(f"RFECV selected {len(selected_features)} features:")
-    for feat, imp in zip(feature_importance_df['feature'], feature_importance_df['importance']):
+    for feat, imp in zip(feature_importance_df["feature"], feature_importance_df["importance"]):
         logger.info(f"  - {feat}: {imp}")
     return selected_features, feature_importance_df
 
-def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+
+def hypertune_with_feature_importance(
+    X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50
+):
     """
     Perform hyperparameter optimization with Optuna while tracking feature importances.
-    
+
     Args:
         X_train (pd.DataFrame): Training features
-        y_train (pd.Series): Training labels 
+        y_train (pd.Series): Training labels
         X_test (pd.DataFrame): Test features
         y_test (pd.Series): Test labels
         n_trials (int): Number of optimization trials
-        
+
     Returns:
         tuple: (best_params, feature_importance_df)
     """
     logger.info(f"Starting hyperparameter optimization with {n_trials} trials")
-    
+
     # Store feature importances across trials
     feature_importances = []
     hyperparameter_space = load_hyperparameter_space()
+
     def objective(trial):
         params = base_params.copy()
         # Add hyperparameters from config with step size if provided
@@ -670,40 +706,38 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
                         param_name, param_config["low"], param_config["high"]
                     )
 
-        
         # Train model
         model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params)
-        
+
         # Store feature importances for this trial
         importance_dict = dict(zip(X_train.columns, model.feature_importances_))
         feature_importances.append(importance_dict)
-        
-        return metrics['precision']
-    
+
+        return metrics["precision"]
+
     # Create and run study
-    study = optuna.create_study(direction='maximize')
+    study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials)
-    
+
     # Calculate average feature importance across all trials
     avg_importances = {}
     for feature in X_train.columns:
         importance_values = [trial_imp[feature] for trial_imp in feature_importances]
         avg_importances[feature] = np.mean(importance_values)
-    
+
     # Create DataFrame and sort by importance
-    importance_df = pd.DataFrame({
-        'feature': list(avg_importances.keys()),
-        'importance': list(avg_importances.values())
-    })
-    importance_df = importance_df.sort_values('importance', ascending=False)
-    
+    importance_df = pd.DataFrame(
+        {"feature": list(avg_importances.keys()), "importance": list(avg_importances.values())}
+    )
+    importance_df = importance_df.sort_values("importance", ascending=False)
+
     # Get top 100 features
     top_100_features = importance_df.head(100)
-    
+
     logger.info("Top 100 features by average importance across trials:")
     for idx, row in top_100_features.iterrows():
         logger.info(f"{row['feature']}: {row['importance']:.4f} id: {idx}")
-    
+
     return study.best_params, importance_df
 
 
@@ -714,7 +748,7 @@ def main():
     try:
         logger.info("Starting LightGBM model training")
         global X_train, y_train, X_test, y_test, X_eval, y_eval
-        
+
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
@@ -739,10 +773,10 @@ def main():
         # )
 
         # --- Feature Selection with RFECV ---
-        # selected_features, feature_importance_df = select_features_rfecv(X_eval, y_eval, logger, 
-        #                                                                 min_features=150, 
-        #                                                                 step=1, 
-        #                                                                 scoring='roc_auc', 
+        # selected_features, feature_importance_df = select_features_rfecv(X_eval, y_eval, logger,
+        #                                                                 min_features=150,
+        #                                                                 step=1,
+        #                                                                 scoring='roc_auc',
         #                                                                 random_state=SEED)
         # print(feature_importance_df)
 

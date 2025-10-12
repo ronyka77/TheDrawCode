@@ -1,18 +1,21 @@
 """Configuration loading and validation utilities."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 
-from utils.logger import ExperimentLogger
+from src.utils.logger import ExperimentLogger
 
 
 class ConfigurationLoader:
     """Handles loading and validation of model configurations."""
 
     def __init__(
-        self, model_type: str = None, logger: ExperimentLogger = None, experiment_name: str = None
+        self,
+        model_type: Optional[str] = None,
+        logger: Optional[ExperimentLogger] = None,
+        experiment_name: Optional[str] = None,
     ):
         """Initialize the configuration loader.
 
@@ -28,7 +31,7 @@ class ConfigurationLoader:
         self.project_root = Path(__file__).parent.parent.parent.parent
         self.base_config_path = self.project_root / "models" / "StackedEnsemble" / "config"
 
-    def load_model_config(self, model_type: str = None) -> dict[str, Any]:
+    def load_model_config(self, model_type: Optional[str] = None) -> dict[str, Any]:
         """Load model-specific configuration.
 
         Args:
@@ -59,7 +62,7 @@ class ConfigurationLoader:
             self.logger.error(f"Error parsing configuration file: {e}")
             raise
 
-    def load_hyperparameter_space(self, model_type: str = None) -> dict[str, Any]:
+    def load_hyperparameter_space(self, model_type: Optional[str] = None) -> dict[str, Any]:
         """Load hyperparameter search space configuration.
 
         Args:

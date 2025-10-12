@@ -19,6 +19,7 @@ import numpy as np
 import optuna
 import sklearn
 import xgboost as xgb
+from mlflow.models import infer_signature
 from optuna.integration import XGBoostPruningCallback
 
 # Import own modules
@@ -90,62 +91,62 @@ def load_hyperparameter_space():
     hyperparameter_space = {
         "early_stopping_rounds": {
             "type": "int",
-            "low": 400,   # Slightly below min
-            "high": 2000, # Slightly above max
+            "low": 400,  # Slightly below min
+            "high": 2000,  # Slightly above max
             "step": 10,
         },
         "learning_rate": {
             "type": "float",
-            "low": 0.038,   # Slightly below min
-            "high": 0.17,   # Slightly above max
+            "low": 0.038,  # Slightly below min
+            "high": 0.17,  # Slightly above max
             "step": 0.001,
         },
         "max_depth": {
             "type": "int",
-            "low": 5,      # At min
-            "high": 16,    # Slightly above max
+            "low": 5,  # At min
+            "high": 16,  # Slightly above max
             "step": 1,
         },
         "min_child_weight": {
             "type": "int",
-            "low": 320,    # Slightly below min
-            "high": 700,   # Slightly above max
+            "low": 320,  # Slightly below min
+            "high": 700,  # Slightly above max
             "step": 10,
         },
         "colsample_bytree": {
             "type": "float",
-            "low": 0.61,   # Slightly below min
+            "low": 0.61,  # Slightly below min
             "high": 0.97,  # Slightly above max
             "step": 0.005,
         },
         "subsample": {
             "type": "float",
-            "low": 0.60,   # Slightly below min
+            "low": 0.60,  # Slightly below min
             "high": 0.94,  # Slightly above max
             "step": 0.005,
         },
         "gamma": {
             "type": "float",
-            "low": 0.20,   # Slightly below min
-            "high": 5.1,   # Slightly above max
+            "low": 0.20,  # Slightly below min
+            "high": 5.1,  # Slightly above max
             "step": 0.01,
         },
         "lambda": {
             "type": "float",
-            "low": 2.8,    # Slightly below min
+            "low": 2.8,  # Slightly below min
             "high": 17.0,  # Slightly above max
             "step": 0.01,
         },
         "alpha": {
             "type": "float",
-            "low": 24.0,   # Slightly below min
+            "low": 24.0,  # Slightly below min
             "high": 58.0,  # Slightly above max
             "step": 0.1,
         },
         "scale_pos_weight": {
             "type": "float",
-            "low": 1.5,    # Slightly below min
-            "high": 3.2,   # Slightly above max
+            "low": 1.5,  # Slightly below min
+            "high": 3.2,  # Slightly above max
             "step": 0.01,
         },
     }
@@ -171,18 +172,18 @@ def create_model(model_params):
     return model
 
 
-def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
+def train_model(x_train, y_train, x_test, y_test, x_eval, y_eval, model_params):
     """
     Train a XGBoost model with early stopping and threshold optimization.
     Uses DataFrame/Array for fitting (required by XGBClassifier wrapper)
-    Requires X_eval, y_eval for threshold optimization and eval_set.
+    Requires x_eval, y_eval for threshold optimization and eval_set.
     Early stopping is handled by the model constructor.
     Args:
-        X_train (pd.DataFrame): Training features
+        x_train (pd.DataFrame): Training features
         y_train: Training labels (needed by create_model if scale_pos_weight calculation required, though currently static)
-        X_test: Validation features (currently unused)
+        x_test: Validation features (currently unused)
         y_test: Validation labels (currently unused)
-        X_eval (pd.DataFrame): Evaluation features for eval_set and threshold optimization
+        x_eval (pd.DataFrame): Evaluation features for eval_set and threshold optimization
         y_eval (pd.Series): Evaluation labels for threshold optimization
         model_params (dict): Model parameters
     Returns:
@@ -194,11 +195,11 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
 
         # Create eval set for early stopping using DMatrix
         # Use DataFrame/Array for eval_set as required by fit when using wrapper
-        eval_set = [(X_test, y_test)]
+        eval_set = [(x_test, y_test)]
 
         # Fit model with early stopping
         model.fit(
-            X=X_train,
+            X=x_train,
             y=y_train,
             eval_set=eval_set,
             verbose=False,
@@ -206,7 +207,7 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         )
 
         # Get validation predictions using the DataFrame for optimize_threshold
-        best_threshold, metrics = optimize_threshold(model, X_eval, y_eval, min_recall=min_recall)
+        _, metrics = optimize_threshold(model, x_eval, y_eval, min_recall=min_recall)
 
         return model, metrics
 
@@ -216,7 +217,7 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
 
 
 def optimize_hyperparameters(
-    X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
+    x_train, y_train, x_test, y_test, x_eval, y_eval, hyperparameter_space
 ):
     """
     Optimize hyperparameters using Optuna, passing DataFrames.
@@ -234,7 +235,7 @@ def optimize_hyperparameters(
     # Pass necessary data to the objective function
     def objective_func(trial):
         return objective(
-            trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
+            trial, x_train, y_train, x_test, y_test, x_eval, y_eval, hyperparameter_space
         )
 
     # Callback function defined outside the loop so that its modifications affect the outer scope.
@@ -274,7 +275,6 @@ def optimize_hyperparameters(
             logger.info(table_separator)
             for row in table_rows:
                 logger.info(row)
-        return best_score
 
     # Set persistent storage path using SQLite
     storage_url = "sqlite:///optuna_xgboost.db"
@@ -317,7 +317,7 @@ def optimize_hyperparameters(
 
     # After all batches, update best_params (assume the best trial is the first in global_top_trials)
     if global_top_trials:
-        best_score, best_params_from_hpo, best_trial_number = global_top_trials[0]
+        best_score, best_params_from_hpo, _ = global_top_trials[0]
     else:
         best_params_from_hpo = {}  # Initialize if no trials were successful
 
@@ -343,7 +343,7 @@ def optimize_hyperparameters(
 
 
 # Objective function now needs to accept the data explicitly
-def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
+def objective(trial, x_train, y_train, x_test, y_test, x_eval, y_eval, hyperparameter_space):
     try:
         params = base_params.copy()
         # Extract early_stopping_rounds separately
@@ -392,9 +392,7 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
         # Pruning Callback - Monitor AUC PR on eval set (default name 'validation_0')
         XGBoostPruningCallback(trial, "validation_0-aucpr")
         # Train model and get metrics using DataFrames
-        model, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, params
-        )
+        model, metrics = train_model(x_train, y_train, x_test, y_test, x_eval, y_eval, params)
 
         recall = metrics.get("recall", 0.0)
         precision = metrics.get("precision", 0.0)
@@ -404,8 +402,6 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
 
         # Pruning: report the score back to Optuna
         trial.report(score, step=model.best_iteration if hasattr(model, "best_iteration") else 0)
-        # if trial.should_prune():
-        #     raise optuna.TrialPruned()
         logger.info(f"Trial {trial.number}:")
         logger.info(f"  Score: {score:.4f} (Precision: {precision:.4f}, Recall: {recall:.4f})")
         logger.info(f"  Threshold: {threshold:.4f}")
@@ -413,9 +409,9 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
 
         for metric_name, metric_value in metrics.items():
             trial.set_user_attr(metric_name, metric_value)
-        
+
         if score > 0.37:
-            log_to_mlflow(model, metrics, params, experiment_name, X_eval)
+            log_to_mlflow(model, metrics, params, experiment_name, x_eval)
         return score
 
     except optuna.TrialPruned:
@@ -426,33 +422,32 @@ def objective(trial, X_train, y_train, X_test, y_test, X_eval, y_eval, hyperpara
         return 0.0  # Return low score for failed trials
 
 
-def hypertune_xgboost(X_train, y_train, X_test, y_test, X_eval, y_eval, experiment_name: str):
+def hypertune_xgboost(x_train, y_train, x_test, y_test, x_eval, y_eval, experiment_name: str):
     """
     Main training function with MLflow tracking using DataFrames.
     Args:
-        X_train (pd.DataFrame): Training features
+        x_train (pd.DataFrame): Training features
         y_train: Training labels
-        X_test: Validation features
+        x_test: Validation features
         y_test: Validation labels
-        X_eval (pd.DataFrame): Evaluation features for signature/logging
+        x_eval (pd.DataFrame): Evaluation features for signature/logging
         y_eval (pd.Series): Evaluation labels
         experiment_name (str): Experiment name for MLflow tracking
     Returns:
         tuple: (best_params, best_metrics)
     """
     try:
-
         # Load hyperparameter space
         hyperparameter_space = load_hyperparameter_space()
 
         # Run hyperparameter optimization
         logger.info("Starting hyperparameter optimization")
         best_params = optimize_hyperparameters(
-            X_train,
+            x_train,
             y_train,
-            X_test,
+            x_test,
             y_test,
-            X_eval,
+            x_eval,
             y_eval,
             hyperparameter_space=hyperparameter_space,
         )
@@ -462,12 +457,12 @@ def hypertune_xgboost(X_train, y_train, X_test, y_test, X_eval, y_eval, experime
         # best_params already contains the combined HPO and base params, including early_stopping_rounds
         final_train_params = best_params
 
-        model, metrics = train_model(
-            X_train,
+        _, metrics = train_model(
+            x_train,
             y_train,
-            X_test,
+            x_test,
             y_test,
-            X_eval,  # Pass X_eval for threshold optimization within train_model
+            x_eval,  # Pass x_eval for threshold optimization within train_model
             y_eval,
             final_train_params,  # Pass the full best parameters including early stopping
         )
@@ -479,16 +474,16 @@ def hypertune_xgboost(X_train, y_train, X_test, y_test, X_eval, y_eval, experime
         return None, None
 
 
-def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
+def log_to_mlflow(model, metrics, params, experiment_name, x_eval):
     """
     Log trained model, metrics, and parameters to MLflow.
-    Requires X_eval DataFrame for signature generation.
+    Requires x_eval DataFrame for signature generation.
     Args:
         model: Trained XGBoost model
         metrics: Model evaluation metrics
         params: Model parameters
         experiment_name: Experiment name
-        X_eval (pd.DataFrame): Evaluation features for signature generation
+        x_eval (pd.DataFrame): Evaluation features for signature generation
     Returns:
         str: Run ID
     """
@@ -511,8 +506,8 @@ def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
             # Log metrics
             mlflow.log_metrics(metrics)
 
-            # Create input example using the DataFrame X_eval
-            input_example = X_eval.iloc[:5].copy()
+            # Create input example using the DataFrame x_eval
+            input_example = x_eval.iloc[:5].copy()
 
             # Identify and convert integer columns to float64
             if hasattr(input_example, "dtypes"):
@@ -522,7 +517,7 @@ def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
                         input_example[col] = input_example[col].astype("float64")
 
             # Infer signature
-            signature = mlflow.models.infer_signature(input_example, model.predict(input_example))
+            signature = infer_signature(input_example, model.predict(input_example))
 
             # Update model registration with signature
             model_info = mlflow.xgboost.log_model(
@@ -542,15 +537,15 @@ def log_to_mlflow(model, metrics, params, experiment_name, X_eval):
         return None
 
 
-def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
+def train_with_precision_target(x_train, y_train, x_test, y_test, x_eval, y_eval):
     """
     Train XGBoost model with focus on precision target using DataFrames.
     Args:
-        X_train (pd.DataFrame): Training features
+        x_train (pd.DataFrame): Training features
         y_train: Training labels
-        X_test: Validation features
+        x_test: Validation features
         y_test: Validation labels
-        X_eval (pd.DataFrame): Evaluation features for logging/thresholding
+        x_eval (pd.DataFrame): Evaluation features for logging/thresholding
         y_eval (pd.Series): Evaluation labels
     Returns:
         tuple: (best_model, best_metrics)
@@ -575,31 +570,38 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
             }
         )
         # Train final model with specific parameters
-        model, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, params
-        )
+        model, metrics = train_model(x_train, y_train, x_test, y_test, x_eval, y_eval, params)
 
-        # Log to MLflow using the DataFrame X_eval for signature
-        # log_to_mlflow(model, metrics, params, experiment_name, X_eval)
-        top_features = select_top_features_xgb(model, X_eval)
+        # Log to MLflow using the DataFrame x_eval for signature
+        # log_to_mlflow(model, metrics, params, experiment_name, x_eval)
+        top_features = select_top_features_xgb(model, x_eval)
         logger.info(f"Top features: {top_features}")
         return model, metrics
     except Exception as e:
         logger.error(f"Error in precision-focused training: {str(e)}")
         return None, None
 
+
 def select_best_feature_combination(
-    X, y, X_test, y_test, X_eval, y_eval,
-    num_features=70, num_trials=500, min_recall=0.3, random_state=19
+    x,
+    y,
+    x_test,
+    y_test,
+    x_eval,
+    y_eval,
+    num_features=70,
+    num_trials=500,
+    min_recall=0.3,
+    random_state=19,
 ):
     """
     Try multiple random combinations of features, train a model for each,
     and select the best set based on precision (if recall >= min_recall).
     Args:
-        X (pd.DataFrame): Training features (all 165 columns)
+        x (pd.DataFrame): Training features (all 165 columns)
         y (pd.Series): Training labels
         logger: Logger instance
-        X_test, y_test, X_eval, y_eval: Validation/eval sets (same columns as X)
+        x_test, y_test, x_eval, y_eval: Validation/eval sets (same columns as x)
         num_features (int): Number of features to select in each trial
         num_trials (int): Number of random combinations to try
         min_recall (float): Minimum recall threshold for score
@@ -611,7 +613,7 @@ def select_best_feature_combination(
     """
 
     rng = np.random.default_rng(random_state)
-    all_features = list(X_eval.columns)
+    all_features = list(x_eval.columns)
     best_score = -1.0
     best_features = None
     best_mask = None
@@ -625,7 +627,7 @@ def select_best_feature_combination(
             "n_jobs": 4,
             "tree_method": "hist",
             "verbosity": 0,
-            "eval_metric": ['aucpr', 'error', 'logloss'],
+            "eval_metric": ["aucpr", "error", "logloss"],
             "colsample_bytree": 0.81,
             "subsample": 0.68,
             "gamma": 3.41,
@@ -637,70 +639,79 @@ def select_best_feature_combination(
             "nthread": 8,
             "seed": 19,
             "device": "cuda",
-            "early_stopping_rounds": 700
+            "early_stopping_rounds": 700,
         }
     )
-    logger.info(f"Trying {num_trials} random combinations of {num_features} features out of {len(all_features)}...")
+    logger.info(
+        f"Trying {num_trials} random combinations of {num_features} features out of {len(all_features)}..."
+    )
 
     for trial in range(num_trials):
         # Randomly select features
         selected = rng.choice(all_features, size=num_features, replace=False)
         selected = list(selected)
         # Subset data
-        X_train_sel = X[selected]
-        X_test_sel = X_test[selected]
-        X_eval_sel = X_eval[selected]
+        x_train_sel = x[selected]
+        x_test_sel = x_test[selected]
+        x_eval_sel = x_eval[selected]
         # Train model and get metrics
         try:
-            model, metrics = train_model(
-                X_train_sel, y, X_test_sel, y_test, X_eval_sel, y_eval, model_params
+            _, metrics = train_model(
+                x_train_sel, y, x_test_sel, y_test, x_eval_sel, y_eval, model_params
             )
             recall = metrics.get("recall", 0.0)
             precision = metrics.get("precision", 0.0)
             score = precision if recall >= min_recall else 0.0
-            
+
             if score > best_score:
                 best_score = score
                 best_features = selected
                 # Create boolean mask for best features
                 best_mask = np.array([f in best_features for f in all_features])
-            logger.info(f"Trial {trial+1}/{num_trials}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f} best_score={best_score:.4f})")
+            logger.info(
+                f"Trial {trial + 1}/{num_trials}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f} best_score={best_score:.4f})"
+            )
         except Exception as e:
-            logger.error(f"Trial {trial+1} failed: {e}")
+            logger.error(f"Trial {trial + 1} failed: {e}")
 
     logger.info(f"Best score: {best_score:.4f} with features: {best_features}")
     return best_features, best_mask, best_score
 
-def select_top_features_xgb(model, X_features, n_features: int = 30) -> list[str]:
+
+def select_top_features_xgb(model, x_features, n_features: int = 30) -> list[str]:
     """
     Selects the top N features based on XGBoost feature importances.
 
     Args:
         model: Trained xgb.XGBClassifier model.
-        X_features: DataFrame containing the features used for training (to get names).
+        x_features: DataFrame containing the features used for training (to get names).
         n_features: The number of top features to select.
 
     Returns:
         A list of the names of the top N features.
     """
     import pandas as pd
-    if not hasattr(model, 'feature_importances_'):
-        raise ValueError("The provided model has not been trained yet or does not support feature importances.")
+
+    if not hasattr(model, "feature_importances_"):
+        raise ValueError(
+            "The provided model has not been trained yet or does not support feature importances."
+        )
 
     importances = model.feature_importances_
-    feature_names = X_features.columns
+    feature_names = x_features.columns
 
     if len(importances) != len(feature_names):
         raise ValueError("Mismatch between the number of feature importances and feature names.")
 
-    feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
-    feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+    feature_importance_df = pd.DataFrame({"Feature": feature_names, "Importance": importances})
+    feature_importance_df = feature_importance_df.sort_values(by="Importance", ascending=False)
 
-    top_features = feature_importance_df['Feature'].head(n_features).tolist()
+    top_features = feature_importance_df["Feature"].head(n_features).tolist()
     logger.info(f"Selected top {n_features} features based on RF importance.")
-    logger.info(f"Top features: {top_features}") # Log the selected features for visibility
+    logger.info(f"Top features: {top_features}")  # Log the selected features for visibility
 
     return top_features
+
 
 def main():
     """
@@ -708,44 +719,51 @@ def main():
     """
     try:
         logger.info("Starting XGBoost model training")
-        
+
         # Load data
         dataloader = DataLoader()
-        X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
+        x_train, y_train, x_test, y_test, x_eval, y_eval = dataloader.load_data()
 
         features = import_selected_features_ensemble_new(model_type="xgb")
         logger.info(f"Features: {len(features)}")
-        X_train = prepare_data(X_train, features)
-        X_test = prepare_data(X_test, features)
-        X_eval = prepare_data(X_eval, features)
-        # best_features, best_mask, best_score = select_best_feature_combination(X_train, y_train, X_test, y_test, X_eval, y_eval)
+        # Ensure features is a list of strings for prepare_data
+        assert isinstance(features, list), f"Expected list of features, got {type(features)}"
+        x_train = prepare_data(x_train, features)
+        x_test = prepare_data(x_test, features)
+        x_eval = prepare_data(x_eval, features)
+        # best_features, best_mask, best_score = select_best_feature_combination(x_train, y_train, x_test, y_test, x_eval, y_eval)
         # Log data shapes
-        logger.info(f"Training data shape: {X_train.shape}")
-        logger.info(f"Testing data shape: {X_test.shape}")
-        logger.info(f"Evaluation data shape: {X_eval.shape}")
+        logger.info(f"Training data shape: {x_train.shape}")
+        logger.info(f"Testing data shape: {x_test.shape}")
+        logger.info(f"Evaluation data shape: {x_eval.shape}")
         logger.info(
             f"Positive class ratio - Train: {y_train.mean():.3f}, Test: {y_test.mean():.3f}, Eval: {y_eval.mean():.3f}"
         )
 
         # Run Hyperparameter Optimization
         hypertune_xgboost(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, # Pass DataFrames
-            experiment_name
+            x_train,
+            y_train,
+            x_test,
+            y_test,
+            x_eval,
+            y_eval,  # Pass DataFrames
+            experiment_name,
         )
 
-        # logger.info("Proceeding to train final model with precision target settings.")
-        # best_model, best_metrics = train_with_precision_target(
-        #     X_train,
-        #     y_train,
-        #     X_test,
-        #     y_test,
-        #     X_eval,
-        #     y_eval,  # Pass DataFrames
-        # )
-        # logger.error("Hyperparameter optimization failed. Skipping precision target training.")
+        # logger.info("Proceeding to train final model with precision target settings.") # noqa: E501
+        # best_model, best_metrics = train_with_precision_target( # noqa: E501
+        #     x_train, # noqa: E501
+        #     y_train, # noqa: E501
+        #     x_test, # noqa: E501
+        #     y_test, # noqa: E501
+        #     x_eval, # noqa: E501
+        #     y_eval,  # Pass DataFrames # noqa: E501
+        # ) # noqa: E501
+        # logger.error("Hyperparameter optimization failed. Skipping precision target training.") # noqa: E501
 
     except Exception as e:
-        logger.error(f"Error in main execution: {str(e)}")  # Add traceback
+        logger.error(f"Error in main execution: {str(e)}")  # Add traceback 
     finally:
         # Clean up DMatrix objects if needed (usually not necessary)
         # del dtrain, dtest, deval

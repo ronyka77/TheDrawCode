@@ -18,12 +18,13 @@ os.environ["OPENBLAS_NUM_THREADS"] = NUM_THREADS
 os.environ["TF_INTRA_OP_PARALLELISM_THREADS"] = NUM_THREADS
 os.environ["TF_INTER_OP_PARALLELISM_THREADS"] = NUM_THREADS
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force CPU usage
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"    # Change from "2" to "3"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Change from "2" to "3"
 os.environ["XLA_FLAGS"] = "--xla_hlo_profile=false"  # Disable XLA logging
 
 # Optional: Set process priority to high (Windows only)
 try:
     import psutil
+
     p = psutil.Process(os.getpid())
     p.nice(psutil.HIGH_PRIORITY_CLASS)
 except Exception:
@@ -56,37 +57,38 @@ random_seed = 19
 random.seed(random_seed)
 np.random.seed(random_seed)
 tf.random.set_seed(random_seed)
-os.environ['PYTHONHASHSEED'] = str(random_seed)
+os.environ["PYTHONHASHSEED"] = str(random_seed)
 
 # Configure Git executable path if available
 git_executable = os.environ.get("GIT_PYTHON_GIT_EXECUTABLE")
 if git_executable and os.path.exists(git_executable):
     import git
+
     git.refresh(git_executable)
 
 mlflow_tracking = setup_mlflow_tracking(experiment_name)
 
 # Global settings
-min_recall = 0.25            # Minimum acceptable recall
-n_trials = 10000             # Fewer trials for MLP due to longer training times
+min_recall = 0.25  # Minimum acceptable recall
+n_trials = 10000  # Fewer trials for MLP due to longer training times
 pip_requirements = [
     f"tensorflow=={tf.__version__}",
-    "scikit-learn", 
-    f"mlflow=={mlflow.__version__}"
+    "scikit-learn",
+    f"mlflow=={mlflow.__version__}",
 ]
 scaler = None  # Global scaler object
 
 # Define base configurations
-base_params = {
-    'verbose': 0,
-    'metrics': ['accuracy', 'AUC']
-}
+base_params = {"verbose": 0, "metrics": ["accuracy", "AUC"]}
+
+
 # Define the Wrapper Class
 class KerasMLPWrapper(BaseEstimator, ClassifierMixin):
     """
     A wrapper for a fitted Keras Sequential model to provide
     a scikit-learn compatible predict_proba method.
     """
+
     def __init__(self, model):
         # Check if the model is a fitted Keras model
         # Keras models might not have model.built immediately after loading, check for weights
@@ -130,89 +132,40 @@ class KerasMLPWrapper(BaseEstimator, ClassifierMixin):
 
     # Add necessary methods for sklearn compatibility if needed further
     def get_params(self, deep=True):
-        return {'model': self.model}
+        return {"model": self.model}
 
     def set_params(self, **params):
-        if 'model' in params:
-            self.model = params['model']
+        if "model" in params:
+            self.model = params["model"]
         return self
+
 
 def load_hyperparameter_space():
     """
     Define hyperparameter space for MLP tuning.
-    
+
     Returns:
         dict: Hyperparameter space configuration.
     """
     hyperparameter_space = {
-        'learning_rate': {
-            'type': 'float',
-            'low': 1e-5,
-            'high': 5e-2,
-            'log': True
-        },
-        'hidden_layers': {
-            'type': 'int',
-            'low': 1,
-            'high': 6
-        },
-        'neurons_per_layer': {
-            'type': 'int',
-            'low': 32,
-            'high': 1024,
-            'step': 16
-        },
-        'dropout_rate': {
-            'type': 'float',
-            'low': 0.59,
-            'high': 0.8,
-            'step': 0.001
-        },
-        'activation': {
-            'type': 'categorical',
-            'choices': ['elu', 'tanh']
-        },
-        'l1_regularization': {
-            'type': 'float',
-            'low': 1e-6,
-            'high': 5e-4,
-            'log': True
-        },
-        'l2_regularization': {
-            'type': 'float',
-            'low': 1e-6,
-            'high': 5e-3,
-            'log': True
-        },
-        'batch_size': {
-            'type': 'int',
-            'low': 512,
-            'high': 4096,  
-            'step': 32
-        },
-        'epochs': {
-            'type': 'int',
-            'low': 50,
-            'high': 250,
-            'step': 5
-        },
-        'patience': {
-            'type': 'int',
-            'low': 5,
-            'high': 50
-        },
-        'class_weight_multiplier': {
-            'type': 'float',
-            'low': 1.0,
-            'high': 2.5,
-            'step': 0.01
-        }
+        "learning_rate": {"type": "float", "low": 1e-5, "high": 5e-2, "log": True},
+        "hidden_layers": {"type": "int", "low": 1, "high": 6},
+        "neurons_per_layer": {"type": "int", "low": 32, "high": 1024, "step": 16},
+        "dropout_rate": {"type": "float", "low": 0.59, "high": 0.8, "step": 0.001},
+        "activation": {"type": "categorical", "choices": ["elu", "tanh"]},
+        "l1_regularization": {"type": "float", "low": 1e-6, "high": 5e-4, "log": True},
+        "l2_regularization": {"type": "float", "low": 1e-6, "high": 5e-3, "log": True},
+        "batch_size": {"type": "int", "low": 512, "high": 4096, "step": 32},
+        "epochs": {"type": "int", "low": 50, "high": 250, "step": 5},
+        "patience": {"type": "int", "low": 5, "high": 50},
+        "class_weight_multiplier": {"type": "float", "low": 1.0, "high": 2.5, "step": 0.01},
     }
     return hyperparameter_space
 
+
 def preprocess_data(X_train, X_test, X_eval=None):
     try:
-        with open('src/models/scalers/scaler_mlp.pkl', 'rb') as f:
+        with open("src/models/scalers/scaler_mlp.pkl", "rb") as f:
             scaler = pickle.load(f)
         logger.info("Loaded existing MLP scaler")
         X_train_scaled = scaler.transform(X_train)
@@ -225,57 +178,61 @@ def preprocess_data(X_train, X_test, X_eval=None):
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
         X_eval_scaled = scaler.transform(X_eval)
-        with open('src/models/scalers/scaler_mlp.pkl', 'wb') as f:
+        with open("src/models/scalers/scaler_mlp.pkl", "wb") as f:
             pickle.dump(scaler, f)
-        
+
     return X_train_scaled, X_test_scaled, X_eval_scaled, scaler
+
 
 def create_model(model_params):
     """
     Create and compile a Keras MLP model based on provided hyperparameters.
-    
+
     Args:
         model_params (dict): Hyperparameters for model configuration.
-        
+
     Returns:
         keras.Model: Compiled MLP model.
     """
     try:
-        input_dim = model_params.pop('input_dim')
-        hidden_layers = model_params.pop('hidden_layers', 2)
-        neurons_per_layer = model_params.pop('neurons_per_layer', 128)
-        dropout_rate = model_params.pop('dropout_rate', 0.2)
-        activation = model_params.pop('activation', 'relu')
-        l1_reg = model_params.pop('l1_regularization', 0.0)
-        l2_reg = model_params.pop('l2_regularization', 0.0)
-        learning_rate = model_params.pop('learning_rate', 0.001)
-        
+        input_dim = model_params.pop("input_dim")
+        hidden_layers = model_params.pop("hidden_layers", 2)
+        neurons_per_layer = model_params.pop("neurons_per_layer", 128)
+        dropout_rate = model_params.pop("dropout_rate", 0.2)
+        activation = model_params.pop("activation", "relu")
+        l1_reg = model_params.pop("l1_regularization", 0.0)
+        l2_reg = model_params.pop("l2_regularization", 0.0)
+        learning_rate = model_params.pop("learning_rate", 0.001)
+
         model = keras.Sequential()
         model.add(layers.InputLayer(shape=(input_dim,)))
-        
+
         # Add hidden layers
         for _ in range(hidden_layers):
-            model.add(layers.Dense(
-                neurons_per_layer,
-                activation=activation,
-                kernel_regularizer=regularizers.l1_l2(l1=l1_reg, l2=l2_reg)
-            ))
+            model.add(
+                layers.Dense(
+                    neurons_per_layer,
+                    activation=activation,
+                    kernel_regularizer=regularizers.l1_l2(l1=l1_reg, l2=l2_reg),
+                )
+            )
             model.add(layers.BatchNormalization())
             model.add(layers.Dropout(dropout_rate))
-        
+
         # Output layer for binary classification
-        model.add(layers.Dense(1, activation='sigmoid'))
+        model.add(layers.Dense(1, activation="sigmoid"))
         optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
         model.compile(
             optimizer=optimizer,
-            loss='binary_crossentropy',
-            metrics=['accuracy', keras.metrics.AUC(name='auc')],
-            jit_compile=True  # Enable XLA compilation for faster CPU execution
+            loss="binary_crossentropy",
+            metrics=["accuracy", keras.metrics.AUC(name="auc")],
+            jit_compile=True,  # Enable XLA compilation for faster CPU execution
         )
         return model
     except Exception as e:
         logger.error(f"Error creating MLP model: {str(e)}")
         raise
+
 
 def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
@@ -283,36 +240,37 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
     """
     try:
         # Set the input dimension based on training data
-        model_params['input_dim'] = X_train.shape[1]
+        model_params["input_dim"] = X_train.shape[1]
         keras_model = create_model(model_params.copy())
 
         # Compute class weights
         neg_count = np.sum(y_train == 0)
         pos_count = np.sum(y_train == 1)
         class_weight = {0: 1.0, 1: (neg_count / pos_count) if pos_count > 0 else 1.0}
-        class_weight[1] *= model_params.get('class_weight_multiplier', 1.0)
+        class_weight[1] *= model_params.get("class_weight_multiplier", 1.0)
 
         # Early stopping callback
         early_stop = callbacks.EarlyStopping(
-            monitor='val_auc', # Monitor validation AUC
-            mode='max',
-            patience=model_params.get('patience', 20),
+            monitor="val_auc",  # Monitor validation AUC
+            mode="max",
+            patience=model_params.get("patience", 20),
             restore_best_weights=True,
-            verbose=0
+            verbose=0,
         )
 
         logger.info("Starting Keras model fitting...")
         # For CPU training, moderate batch sizes work better
-        batch_size = model_params.get('batch_size', 32)
-        
+        batch_size = model_params.get("batch_size", 32)
+
         keras_model.fit(
-            X_train, y_train,
+            X_train,
+            y_train,
             validation_data=(X_test, y_test),
-            epochs=model_params.get('epochs', 100),
+            epochs=model_params.get("epochs", 100),
             batch_size=batch_size,
             class_weight=class_weight,
             callbacks=[early_stop],
-            verbose=0
+            verbose=0,
         )
         logger.info("Keras model fitting finished.")
 
@@ -321,7 +279,9 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         wrapped_model = KerasMLPWrapper(keras_model)
 
         # Optimize threshold using the wrapped model
-        best_threshold, threshold_metrics = optimize_threshold(wrapped_model, X_eval, y_eval, min_recall)
+        best_threshold, threshold_metrics = optimize_threshold(
+            wrapped_model, X_eval, y_eval, min_recall
+        )
 
         # Return the original Keras model and the combined metrics
         return keras_model, threshold_metrics, wrapped_model
@@ -329,7 +289,10 @@ def train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, model_params):
         logger.error(f"Error training MLP model: {str(e)}")
         raise
 
-def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space):
+
+def optimize_hyperparameters(
+    X_train, y_train, X_test, y_test, X_eval, y_eval, hyperparameter_space
+):
     """
     Run hyperparameter optimization using Optuna.
     """
@@ -345,26 +308,33 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         try:
             params = {}
             for param_name, param_config in hyperparameter_space.items():
-                if param_config['type'] == 'float':
+                if param_config["type"] == "float":
                     params[param_name] = trial.suggest_float(
-                        param_name, param_config['low'], param_config['high'],
-                        log=param_config.get('log', False), step=param_config.get('step')
+                        param_name,
+                        param_config["low"],
+                        param_config["high"],
+                        log=param_config.get("log", False),
+                        step=param_config.get("step"),
                     )
-                elif param_config['type'] == 'int':
+                elif param_config["type"] == "int":
                     params[param_name] = trial.suggest_int(
-                        param_name, param_config['low'], param_config['high']
+                        param_name, param_config["low"], param_config["high"]
                     )
-                elif param_config['type'] == 'categorical':
+                elif param_config["type"] == "categorical":
                     params[param_name] = trial.suggest_categorical(
-                        param_name, param_config['choices']
+                        param_name, param_config["choices"]
                     )
             # Train model - train_model now returns raw Keras model and metrics dict
-            model, metrics, wrapped_model = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, params.copy())
+            model, metrics, wrapped_model = train_model(
+                X_train, y_train, X_test, y_test, X_eval, y_eval, params.copy()
+            )
 
-            precision = metrics.get('precision', 0.0)
-            recall = metrics.get('recall', 0.0)
-            score = precision if recall >= min_recall else 0.0 # Optimize for precision
-            logger.info(f"  Trial {trial.number}: Score={score:.4f}, Precision={precision:.4f}, Recall={recall:.4f}, AUC={metrics.get('auc', 0.0):.4f}")
+            precision = metrics.get("precision", 0.0)
+            recall = metrics.get("recall", 0.0)
+            score = precision if recall >= min_recall else 0.0  # Optimize for precision
+            logger.info(
+                f"  Trial {trial.number}: Score={score:.4f}, Precision={precision:.4f}, Recall={recall:.4f}, AUC={metrics.get('auc', 0.0):.4f}"
+            )
 
             for metric_name, metric_value in metrics.items():
                 # Ensure serializable for Optuna
@@ -374,7 +344,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
                     trial.set_user_attr(metric_name, metric_value.item())
                 else:
                     trial.set_user_attr(metric_name, str(metric_value))
-            
+
             if score > 0.30 and score > best_score:
                 logger.info(f"Trial {trial.number} completed with score {score:.4f}")
                 log_to_mlflow(model, metrics, params, experiment_name, scaler, X_eval)
@@ -425,7 +395,7 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     sampler = optuna.samplers.RandomSampler(seed=random_seed)
     study = optuna.create_study(
         study_name=study_name,
-        direction='maximize',
+        direction="maximize",
         storage=storage_url,
         load_if_exists=True,
         sampler=sampler,
@@ -434,15 +404,17 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
         if batch > 0:  # Skip feature reduction for the first batch
             features_to_remove = min(1, X_train.shape[1] - 20)
             if features_to_remove > 0:
-                logger.info(f"Batch {batch + 1}: Removing {features_to_remove} features from position 0")
+                logger.info(
+                    f"Batch {batch + 1}: Removing {features_to_remove} features from position 0"
+                )
                 logger.info(f"Features before removal: {X_train.shape[1]}")
-                
+
                 # Remove features from numpy arrays by slicing (remove first features_to_remove columns)
                 X_train = X_train[:, features_to_remove:]
                 X_test = X_test[:, features_to_remove:]
                 if X_eval is not None:
                     X_eval = X_eval[:, features_to_remove:]
-                
+
                 logger.info(f"Features after removal: {X_train.shape[1]}")
         try:
             study.optimize(objective, n_trials=batch_size, callbacks=[callback], n_jobs=3)
@@ -455,57 +427,80 @@ def optimize_hyperparameters(X_train, y_train, X_test, y_test, X_eval, y_eval, h
     best_params.update(base_params)
     return best_params
 
+
 def hypertune_mlp(experiment_name):
     """
     Run hyperparameter tuning and final training for the MLP model with MLflow tracking.
     """
     try:
-        X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(X_train, X_test, X_eval)
+        X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(
+            X_train, X_test, X_eval
+        )
         hyperparameter_space = load_hyperparameter_space()
-        best_params = optimize_hyperparameters(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, hyperparameter_space)
+        best_params = optimize_hyperparameters(
+            X_train_scaled,
+            y_train,
+            X_test_scaled,
+            y_test,
+            X_eval_scaled,
+            y_eval,
+            hyperparameter_space,
+        )
         logger.info("Training final MLP model with best hyperparameters")
-        model, metrics = train_model(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, best_params.copy())
-        log_to_mlflow(model, metrics, best_params, experiment_name, scaler)
+        model, metrics = train_model(
+            X_train_scaled,
+            y_train,
+            X_test_scaled,
+            y_test,
+            X_eval_scaled,
+            y_eval,
+            best_params.copy(),
+        )
+        log_to_mlflow(model, metrics, best_params, experiment_name, scaler, X_eval)
         return best_params, metrics
     except Exception as e:
         logger.error(f"Error during hypertuning: {str(e)}")
         return None, None
 
+
 def log_to_mlflow(model, metrics, params, experiment_name, scaler, X_eval):
     """
     Log the final MLP model, its metrics, and parameters to MLflow.
-    
+
     Returns:
         str: Run ID.
     """
     try:
         mlflow.set_experiment(experiment_name)
-        with mlflow.start_run(run_name=f"mlp_final_{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
+        with mlflow.start_run(
+            run_name=f"mlp_final_{datetime.now().strftime('%Y%m%d_%H%M')}"
+        ) as run:
             for param_name, param_value in params.items():
                 mlflow.log_param(param_name, param_value)
             for metric_name, metric_value in metrics.items():
                 mlflow.log_metric(metric_name, metric_value)
-            
+
             # Wrap the fitted Keras model
             wrapped_model = KerasMLPWrapper(model)
-            scaler_path = 'src/models/scalers/scaler_mlp.pkl'
+            scaler_path = "src/models/scalers/scaler_mlp.pkl"
             mlflow.log_artifact(scaler_path, artifact_path="scaler")
             # Create input example
             input_example = X_eval.iloc[:5].copy()
             # Identify and convert integer columns to float64 to prevent schema enforcement errors
-            if hasattr(input_example, 'dtypes'):
+            if hasattr(input_example, "dtypes"):
                 for col in input_example.columns:
-                    if input_example[col].dtype.kind == 'i':
-                        logger.info(f"Converting integer column '{col}' to float64 to handle potential missing values")
-                        input_example[col] = input_example[col].astype('float64')
-            
+                    if input_example[col].dtype.kind == "i":
+                        logger.info(
+                            f"Converting integer column '{col}' to float64 to handle potential missing values"
+                        )
+                        input_example[col] = input_example[col].astype("float64")
+
             signature = None
             if input_example is not None:
                 try:
                     # Use wrapped model for predict_proba signature
                     signature = mlflow.models.infer_signature(
-                        input_example,
-                        wrapped_model.predict_proba(input_example)
+                        input_example, wrapped_model.predict_proba(input_example)
                     )
                 except Exception as sig_err:
                     logger.error(f"Failed to infer signature: {sig_err}")
@@ -516,7 +511,7 @@ def log_to_mlflow(model, metrics, params, experiment_name, scaler, X_eval):
                 artifact_path="model",
                 pip_requirements=pip_requirements,
                 registered_model_name=f"mlp_{datetime.now().strftime('%Y%m%d_%H%M')}",
-                signature=signature
+                signature=signature,
             )
             run_id = run.info.run_id
             logger.info(f"MLflow run ID: {run_id}")
@@ -525,6 +520,7 @@ def log_to_mlflow(model, metrics, params, experiment_name, scaler, X_eval):
     except Exception as e:
         logger.error(f"Error logging to MLflow: {str(e)}")
         return None
+
 
 def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval):
     """
@@ -543,35 +539,44 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
         logger.info("Training model with precision target")
         params = base_params.copy()  # Inherits base MLP parameters
         # Specific parameters for this training run with advanced scheduling
-        params.update({
-            "learning_rate": 2.291034155900042e-05,
-            "hidden_layers": 1,
-            "neurons_per_layer": 778,
-            "dropout_rate": 0.69,
-            "activation": "elu",
-            "l1_regularization": 1.2245823592413548e-06,
-            "l2_regularization": 7.52365321620833e-05,
-            "batch_size": 3621,
-            "epochs": 112,
-            "patience": 30,
-            "class_weight_multiplier": 2.42,
-        })
-        X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(X_train, X_test, X_eval)
+        params.update(
+            {
+                "learning_rate": 2.291034155900042e-05,
+                "hidden_layers": 1,
+                "neurons_per_layer": 778,
+                "dropout_rate": 0.69,
+                "activation": "elu",
+                "l1_regularization": 1.2245823592413548e-06,
+                "l2_regularization": 7.52365321620833e-05,
+                "batch_size": 3621,
+                "epochs": 112,
+                "patience": 30,
+                "class_weight_multiplier": 2.42,
+            }
+        )
+        X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(
+            X_train, X_test, X_eval
+        )
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
-        model, metrics, wrapped_model = train_model(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, params)
+        model, metrics, wrapped_model = train_model(
+            X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, params
+        )
         # Log to MLflow
         # log_to_mlflow(model, metrics, params, experiment_name, scaler)
-        top_features = compute_permutation_importance(wrapped_model, X_eval, X_eval_scaled, y_eval, metrics["threshold"])
+        top_features = compute_permutation_importance(
+            wrapped_model, X_eval, X_eval_scaled, y_eval, metrics["threshold"]
+        )
         logger.info(f"Top features: {top_features}")
         return model, metrics, params
     except Exception as e:
         logger.error(f"Error during MLflow artifact logging: {str(e)}")
         return mlflow.active_run().info.run_id if mlflow.active_run() else None
 
+
 def compute_permutation_importance(
     model,
-    X_val: pd.DataFrame, 
+    X_val: pd.DataFrame,
     X_val_scaled: np.ndarray,
     y_val: np.ndarray,
     threshold: float = 0.3,
@@ -592,35 +597,37 @@ def compute_permutation_importance(
         DataFrame with columns: ['feature', 'importance'] (mean drop in metric), sorted descending.
     """
     feature_names = X_val.columns.tolist()
-    y_val_np = y_val.values if hasattr(y_val, 'values') else y_val
-    
+    y_val_np = y_val.values if hasattr(y_val, "values") else y_val
+
     # Compute baseline metric
     probs = model.predict_proba(X_val_scaled)[:, 1]
     preds = (probs >= threshold).astype(int)
-    
+
     # Calculate baseline precision
     baseline = np.sum((y_val_np == 1) & (preds == 1)) / (np.sum(preds == 1))
     logger.info(f"Baseline metric: {baseline:.4f}")
-    
+
     importances = []
     for idx, feat in enumerate(feature_names):
         drops = []
         for i in range(n_repeats):
-            logger.info(f"Shuffling feature: {feat} ({idx}) - Repeat: {i+1}")
+            logger.info(f"Shuffling feature: {feat} ({idx}) - Repeat: {i + 1}")
             X_shuffled = X_val_scaled.copy()
             X_shuffled[:, idx] = np.random.permutation(X_shuffled[:, idx])
             probs_shuffled = model.predict_proba(X_shuffled)[:, 1]
             preds_shuffled = (probs_shuffled >= threshold).astype(int)
-            
+
             # Calculate precision directly instead of using metric parameter
-            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (
+                np.sum(preds_shuffled == 1)
+            )
             drop = baseline - precision
             drops.append(drop)
-            
+
         mean_drop = np.mean(drops)
         importances.append((feat, mean_drop))
         logger.debug(f"Feature: {feat}, Mean drop: {mean_drop:.4f}")
-        
+
     # Sort by importance descending
     importances.sort(key=lambda x: x[1], reverse=True)
     df_importance = pd.DataFrame(importances, columns=["feature", "importance"])
@@ -628,13 +635,16 @@ def compute_permutation_importance(
     logger.info(df_importance.head(number_of_features).to_string(index=False))
     return df_importance
 
-def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50):
+
+def hypertune_with_feature_importance(
+    X_train, y_train, X_test, y_test, X_eval, y_eval, n_trials=50
+):
     """
     Perform hyperparameter optimization with Optuna while tracking feature importances.
     After optimization, compute SHAP feature importances for the best model.
     Args:
         X_train (pd.DataFrame): Training features
-        y_train (pd.Series): Training labels 
+        y_train (pd.Series): Training labels
         X_test (pd.DataFrame): Test features
         y_test (pd.Series): Test labels
         n_trials (int): Number of optimization trials
@@ -647,9 +657,10 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
     hyperparameter_space = load_hyperparameter_space()
     X_train_scaled, X_test_scaled, X_eval_scaled, scaler = preprocess_data(X_train, X_test, X_eval)
     best_model = None
-    best_score = -float('inf')
+    best_score = -float("inf")
     best_metrics = None
     best_wrapped_model = None
+
     def objective(trial):
         nonlocal best_model, best_score, best_metrics, best_wrapped_model
         params = base_params.copy()
@@ -684,11 +695,13 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
                         param_name, param_config["low"], param_config["high"]
                     )
         # Train model
-        model, metrics, wrapped_model = train_model(X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, params)
+        model, metrics, wrapped_model = train_model(
+            X_train_scaled, y_train, X_test_scaled, y_test, X_eval_scaled, y_eval, params
+        )
         # Track best model
-        precision = metrics.get('precision', 0.0)
-        recall = metrics.get('recall', 0.0)
-        threshold = metrics.get('threshold', 0.5)
+        precision = metrics.get("precision", 0.0)
+        recall = metrics.get("recall", 0.0)
+        threshold = metrics.get("threshold", 0.5)
         score = precision if recall >= min_recall else 0.0
         if score > best_score:
             best_score = score
@@ -698,7 +711,7 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
         # Compute permutation importance for this trial
         importances = []
         feature_names = X_eval.columns.tolist()
-        y_val_np = y_eval.values if hasattr(y_eval, 'values') else y_eval
+        y_val_np = y_eval.values if hasattr(y_eval, "values") else y_eval
         probs = wrapped_model.predict_proba(X_eval_scaled)[:, 1]
         preds = (probs >= threshold).astype(int)
         baseline = np.sum((y_val_np == 1) & (preds == 1)) / (np.sum(preds == 1))
@@ -707,161 +720,175 @@ def hypertune_with_feature_importance(X_train, y_train, X_test, y_test, X_eval, 
             X_shuffled[:, idx] = np.random.permutation(X_shuffled[:, idx])
             probs_shuffled = wrapped_model.predict_proba(X_shuffled)[:, 1]
             preds_shuffled = (probs_shuffled >= threshold).astype(int)
-            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (np.sum(preds_shuffled == 1))
+            precision = np.sum((y_val_np == 1) & (preds_shuffled == 1)) / (
+                np.sum(preds_shuffled == 1)
+            )
             drop = baseline - precision
             importances.append(drop)
         feature_importances_trials.append(importances)
         return score
+
     # Create and run study
-    study = optuna.create_study(direction='maximize')
+    study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials)
-    
+
     # Aggregate importances
     importances_array = np.array(feature_importances_trials)  # shape: (n_trials, n_features)
     mean_importances = np.mean(importances_array, axis=0)
-    importance_df = pd.DataFrame({
-        'feature': X_eval.columns,
-        'mean_importance': mean_importances
-    }).sort_values('mean_importance', ascending=False)
-    logger.info('Top features by average permutation importance across trials:')
+    importance_df = pd.DataFrame(
+        {"feature": X_eval.columns, "mean_importance": mean_importances}
+    ).sort_values("mean_importance", ascending=False)
+    logger.info("Top features by average permutation importance across trials:")
     for _idx, row in importance_df.head(100).iterrows():
-        logger.info(f'  {row.feature}: {row.mean_importance:.6f}')
+        logger.info(f"  {row.feature}: {row.mean_importance:.6f}")
 
-    
     return study.best_params, importance_df
+
 
 def mlp_staged_selection(X, y, X_eval, y_eval, target_features=100):
     """Multi-stage MLP feature selection with different objectives"""
-    
+
     logger.info(f"Starting MLP staged selection with {X.shape[1]} initial features")
-    
+
     # Stage 1: Quick filter with simple MLP
     logger.info("Stage 1: Quick filter with simple MLP")
     X_scaled, X_eval_scaled, _X_eval_scaled, scaler_stage1 = preprocess_data(X, X_eval, X_eval)
-    
+
     # Create simple MLP for quick filtering
-    mlp_fast = keras.Sequential([
-        layers.InputLayer(shape=(X.shape[1],)),
-        layers.Dense(64, activation='relu'),
-        layers.Dropout(0.3),
-        layers.Dense(32, activation='relu'),
-        layers.Dropout(0.3),
-        layers.Dense(1, activation='sigmoid')
-    ])
-    
+    mlp_fast = keras.Sequential(
+        [
+            layers.InputLayer(shape=(X.shape[1],)),
+            layers.Dense(64, activation="relu"),
+            layers.Dropout(0.3),
+            layers.Dense(32, activation="relu"),
+            layers.Dropout(0.3),
+            layers.Dense(1, activation="sigmoid"),
+        ]
+    )
+
     mlp_fast.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.01),
-        loss='binary_crossentropy',
-        metrics=['accuracy', 'precision', 'recall']
+        loss="binary_crossentropy",
+        metrics=["accuracy", "precision", "recall"],
     )
-    
+
     # Train quick model
     mlp_fast.fit(
-        X_scaled, y,
+        X_scaled,
+        y,
         validation_data=(X_eval_scaled, y_eval),
         epochs=50,
         batch_size=512,
         verbose=0,
-        callbacks=[keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)]
+        callbacks=[keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)],
     )
-    
+
     # Calculate permutation importance for stage 1
     baseline_score = mlp_fast.evaluate(X_eval_scaled, y_eval, verbose=0)[1]  # accuracy
     stage1_importances = []
-    
+
     for i in range(X.shape[1]):
         X_eval_permuted = X_eval_scaled.copy()
         X_eval_permuted[:, i] = np.random.permutation(X_eval_permuted[:, i])
         permuted_score = mlp_fast.evaluate(X_eval_permuted, y_eval, verbose=0)[1]
         importance = baseline_score - permuted_score
         stage1_importances.append(importance)
-    
+
     stage1_importances = np.array(stage1_importances)
     stage1_features = X.columns[np.argsort(stage1_importances)[-200:]].tolist()
-    
+
     logger.info(f"Stage 1: Selected {len(stage1_features)} features")
-    
+
     # Stage 2: Refined selection with cross-validation
     logger.info("Stage 2: Refined selection with cross-validation")
     X_stage1 = X[stage1_features]
     X_eval_stage1 = X_eval[stage1_features]
-    
+
     # Cross-validation feature importance
     cv_scores = []
     cv_importances = []
-    
+
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     for fold, (train_idx, val_idx) in enumerate(skf.split(X_stage1, y)):
         logger.info(f"Processing fold {fold + 1}/5")
-        
+
         X_train_cv, X_val_cv = X_stage1.iloc[train_idx], X_stage1.iloc[val_idx]
         y_train_cv, y_val_cv = y.iloc[train_idx], y.iloc[val_idx]
-        
+
         # Scale data for this fold
         scaler_cv = RobustScaler()
         X_train_cv_scaled = scaler_cv.fit_transform(X_train_cv)
         X_val_cv_scaled = scaler_cv.transform(X_val_cv)
         X_eval_stage1_scaled = scaler_cv.transform(X_eval_stage1)
-        
+
         # Create refined MLP
-        mlp_refined = keras.Sequential([
-            layers.InputLayer(shape=(X_stage1.shape[1],)),
-            layers.Dense(128, activation='elu', kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)),
-            layers.Dropout(0.4),
-            layers.Dense(64, activation='elu', kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)),
-            layers.Dropout(0.4),
-            layers.Dense(32, activation='elu', kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)),
-            layers.Dropout(0.3),
-            layers.Dense(1, activation='sigmoid')
-        ])
-        
+        mlp_refined = keras.Sequential(
+            [
+                layers.InputLayer(shape=(X_stage1.shape[1],)),
+                layers.Dense(
+                    128, activation="elu", kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)
+                ),
+                layers.Dropout(0.4),
+                layers.Dense(
+                    64, activation="elu", kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)
+                ),
+                layers.Dropout(0.4),
+                layers.Dense(
+                    32, activation="elu", kernel_regularizer=regularizers.l1_l2(l1=1e-5, l2=1e-4)
+                ),
+                layers.Dropout(0.3),
+                layers.Dense(1, activation="sigmoid"),
+            ]
+        )
+
         mlp_refined.compile(
             optimizer=keras.optimizers.Adam(learning_rate=0.001),
-            loss='binary_crossentropy',
-            metrics=['accuracy', 'precision', 'recall']
+            loss="binary_crossentropy",
+            metrics=["accuracy", "precision", "recall"],
         )
-        
+
         # Train refined model
         mlp_refined.fit(
-            X_train_cv_scaled, y_train_cv,
+            X_train_cv_scaled,
+            y_train_cv,
             validation_data=(X_val_cv_scaled, y_val_cv),
             epochs=100,
             batch_size=256,
             verbose=0,
-            callbacks=[keras.callbacks.EarlyStopping(patience=15, restore_best_weights=True)]
+            callbacks=[keras.callbacks.EarlyStopping(patience=15, restore_best_weights=True)],
         )
-        
+
         # Calculate permutation importance for this fold
         baseline_score_cv = mlp_refined.evaluate(X_eval_stage1_scaled, y_eval, verbose=0)[1]
         fold_importances = []
-        
+
         for i in range(X_stage1.shape[1]):
             X_eval_permuted = X_eval_stage1_scaled.copy()
             X_eval_permuted[:, i] = np.random.permutation(X_eval_permuted[:, i])
             permuted_score = mlp_refined.evaluate(X_eval_permuted, y_eval, verbose=0)[1]
             importance = baseline_score_cv - permuted_score
             fold_importances.append(importance)
-        
+
         cv_importances.append(fold_importances)
         cv_scores.append(baseline_score_cv)
-        
+
         # Clear memory
         del mlp_refined
         keras.backend.clear_session()
-    
+
     # Average importance across folds
     avg_importance = np.mean(cv_importances, axis=0)
     stage2_features = [stage1_features[i] for i in np.argsort(avg_importance)[-target_features:]]
-    
+
     # Log average importances for the selected features
     selected_indices = np.argsort(avg_importance)[-target_features:]
     selected_importances = avg_importance[selected_indices]
     feature_importance_pairs = list(zip(stage2_features, selected_importances))
-    
+
     logger.info(f"Stage 2: Selected {len(stage2_features)} features: {stage2_features}")
     logger.info(f"Feature-importance pairs: {feature_importance_pairs}")
     logger.info(f"CV Score: {np.mean(cv_scores):.4f} ± {np.std(cv_scores):.4f}")
-    
+
     return stage2_features, avg_importance
 
 
@@ -896,7 +923,9 @@ def main():
         y_combined = pd.concat([y_train, y_test])
         X_eval_combined = pd.concat([X_eval, X_test])
         y_eval_combined = pd.concat([y_eval, y_test])
-        mlp_staged_selection(X_combined, y_combined, X_eval_combined, y_eval_combined, target_features=80)
+        mlp_staged_selection(
+            X_combined, y_combined, X_eval_combined, y_eval_combined, target_features=80
+        )
 
         # # Optional seed-based fine-tuning for improved precision
         # train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval)
@@ -904,5 +933,6 @@ def main():
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
 
+
 if __name__ == "__main__":
-    main() 
+    main()

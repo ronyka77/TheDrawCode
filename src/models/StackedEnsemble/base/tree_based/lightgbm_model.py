@@ -71,17 +71,41 @@ def load_hyperparameter_space():
         dict: Hyperparameter space configuration with narrowed ranges and steps.
     """
     hyperparameter_space = {
-        "learning_rate": {"type": "float", "low": 0.045, "high": 0.18, "log": False, "step": 0.0025},
+        "learning_rate": {
+            "type": "float",
+            "low": 0.045,
+            "high": 0.18,
+            "log": False,
+            "step": 0.0025,
+        },
         "num_leaves": {"type": "int", "low": 55, "high": 200, "log": False, "step": 5},
         "max_depth": {"type": "int", "low": 5, "high": 12, "log": False, "step": 1},
         "min_child_samples": {"type": "int", "low": 200, "high": 600, "log": False, "step": 10},
-        "feature_fraction": {"type": "float", "low": 0.58, "high": 0.75, "log": False, "step": 0.01},
-        "bagging_fraction": {"type": "float", "low": 0.56, "high": 0.75, "log": False, "step": 0.005},
+        "feature_fraction": {
+            "type": "float",
+            "low": 0.58,
+            "high": 0.75,
+            "log": False,
+            "step": 0.01,
+        },
+        "bagging_fraction": {
+            "type": "float",
+            "low": 0.56,
+            "high": 0.75,
+            "log": False,
+            "step": 0.005,
+        },
         "bagging_freq": {"type": "int", "low": 10, "high": 15, "log": False, "step": 1},
         "reg_alpha": {"type": "float", "low": 8.0, "high": 20.0, "log": False, "step": 0.1},
         "reg_lambda": {"type": "float", "low": 8.0, "high": 20.0, "log": False, "step": 0.1},
         "min_split_gain": {"type": "float", "low": 0.12, "high": 0.30, "log": False, "step": 0.005},
-        "early_stopping_rounds": {"type": "int", "low": 600, "high": 1200, "log": False, "step": 10},
+        "early_stopping_rounds": {
+            "type": "int",
+            "low": 600,
+            "high": 1200,
+            "log": False,
+            "step": 10,
+        },
         "path_smooth": {"type": "float", "low": 0.10, "high": 0.60, "log": False, "step": 0.005},
         "cat_smooth": {"type": "float", "low": 20.0, "high": 35.0, "log": False, "step": 0.1},
         "max_bin": {"type": "int", "low": 200, "high": 700, "log": False, "step": 10},
@@ -355,9 +379,7 @@ def hypertune_lightgbm(experiment_name: str):
 
         # Train final model with best parameters
         logger.info("Training final model with best parameters")
-        model, metrics = train_model(
-            X_train, y_train, X_test, y_test, X_eval, y_eval, best_params
-        )
+        model, metrics = train_model(X_train, y_train, X_test, y_test, X_eval, y_eval, best_params)
 
         return best_params, metrics
 
@@ -481,8 +503,16 @@ def train_with_precision_target(X_train, y_train, X_test, y_test, X_eval, y_eval
 
 
 def select_best_feature_combination(
-    X, y, X_test, y_test, X_eval, y_eval,
-    num_features=95, num_trials=1000, min_recall=0.2, random_state=19
+    X,
+    y,
+    X_test,
+    y_test,
+    X_eval,
+    y_eval,
+    num_features=95,
+    num_trials=1000,
+    min_recall=0.2,
+    random_state=19,
 ):
     """
     Try multiple random combinations of features, train a model for each,
@@ -509,30 +539,32 @@ def select_best_feature_combination(
     best_mask = None
     model_params = base_params.copy()
     model_params.update(
-            {
-                "learning_rate": 0.1625,
-                "num_leaves": 75,
-                "max_depth": 10,
-                "min_child_samples": 540,
-                "feature_fraction": 0.61,
-                "bagging_fraction": 0.645,
-                "bagging_freq": 15,
-                "reg_alpha": 19.4,
-                "reg_lambda": 11.8,
-                "min_split_gain": 0.17,
-                "early_stopping_rounds": 670,
-                "path_smooth": 0.51,
-                "cat_smooth": 33.8,
-                "max_bin": 670,
-                "device": "cpu",
-                "n_jobs": 8,
-                "objective": "binary",
-                "metric": ["aucpr", "binary_logloss"],
-                "random_state": 19,
-                "verbose": -1,
-            }
-        )
-    logger.info(f"Trying {num_trials} random combinations of {num_features} features out of {len(all_features)}...")
+        {
+            "learning_rate": 0.1625,
+            "num_leaves": 75,
+            "max_depth": 10,
+            "min_child_samples": 540,
+            "feature_fraction": 0.61,
+            "bagging_fraction": 0.645,
+            "bagging_freq": 15,
+            "reg_alpha": 19.4,
+            "reg_lambda": 11.8,
+            "min_split_gain": 0.17,
+            "early_stopping_rounds": 670,
+            "path_smooth": 0.51,
+            "cat_smooth": 33.8,
+            "max_bin": 670,
+            "device": "cpu",
+            "n_jobs": 8,
+            "objective": "binary",
+            "metric": ["aucpr", "binary_logloss"],
+            "random_state": 19,
+            "verbose": -1,
+        }
+    )
+    logger.info(
+        f"Trying {num_trials} random combinations of {num_features} features out of {len(all_features)}..."
+    )
 
     for trial in range(num_trials):
         # Randomly select features
@@ -550,18 +582,21 @@ def select_best_feature_combination(
             recall = metrics.get("recall", 0.0)
             precision = metrics.get("precision", 0.0)
             score = precision if recall >= min_recall else 0.0
-            
+
             if score > best_score:
                 best_score = score
                 best_features = selected
                 # Create boolean mask for best features
                 best_mask = np.array([f in best_features for f in all_features])
-            logger.info(f"Trial {trial+1}/{num_trials}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f} best_score={best_score:.4f})")
+            logger.info(
+                f"Trial {trial + 1}/{num_trials}: Score={score:.4f} (Precision={precision:.4f}, Recall={recall:.4f} best_score={best_score:.4f})"
+            )
         except Exception as e:
-            logger.error(f"Trial {trial+1} failed: {e}")
+            logger.error(f"Trial {trial + 1} failed: {e}")
 
     logger.info(f"Best score: {best_score:.4f} with {num_features} features: {best_features}")
     return best_features, best_mask, best_score
+
 
 def main():
     """
@@ -570,16 +605,16 @@ def main():
     try:
         logger.info("Starting LightGBM model training")
         global X_train, y_train, X_test, y_test, X_eval, y_eval
-        
+
         # Load data
         dataloader = DataLoader()
         X_train, y_train, X_test, y_test, X_eval, y_eval = dataloader.load_data()
         features = import_selected_features_ensemble(model_type="lgbm")
-        
+
         X_train = prepare_data(X_train, features)
         X_test = prepare_data(X_test, features)
         X_eval = prepare_data(X_eval, features)
-        
+
         # best_features, best_mask, best_score = select_best_feature_combination(X_train, y_train, X_test, y_test, X_eval, y_eval)
 
         # Log data shapes

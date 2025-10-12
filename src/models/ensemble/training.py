@@ -530,12 +530,14 @@ def hypertune_meta_learner(
     np.random.seed(random_seed)
     tf.random.set_seed(random_seed)
     os.environ["PYTHONHASHSEED"] = str(random_seed)
-    
+
     # PyTorch specific reproducibility settings and optimizations
     torch.manual_seed(random_seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(random_seed)
-        torch.backends.cudnn.benchmark = True  # Auto-optimizes for hardware if input sizes don't change
+        torch.backends.cudnn.benchmark = (
+            True  # Auto-optimizes for hardware if input sizes don't change
+        )
         torch.backends.cudnn.deterministic = False  # Better performance, less deterministic
         # Enable TF32 for better performance on Ampere GPUs (RTX 30xx and newer)
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -550,9 +552,7 @@ def hypertune_meta_learner(
             # Use to_numpy() for modern pandas
             meta_features_np = meta_features.to_numpy()
             meta_targets_np = (
-                meta_targets.to_numpy()
-                if hasattr(meta_targets, "to_numpy")
-                else meta_targets
+                meta_targets.to_numpy() if hasattr(meta_targets, "to_numpy") else meta_targets
             )
             eval_features_np = (
                 eval_meta_features.to_numpy()
@@ -626,8 +626,10 @@ def hypertune_meta_learner(
             batch_size = trial.suggest_int("batch_size", 1024, 24576)  # Fit param
             # Ensure virtual_batch_size is always <= batch_size to prevent CUDA errors
             max_virtual_batch_size = min(4096, batch_size)
-            virtual_batch_size = trial.suggest_int("virtual_batch_size", 128, max_virtual_batch_size)  # Fit param
-            
+            virtual_batch_size = trial.suggest_int(
+                "virtual_batch_size", 128, max_virtual_batch_size
+            )  # Fit param
+
             fit_params = {
                 "max_epochs": trial.suggest_int("max_epochs", 50, 250, step=5),  # Fit param
                 "patience": trial.suggest_int("patience", 4, 40, step=2),  # Fit param
@@ -655,10 +657,12 @@ def hypertune_meta_learner(
             meta_learner = TabNetClassifier(**train_params)
             if torch.cuda.is_available():
                 try:
-                    if hasattr(meta_learner, 'network') and hasattr(torch, 'compile'):
+                    if hasattr(meta_learner, "network") and hasattr(torch, "compile"):
                         logger.info("Applying torch.compile to TabNet network for GPU acceleration")
                         # Apply compilation with 'reduce-overhead' mode which is good for GPU performance
-                        meta_learner.network = torch.compile(meta_learner.network, mode="reduce-overhead")
+                        meta_learner.network = torch.compile(
+                            meta_learner.network, mode="reduce-overhead"
+                        )
                         logger.info("Successfully applied torch.compile to TabNet network")
                 except Exception as e:
                     logger.warning(f"Could not apply torch.compile: {str(e)}")
@@ -784,15 +788,17 @@ def hypertune_meta_learner(
                 # Clear GPU cache before training to prevent memory issues
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                
+
                 # Validate batch size relationship
                 batch_size = params["batch_size"]
                 virtual_batch_size = params["virtual_batch_size"]
                 if virtual_batch_size > batch_size:
-                    logger.warning(f"Invalid batch size relationship: virtual_batch_size ({virtual_batch_size}) > batch_size ({batch_size}). Adjusting virtual_batch_size.")
+                    logger.warning(
+                        f"Invalid batch size relationship: virtual_batch_size ({virtual_batch_size}) > batch_size ({batch_size}). Adjusting virtual_batch_size."
+                    )
                     virtual_batch_size = min(virtual_batch_size, batch_size)
                     params["virtual_batch_size"] = virtual_batch_size
-                
+
                 # Special handling for TabNet's training
                 meta_learner.fit(
                     meta_features_np,
@@ -853,7 +859,8 @@ def hypertune_meta_learner(
                     eval_set=[(eval_meta_features, eval_meta_targets)],
                     callbacks=[lgb.early_stopping(stopping_rounds=early_stopping_rounds)],
                 )
-            elif (hasattr(meta_learner, "early_stopping_rounds")
+            elif (
+                hasattr(meta_learner, "early_stopping_rounds")
                 or hasattr(meta_learner, "early_stopping")
                 and meta_learner_type != "sgd"
             ):
@@ -886,16 +893,19 @@ def hypertune_meta_learner(
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error in trial {trial.number}: {error_msg}")
-            
+
             # Handle CUDA-specific errors
             if "CUDA" in error_msg or "device-side assert" in error_msg:
-                logger.error(f"CUDA error detected in trial {trial.number}. Clearing GPU cache and continuing.")
+                logger.error(
+                    f"CUDA error detected in trial {trial.number}. Clearing GPU cache and continuing."
+                )
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     # Force garbage collection
                     import gc
+
                     gc.collect()
-            
+
             return -1.0
 
     # Initialize variables for batch training
@@ -958,9 +968,7 @@ def hypertune_meta_learner(
 
         # Create and run Optuna study with persistent storage
         study = optuna.create_study(
-            study_name=study_name,
-            direction="maximize",
-            sampler=random_sampler
+            study_name=study_name, direction="maximize", sampler=random_sampler
         )
 
         logger.info(

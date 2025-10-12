@@ -18,7 +18,7 @@ from xgboost import XGBClassifier
 warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Suppress pandas chained assignment warnings
-pd.options.mode.chained_assignment = None  # default='warn'
+pd.options.mode.chained_assignment = None
 
 from src.utils.create_evaluation_set import (
     create_prediction_set_ensemble,
@@ -39,6 +39,10 @@ os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 
+# Error message constants
+MODEL_NOT_LOADED_ERROR = "Model not loaded"
+MODEL_MISSING_PREDICT_PROBA_ERROR = "Model must have predict_proba method"
+
 
 class DrawPredictor:
     """Predictor class for draw predictions using the stacked model."""
@@ -46,7 +50,6 @@ class DrawPredictor:
     def __init__(self, model_uri: str):
         """Initialize predictor with model URI."""
         # Set up MLflow tracking URI based on current environment
-        os.getcwd()
         try:
             self.model = mlflow.sklearn.load_model(model_uri)
             self.test_model = mlflow.pyfunc.load_model(model_uri)
@@ -55,13 +58,15 @@ class DrawPredictor:
             self.model = mlflow.pyfunc.load_model(model_uri)
             self.test_model = self.model
         try:
-            # Retrieve the optimal threshold if set during training.
-            if hasattr(self.model, "optimal_threshold"):
-                self.threshold = self.model.optimal_threshold
-                print(f"Using model's optimal threshold: {self.threshold:.2%}")
-            # elif hasattr(self.test_model, "metadata") and "threshold" in self.test_model.metadata.get_all_tags():
-            #     self.threshold = float(self.test_model.metadata.get_tag("threshold"))
-            #     print(f"Using model's threshold: {self.threshold:.2%}")
+            # Retrieve the optimal threshold if set during training with null checks
+            if self.model is not None and hasattr(self.model, "optimal_threshold"):
+                optimal_threshold = getattr(self.model, "optimal_threshold", None)
+                if optimal_threshold is not None:
+                    self.threshold = optimal_threshold
+                    print(f"Using model's optimal threshold: {self.threshold:.2%}")
+                else:
+                    self.threshold = 0.27
+                    print("Model optimal_threshold attribute is None, using default 27% threshold")
             else:
                 self.threshold = 0.27
                 print("No optimal threshold found in model, using default 27% threshold")
@@ -89,10 +94,33 @@ class DrawPredictor:
         # Validate input if needed.
         self._validate_input(df)
 
-        # Get probabilities - our ensemble model returns a 1D array of positive class probabilities
+        # Initialize variables to avoid unbound variable errors
+        predictions = None
+        pos_probas = None
+
+        # Get probabilities - extract positive class probabilities (draw class)
         try:
-            predictions = self.model.predict(df)
-            pos_probas = self.model.predict_proba(df)
+            # Add null guards for model operations
+            if self.model is None:
+                raise ValueError(MODEL_NOT_LOADED_ERROR)
+
+            # Handle different model types
+            if hasattr(self.model, "predict_proba") and callable(getattr(self.model, "predict_proba", None)):
+                # sklearn model
+                predictions = self.model.predict(df)
+                pos_probas = self.model.predict_proba(df)[:, 1]  # type: ignore # Get positive class probabilities
+            else:
+                # PyFuncModel - use predict method which returns probabilities
+                predictions = self.test_model.predict(df)
+                # For binary classification, PyFuncModel predict returns probabilities for both classes
+                if predictions.ndim == 2 and predictions.shape[1] == 2:
+                    pos_probas = predictions[:, 1]
+                    predictions = (pos_probas >= self.threshold).astype(int)
+                else:
+                    # If predict returns 1D array, it might be class predictions
+                    pos_probas = predictions
+                    predictions = (pos_probas >= self.threshold).astype(int)
+
             # Ensure we have a 1D numpy array
             if not isinstance(pos_probas, np.ndarray):
                 pos_probas = np.array(pos_probas)
@@ -100,9 +128,20 @@ class DrawPredictor:
             print(f"Error predicting: {e}")
             if "use_label_encoder" in str(e):
                 print("Attribute error due to missing 'use_label_encoder'. Patching model...")
-                self.model.use_label_encoder = False
-                predictions = self.model.predict(df)
-                pos_probas = self.model.predict_proba(df)
+                if self.model is None:
+                    raise ValueError(MODEL_NOT_LOADED_ERROR) from e
+                # Fallback to PyFuncModel predict
+                predictions = self.test_model.predict(df)
+                if predictions.ndim == 2 and predictions.shape[1] == 2:
+                    pos_probas = predictions[:, 1]
+                    predictions = (pos_probas >= self.threshold).astype(int)
+                else:
+                    pos_probas = predictions
+                    predictions = (pos_probas >= self.threshold).astype(int)
+
+        # Ensure predictions and probabilities were obtained
+        if predictions is None or pos_probas is None:
+            raise RuntimeError("Failed to obtain predictions from model")
 
         results = {
             "predictions": predictions.tolist(),
@@ -129,7 +168,21 @@ class DrawPredictor:
         try:
             prediction_df = features_val.copy()
             prediction_df = prediction_df[self.required_features]
-            probas = self.model.predict_proba(prediction_df)[:, 1]
+            # Add null guard for model operations
+            if self.model is None:
+                raise ValueError(MODEL_NOT_LOADED_ERROR)
+
+            # Handle different model types
+            if hasattr(self.model, "predict_proba") and callable(getattr(self.model, "predict_proba", None)):
+                # sklearn model
+                probas = self.model.predict_proba(prediction_df)[:, 1]  # type: ignore
+            else:
+                # PyFuncModel - use predict method which returns probabilities
+                predictions = self.test_model.predict(prediction_df)
+                if predictions.ndim == 2 and predictions.shape[1] == 2:
+                    probas = predictions[:, 1]
+                else:
+                    probas = predictions
             best_metrics = {"precision": 0, "recall": 0, "f1": 0, "threshold": 0.5}
             best_score = 0
 
@@ -138,7 +191,6 @@ class DrawPredictor:
                 preds = (probas >= threshold).astype(int)
                 true_positives = ((preds == 1) & (target_val == 1)).sum()
                 false_positives = ((preds == 1) & (target_val == 0)).sum()
-                ((preds == 0) & (target_val == 0)).sum()
                 false_negatives = ((preds == 0) & (target_val == 1)).sum()
                 # Calculate metrics
                 recall = (
@@ -187,12 +239,15 @@ class DrawPredictor:
             raise
 
 
-def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
+def make_prediction(
+    prediction_data, model_uri, real_scores_df
+) -> tuple[pd.DataFrame, float, float]:
     """Make predictions and return results with probabilities."""
     try:
         # Initialize default values
         precision = 0.0
         draws_recall = 0.0
+        matches_with_results = pd.DataFrame()  # Initialize to avoid unbound variable error
 
         # Initialize predictor
         predictor = DrawPredictor(model_uri)
@@ -201,7 +256,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         # Ensure data types are compatible with model expectations
         # Convert numeric columns to float64 to match model expectations
         numeric_columns = prediction_df.select_dtypes(include=["number"]).columns
-        prediction_df = prediction_df.astype({col: "float64" for col in numeric_columns})
+        prediction_df = prediction_df.astype(dict.fromkeys(numeric_columns, "float64"))
 
         # Add column validation
         predictor._validate_input(prediction_df)
@@ -231,8 +286,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
         ]
         # Get real scores and merge - this is where the error occurs
         if "fixture_id" in prediction_data.columns:
-            print(f"prediction_data.columns: {prediction_data.shape}")
-            # valid_fixture_ids = prediction_df['fixture_id'].dropna().astype('Int64').tolist()
+            print(f"prediction_data.shape: {prediction_data.shape}")
             if not real_scores_df.empty:  # Only proceed if we have real scores
                 # Ensure is_draw column exists and is properly formatted
                 if "is_draw" not in real_scores_df.columns:
@@ -277,14 +331,16 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                         matches_with_results["is_draw"].fillna(-1).astype(int)
                     )
 
-                # Filter matches with results for date >= 2025-04-01 and order by date descending
+                # Filter matches with results for date >= 2025-05-01 and order by date descending
                 if "Date" in matches_with_results.columns:
                     matches_with_results["Date"] = pd.to_datetime(matches_with_results["Date"])
                     matches_with_results = matches_with_results[
                         matches_with_results["Date"] >= "2025-05-01"
                     ]
-                    matches_with_results = matches_with_results.sort_values(by="Date", ascending=False)
-                
+                    matches_with_results = matches_with_results.sort_values(
+                        by="Date", ascending=False
+                    )
+
                 if len(matches_with_results) > 0 and "is_draw" in matches_with_results.columns:
                     # Filter out rows without valid is_draw values
                     valid_matches = matches_with_results[matches_with_results["is_draw"] != -1]
@@ -309,7 +365,7 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
                         print(f"Predicted Draws: {valid_matches['draw_predicted'].sum()}")
 
                         # Calculate metrics
-                        accuracy = (true_positives + true_negatives) / len(matches_with_results)
+                        accuracy = (true_positives + true_negatives) / len(valid_matches)
 
                         if true_positives + false_negatives > 0:
                             draws_recall = true_positives / (true_positives + false_negatives)
@@ -330,11 +386,18 @@ def make_prediction(prediction_data, model_uri, real_scores_df) -> pd.DataFrame:
             matches_with_results = matches_with_results.loc[
                 :, ~matches_with_results.columns.duplicated(keep="last")
             ]
-        return matches_with_results, precision, draws_recall
+            # Ensure return type is DataFrame
+            assert isinstance(matches_with_results, pd.DataFrame), (
+                f"matches_with_results must be DataFrame, got {type(matches_with_results)}"
+            )
+            return matches_with_results, precision, draws_recall
     except Exception as e:
         print(f"Error during prediction: {str(e)}")
         print(f"Error type: {type(e).__name__}")
         return pd.DataFrame(), 0.0, 0.0
+
+    # Fallback return (should never be reached)
+    return pd.DataFrame(), 0.0, 0.0
 
 
 def apply_threshold_filter(df: pd.DataFrame, remove_thresholds: list[float]) -> pd.DataFrame:
@@ -356,7 +419,7 @@ def apply_threshold_filter(df: pd.DataFrame, remove_thresholds: list[float]) -> 
         print(f"Deleted {num_deleted} rows at threshold {threshold}")
 
     # Apply the filter and return the filtered DataFrame
-    return df[mask]
+    return pd.DataFrame(df[mask].copy())
 
 
 def apply_keep_thresholds_filter(df: pd.DataFrame, allowed_thresholds: list[float]) -> pd.DataFrame:
@@ -369,7 +432,7 @@ def apply_keep_thresholds_filter(df: pd.DataFrame, allowed_thresholds: list[floa
         pd.DataFrame: Filtered DataFrame.
     """
     condition = df["draw_probability"].isin(allowed_thresholds)
-    return df[condition]
+    return pd.DataFrame(df[condition].copy())
 
 
 def main():
@@ -378,19 +441,22 @@ def main():
     best_predictions = pd.DataFrame()  # Initialize empty DataFrame
     predicted_df = pd.DataFrame()  # Initialize predicted_df
     # Model URIs to evaluate
-    model_uris = [
-        "7b3d6490c26e499f99e999a7a86975f8",
-        "cc5ff9dcc34a4f1aab2f0e270bb920b6"
-    ]
+    model_uris = ["7b3d6490c26e499f99e999a7a86975f8", "cc5ff9dcc34a4f1aab2f0e270bb920b6"]
     # Filter configuration to remove predictions near specific thresholds
-    filter_config = {
-        "8d80522037ae4a9790b72129c06851a4": {"remove_thresholds": [0.45, 0.47]},
-    }
+    # Note: URIs in config don't match current model_uris - commented out
+    # filter_config = {
+    #     "8d80522037ae4a9790b72129c06851a4": {"remove_thresholds": [0.45, 0.47]},
+    # }
 
     # Keep configuration to only allow predictions near specific thresholds
-    keep_config = {
-        "97207cdaab54477fa267d8cd29ce35e9": {"keep_thresholds": [0.31, 0.32, 0.34, 0.37]},
-    }
+    # Note: URIs in config don't match current model_uris - commented out
+    # keep_config = {
+    #     "97207cdaab54477fa267d8cd29ce35e9": {"keep_thresholds": [0.31, 0.32, 0.34, 0.37]},
+    # }
+
+    # Empty configs since URIs don't match
+    filter_config = {}
+    keep_config = {}
 
     # Get preprocessed prediction data using standardized function
     prediction_df = create_prediction_set_ensemble()
@@ -416,14 +482,21 @@ def main():
                 print(f"Skipping invalid predictions from model {uri}")
                 continue
 
+            # Ensure predicted_df is a DataFrame for subsequent operations
+            assert isinstance(predicted_df, pd.DataFrame), (
+                f"predicted_df must be DataFrame, got {type(predicted_df)}"
+            )
+            # Type annotation to help type checker
+            predictions_df: pd.DataFrame = predicted_df
+
             # Reorder columns to place draw_predicted and draw_probability last
             cols = [
                 col
-                for col in predicted_df.columns
+                for col in predictions_df.columns
                 if col not in ["draw_predicted", "draw_probability"]
             ]
             cols.extend(["draw_predicted", "draw_probability"])
-            predicted_df = predicted_df[cols]
+            predictions_df = pd.DataFrame(predictions_df[cols].copy())
             # Save individual model predictions
             # model_output_path = Path(f"./data/prediction/ensemble/predictions_{uri}.xlsx")
             # predicted_df.to_excel(model_output_path, index=False)
@@ -437,7 +510,7 @@ def main():
                     print(
                         f"Applying remove threshold filter for model {uri}: removing all predictions with draw_probability in {remove_thresholds}"
                     )
-                    predicted_df = apply_threshold_filter(predicted_df, remove_thresholds)
+                    predictions_df = apply_threshold_filter(predictions_df, remove_thresholds)
             # --- Apply keep threshold filtering if configured for this model ---
             config_keep = keep_config.get(uri, None)
             if config_keep is not None:
@@ -446,20 +519,22 @@ def main():
                     print(
                         f"Applying keep threshold filter for model {uri}: keeping only predictions with draw_probability in {allowed_thresholds}"
                     )
-                    predicted_df = apply_keep_thresholds_filter(predicted_df, allowed_thresholds)
+                    predictions_df = apply_keep_thresholds_filter(
+                        predictions_df, allowed_thresholds
+                    )
             # Remove rows where draw_predicted is 0
-            predicted_df = predicted_df[predicted_df["draw_predicted"] == 1]
-            print(f"Filtered to {len(predicted_df)} rows where draw_predicted = 1")
+            predictions_df = pd.DataFrame(predictions_df[predictions_df["draw_predicted"] == 1].copy())
+            print(f"Filtered to {len(predictions_df)} rows where draw_predicted = 1")
             # Save individual model predictions
             model_output_path = Path(f"./data/prediction/ensemble/predictions_model_{uri}.xlsx")
-            
-            predicted_df.to_excel(model_output_path, index=False)
+
+            predictions_df.to_excel(model_output_path, index=False)
             print(f"Predictions for model {uri} saved to: {model_output_path}")
 
             if precision > best_precision and draws_recall > 0.20:
                 best_precision = precision
                 best_model_uri = uri
-                best_predictions = predicted_df.copy()
+                best_predictions = predictions_df.copy()
                 print(f"New best model: {uri} with precision: {precision:.2%}")
                 print(f"Draws recall: {draws_recall:.2%}")
         except Exception as e:
@@ -471,7 +546,9 @@ def main():
     # Handle empty predictions for best model
     if best_predictions.empty:
         print("Warning: No valid predictions generated. Creating empty result.")
-        predicted_df = pd.DataFrame(columns=["fixture_id", "draw_predicted", "draw_probability"])
+        # Create empty DataFrame with specified columns
+        columns_list = ["fixture_id", "draw_predicted", "draw_probability"]
+        predicted_df = pd.DataFrame(columns=columns_list)  # type: ignore
     else:
         predicted_df = best_predictions
         cols = [

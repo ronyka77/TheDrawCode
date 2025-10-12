@@ -12,16 +12,15 @@ import pickle  # Needed for loading scaler
 import random
 
 import mlflow  # Ensure mlflow is imported for download_artifacts
+import mlflow.artifacts  # Explicit import for artifacts
 import mlflow.lightgbm
 import mlflow.pyfunc
 import mlflow.sklearn
 import mlflow.xgboost
 import numpy as np
 import pandas as pd  # Add pandas import
-import sklearn
 import torch
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.preprocessing import StandardScaler  # Needed for SVM scaler type check potentially
 
 from src.models.ensemble.data_utils import prepare_data
 from src.models.ensemble.diagnostics import analyze_prediction_errors, explain_predictions
@@ -52,6 +51,11 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "16"
 # PyTorch specific reproducibility settings
 torch.manual_seed(SEED)
 
+# String constants for repeated messages
+XGB_PREDICT_PROBA_FALLBACK_MSG = "XGBoost predict_proba not available, using pyfunc predict_proba"
+PYTORCH_SCALER_PATH = "scaler/scaler_pytorch.pkl"
+
+
 class EnsembleModel(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
@@ -69,31 +73,31 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.logger = logger or ExperimentLogger(
             experiment_name="ensemble_model_0410", log_dir="./logs/ensemble_model_0410"
         )
-        self.required_recall = required_recall # For meta-learner
+        self.required_recall = required_recall  # For meta-learner
 
-        self.target_precision = target_precision # For dynamic weights
+        self.target_precision = target_precision  # For dynamic weights
 
         # --- MLflow Run IDs for Base Models ---
         self.xgb_run_id = "a8f84a8a82ef44b7a64bc72d5d797a82"
-        self.lgb_run_id = "ea8b1bb86aaa4faf9bf8c3d2d08145da"  
-        self.tabnet_run_id = "431df2695dd9431f8c088e15b675e8a3" 
-        self.extra_run_id = "625d925be2634d10b7da7f6a42576405" 
+        self.lgb_run_id = "ea8b1bb86aaa4faf9bf8c3d2d08145da"
+        self.tabnet_run_id = "431df2695dd9431f8c088e15b675e8a3"
+        self.extra_run_id = "625d925be2634d10b7da7f6a42576405"
         self.mlp_run_id = "ebb5dfa8d32c4409a7edb21f3fad09d0"
         self.pytorch_run_id = "bb59b9589aef4638a1e0d3aa406c7da7"
-        self.svm_run_id = "8fded66e23fd422ab8d7db66687508dd" 
+        self.svm_run_id = "8fded66e23fd422ab8d7db66687508dd"
         self.fnn_run_id = "c32a835ceac048e9af04334ebb3c3d57"
 
         # Minimum recalls for dynamic weighting (order: xgb, tabnet, lgb, rf, mlp, pytorch, svm)
-        self.min_recalls = [0.25, 0.25, 0.30, 0.30, 0.25, 0.20, 0.25, 0.20] # Added SVM recall
+        self.min_recalls = [0.25, 0.25, 0.30, 0.30, 0.25, 0.20, 0.25, 0.20]  # Added SVM recall
 
         # Meta-learner settings
         self.meta_learner_type = meta_learner_type
-        self.optimal_threshold = 0.5 # Will be tuned
-        self.individual_thresholding = individual_thresholding # Unused currently?
+        self.optimal_threshold = 0.5  # Will be tuned
+        self.individual_thresholding = individual_thresholding  # Unused currently?
         self.calibrate = calibrate  # Unused currently?
-        self.calibration_method = calibration_method # Unused currently?
+        self.calibration_method = calibration_method  # Unused currently?
         self.dynamic_weighting = dynamic_weighting
-        num_models = 8 # Updated number of models (added SVM)
+        num_models = 8  # Updated number of models (added SVM)
         if self.dynamic_weighting:
             # Adjusted for 7 base models
             self.dynamic_weights = {
@@ -102,34 +106,34 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 "tabnet": 1 / num_models,
                 "extra": 1 / num_models,
                 "mlp": 1 / num_models,
-                "pytorch": 1 / num_models, # Added pytorch
-                "svm": 1 / num_models, # Added SVM
-                "fnn": 1 / num_models, # Added FNN
+                "pytorch": 1 / num_models,  # Added pytorch
+                "svm": 1 / num_models,  # Added SVM
+                "fnn": 1 / num_models,  # Added FNN
             }
-        
+
         # Placeholder attributes for models and features - will be populated by load_models
         self.meta_learner = None
         self.model_xgb = None
         self.model_lgb = None
         self.model_tabnet = None
-        self.model_extra = None 
+        self.model_extra = None
         self.model_mlp = None
-        self.model_mlp_scaler = None 
-        self.model_pytorch = None       # Added pytorch model placeholder
-        self.model_pytorch_scaler = None # Added pytorch scaler placeholder
-        self.model_svm = None           # Added SVM model placeholder
-        self.model_svm_scaler = None    # Added SVM scaler placeholder
-        self.model_fnn = None           # Added FNN model placeholder
-        self.model_fnn_scaler = None    # Added FNN scaler placeholder
+        self.model_mlp_scaler = None
+        self.model_pytorch = None  # Added pytorch model placeholder
+        self.model_pytorch_scaler = None  # Added pytorch scaler placeholder
+        self.model_svm = None  # Added SVM model placeholder
+        self.model_svm_scaler = None  # Added SVM scaler placeholder
+        self.model_fnn = None  # Added FNN model placeholder
+        self.model_fnn_scaler = None  # Added FNN scaler placeholder
 
         self.xgb_features = []
         self.lgb_features = []
         self.tabnet_features = []
         self.extra_features = []
         self.mlp_features = []
-        self.pytorch_features = []      # Added pytorch feature list placeholder
-        self.svm_features = []          # Added SVM feature list placeholder
-        self.fnn_features = []          # Added FNN feature list placeholder
+        self.pytorch_features = []  # Added pytorch feature list placeholder
+        self.svm_features = []  # Added SVM feature list placeholder
+        self.fnn_features = []  # Added FNN feature list placeholder
 
         # Load models on initialization
         self.load_models_from_mlflow()
@@ -138,7 +142,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self,
         X_train,
         y_train,
-        X_val=None,
+        x_val=None,
         y_val=None,
         X_test=None,
         y_test=None,
@@ -147,96 +151,146 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
     ) -> dict:
         self.logger.info("Starting ensemble model 0404 training...")
         # Data preparation
-        # X_train_prepared = prepare_data(X_train, X_train.columns)
-        X_val_prepared = prepare_data(X_val, X_val.columns)
-        X_test_prepared = prepare_data(X_test, X_test.columns)
+        # x_train_prepared = prepare_data(X_train, X_train.columns)
+        # Add type assertions for DataFrame operations
+        assert isinstance(x_val, pd.DataFrame), f"x_val must be a DataFrame, got {type(x_val)}"
+        assert isinstance(X_test, pd.DataFrame), f"X_test must be a DataFrame, got {type(X_test)}"
+        x_val_prepared = prepare_data(x_val, list(x_val.columns))
+        x_test_prepared = prepare_data(X_test, list(X_test.columns))
 
         # Prepare feature subsets for each model
         self.logger.info("Preparing feature subsets for base models...")
         try:
-            X_val_xgb = X_val_prepared[self.xgb_features]
+            x_val_xgb = x_val_prepared[self.xgb_features]
         except KeyError:
-            self.logger.warning(f"XGB features not found in X_val_prepared. Using all features. {self.xgb_features}")
-            X_val_xgb = X_val_prepared
-        X_val_tabnet = X_val_prepared[self.tabnet_features]
-        X_val_lgb = X_val_prepared[self.lgb_features]
-        X_val_extra = X_val_prepared[self.extra_features]
-        X_val_mlp = X_val_prepared[self.mlp_features]  # Prepare MLP features
-        X_val_pytorch = X_val_prepared[self.pytorch_features] # Added PyTorch features
-        X_val_svm = X_val_prepared[self.svm_features]         # Added SVM features
-        X_val_fnn = X_val_prepared[self.fnn_features]         # Added FNN features
+            self.logger.warning(
+                f"XGB features not found in x_val_prepared. Using all features. {self.xgb_features}"
+            )
+            x_val_xgb = x_val_prepared
+        x_val_tabnet = x_val_prepared[self.tabnet_features]
+        x_val_lgb = x_val_prepared[self.lgb_features]
+        x_val_extra = x_val_prepared[self.extra_features]
+        x_val_mlp = x_val_prepared[self.mlp_features]  # Prepare MLP features
+        x_val_pytorch = x_val_prepared[self.pytorch_features]  # Added PyTorch features
+        x_val_svm = x_val_prepared[self.svm_features]  # Added SVM features
+        x_val_fnn = x_val_prepared[self.fnn_features]  # Added FNN features
 
-        X_test_xgb = X_test_prepared[self.xgb_features]
-        X_test_tabnet = X_test_prepared[self.tabnet_features]
-        X_test_lgb = X_test_prepared[self.lgb_features]
-        X_test_extra = X_test_prepared[self.extra_features]
-        X_test_mlp = X_test_prepared[self.mlp_features]  # Prepare MLP features
-        X_test_pytorch = X_test_prepared[self.pytorch_features] # Added PyTorch features
-        X_test_svm = X_test_prepared[self.svm_features]         # Added SVM features
-        X_test_fnn = X_test_prepared[self.fnn_features]         # Added FNN features
+        x_test_xgb = x_test_prepared[self.xgb_features]
+        x_test_tabnet = x_test_prepared[self.tabnet_features]
+        x_test_lgb = x_test_prepared[self.lgb_features]
+        x_test_extra = x_test_prepared[self.extra_features]
+        x_test_mlp = x_test_prepared[self.mlp_features]  # Prepare MLP features
+        x_test_pytorch = x_test_prepared[self.pytorch_features]  # Added PyTorch features
+        x_test_svm = x_test_prepared[self.svm_features]  # Added SVM features
+        x_test_fnn = x_test_prepared[self.fnn_features]  # Added FNN features
 
         # Obtain predictions from base models on validation set
         self.logger.info("Obtaining validation predictions from base models...")
-        p_xgb_val = self.model_xgb.predict_proba(X_val_xgb)[:, 1]
+        # Add null checks before accessing model attributes
+        if self.model_xgb is None:
+            raise ValueError("XGBoost model not loaded")
+        # XGBoost predict_proba might not be available on MLflow-loaded model, try pyfunc
+        try:
+            p_xgb_val = self.model_xgb.predict_proba(x_val_xgb)[:, 1]  # type: ignore
+        except AttributeError:
+            self.logger.warning("XGBoost predict_proba not available, using pyfunc predict_proba")
+            # Load pyfunc version for prediction if direct model doesn't work
+            xgb_uri = f"runs:/{self.xgb_run_id}/{'model'}"
+            xgb_pyfunc = mlflow.pyfunc.load_model(xgb_uri)
+            p_xgb_val = xgb_pyfunc.predict_proba(x_val_xgb)[:, 1]  # type: ignore
+
+        if self.model_tabnet is None:
+            raise ValueError("TabNet model not loaded")
         # TabNet input might need .values depending on saving format
         try:
-            p_tabnet_val = self.model_tabnet.predict_proba(X_val_tabnet)[:, 1] 
+            p_tabnet_val = self.model_tabnet.predict_proba(x_val_tabnet)[:, 1]  # type: ignore
         except TypeError:
             self.logger.warning("TabNet predict_proba failed on DataFrame, trying .values")
-            p_tabnet_val = self.model_tabnet.predict_proba(X_val_tabnet.values)[:, 1]
-        p_lgb_val = self.model_lgb.predict_proba(X_val_lgb)[:, 1]
-        p_extra_val = self.model_extra.predict_proba(X_val_extra)[:, 1]
+            p_tabnet_val = self.model_tabnet.predict_proba(x_val_tabnet.values)[:, 1]  # type: ignore
+
+        if self.model_lgb is None:
+            raise ValueError("LightGBM model not loaded")
+        p_lgb_val = self.model_lgb.predict_proba(x_val_lgb)[:, 1]  # type: ignore
+
+        if self.model_extra is None:
+            raise ValueError("Extra Trees model not loaded")
+        p_extra_val = self.model_extra.predict_proba(x_val_extra)[:, 1]  # type: ignore
+
         # MLP requires scaling
-        X_val_mlp_scaled = self.model_mlp_scaler.transform(X_val_mlp)
-        p_mlp_val = self.model_mlp.predict_proba(X_val_mlp_scaled)[:, 1]
+        if self.model_mlp is None:
+            raise ValueError("MLP model not loaded")
+        if self.model_mlp_scaler is None:
+            raise ValueError("MLP scaler not loaded")
+        x_val_mlp_scaled = self.model_mlp_scaler.transform(x_val_mlp)
+        p_mlp_val = self.model_mlp.predict_proba(x_val_mlp_scaled)[:, 1]  # type: ignore
+
         # PyTorch model has scaler_ and device_ attached during creation
-        p_pytorch_val = self.model_pytorch.predict_proba(X_val_pytorch)[:, 1]
+        if self.model_pytorch is None:
+            raise ValueError("PyTorch model not loaded")
+        p_pytorch_val = self.model_pytorch.predict_proba(x_val_pytorch)[:, 1]  # type: ignore
+
         # SVM requires scaling
-        X_val_svm_scaled = self.model_svm_scaler.transform(X_val_svm)
-        p_svm_val = self.model_svm.predict_proba(X_val_svm_scaled)[:, 1]
+        if self.model_svm is None:
+            raise ValueError("SVM model not loaded")
+        if self.model_svm_scaler is None:
+            raise ValueError("SVM scaler not loaded")
+        x_val_svm_scaled = self.model_svm_scaler.transform(x_val_svm)
+        p_svm_val = self.model_svm.predict_proba(x_val_svm_scaled)[:, 1]  # type: ignore
+
         # FNN
-        p_fnn_val = self.model_fnn.predict_proba(X_val_fnn)[:, 1]
+        if self.model_fnn is None:
+            raise ValueError("FNN model not loaded")
+        p_fnn_val = self.model_fnn.predict_proba(x_val_fnn)[:, 1]  # type: ignore
 
         # Obtain predictions from base models on test set (used for meta-learner training)
         self.logger.info(
             "Obtaining test predictions from base models (for meta-learner training)..."
         )
-        p_xgb_test = self.model_xgb.predict_proba(X_test_xgb)[:, 1]
+        # Null checks already performed above for models
         try:
-            p_tabnet_test = self.model_tabnet.predict_proba(X_test_tabnet)[:, 1]
+            p_xgb_test = self.model_xgb.predict_proba(x_test_xgb)[:, 1]  # type: ignore
+        except AttributeError:
+            self.logger.warning(XGB_PREDICT_PROBA_FALLBACK_MSG)
+            xgb_uri = f"runs:/{self.xgb_run_id}/{'model'}"
+            xgb_pyfunc = mlflow.pyfunc.load_model(xgb_uri)
+            p_xgb_test = xgb_pyfunc.predict_proba(x_test_xgb)[:, 1]  # type: ignore
+        try:
+            p_tabnet_test = self.model_tabnet.predict_proba(x_test_tabnet)[:, 1]  # type: ignore
         except TypeError:
-            p_tabnet_test = self.model_tabnet.predict_proba(X_test_tabnet.values)[:, 1]
+            p_tabnet_test = self.model_tabnet.predict_proba(x_test_tabnet.values)[:, 1]  # type: ignore
         # LightGBM
-        p_lgb_test = self.model_lgb.predict_proba(X_test_lgb)[:, 1]
+        p_lgb_test = self.model_lgb.predict_proba(x_test_lgb)[:, 1]  # type: ignore
         # Extra Trees
-        p_extra_test = self.model_extra.predict_proba(X_test_extra)[:, 1]
+        p_extra_test = self.model_extra.predict_proba(x_test_extra)[:, 1]  # type: ignore
         # MLP requires scaling
-        X_test_mlp_scaled = self.model_mlp_scaler.transform(X_test_mlp)
-        p_mlp_test = self.model_mlp.predict_proba(X_test_mlp_scaled)[:, 1]
-        # PyTorch 
-        p_pytorch_test = self.model_pytorch.predict_proba(X_test_pytorch)[:, 1]
+        x_test_mlp_scaled = self.model_mlp_scaler.transform(x_test_mlp)
+        p_mlp_test = self.model_mlp.predict_proba(x_test_mlp_scaled)[:, 1]  # type: ignore
+        # PyTorch
+        p_pytorch_test = self.model_pytorch.predict_proba(x_test_pytorch)[:, 1]  # type: ignore
         # SVM requires scaling
-        X_test_svm_scaled = self.model_svm_scaler.transform(X_test_svm)
-        p_svm_test = self.model_svm.predict_proba(X_test_svm_scaled)[:, 1]
+        x_test_svm_scaled = self.model_svm_scaler.transform(x_test_svm)
+        p_svm_test = self.model_svm.predict_proba(x_test_svm_scaled)[:, 1]  # type: ignore
         # FNN
-        p_fnn_test = self.model_fnn.predict_proba(X_test_fnn)[:, 1]
+        p_fnn_test = self.model_fnn.predict_proba(x_test_fnn)[:, 1]  # type: ignore
         # Optionally calculate dynamic weights based on validation performance
         if self.dynamic_weighting:
             # Use test predictions for weights used during FINAL meta-learner TRAINING
             self.logger.info("Computing dynamic weights based on test performance...")
-            self.dynamic_weights_train, self.thresholds_train = compute_precision_focused_weights_optimized(
-                p_xgb_test,
-                p_tabnet_test,
-                p_lgb_test,
-                p_extra_test,
-                p_mlp_test,  
-                p_pytorch_test, # Added PyTorch
-                p_svm_test,     # Added SVM
-                p_fnn_test,     # Added FNN
-                y_test,
-                self.target_precision,
-                self.min_recalls, # Should now have 7 elements
-                self.logger,
+            self.dynamic_weights_train, self.thresholds_train = (
+                compute_precision_focused_weights_optimized(
+                    p_xgb_test,
+                    p_tabnet_test,
+                    p_lgb_test,
+                    p_extra_test,
+                    p_mlp_test,
+                    p_pytorch_test,  # Added PyTorch
+                    p_svm_test,  # Added SVM
+                    p_fnn_test,  # Added FNN
+                    y_test,
+                    self.target_precision,
+                    self.min_recalls,  # Should now have 7 elements
+                    self.logger,
+                )
             )
             # Ensure weights_0410 is imported and used
             self.logger.info("Computing dynamic weights based on validation performance...")
@@ -245,13 +299,13 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 p_tabnet_val,
                 p_lgb_val,
                 p_extra_val,
-                p_mlp_val,  
-                p_pytorch_val, # Added PyTorch
-                p_svm_val,     # Added SVM
-                p_fnn_val,     # Added FNN
-                y_val, 
+                p_mlp_val,
+                p_pytorch_val,  # Added PyTorch
+                p_svm_val,  # Added SVM
+                p_fnn_val,  # Added FNN
+                y_val,
                 self.target_precision,
-                self.min_recalls, # Should now have 7 elements
+                self.min_recalls,  # Should now have 7 elements
                 self.logger,
             )
 
@@ -262,11 +316,11 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             p_tabnet_val,
             p_lgb_val,
             p_extra_val,
-            p_mlp_val,  
-            p_pytorch_val, # Added PyTorch
-            p_svm_val,     # Added SVM
-            p_fnn_val,     # Added FNN
-            X_val,
+            p_mlp_val,
+            p_pytorch_val,  # Added PyTorch
+            p_svm_val,  # Added SVM
+            p_fnn_val,  # Added FNN
+            x_val_prepared,
             self.dynamic_weights if self.dynamic_weighting else None,
             self.thresholds if self.dynamic_weighting else None,
         )
@@ -277,11 +331,11 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             p_tabnet_test,
             p_lgb_test,
             p_extra_test,
-            p_mlp_test,  
-            p_pytorch_test, # Added PyTorch
-            p_svm_test,     # Added SVM
-            p_fnn_test,     # Added FNN
-            X_test,
+            p_mlp_test,
+            p_pytorch_test,  # Added PyTorch
+            p_svm_test,  # Added SVM
+            p_fnn_test,  # Added FNN
+            x_test_prepared,
             self.dynamic_weights_train if self.dynamic_weighting else None,
             self.thresholds_train if self.dynamic_weighting else None,
         )
@@ -295,10 +349,22 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
         # Train meta-learner using TEST meta-features and HYPERTUNE using VALIDATION meta-features
         self.logger.info("Hypertuning and training meta-learner...")
+        # Fix DataFrame parameter passing to hypertune_meta_learner - convert to numpy arrays
+        assert isinstance(meta_df_train, pd.DataFrame), (
+            f"meta_df_train must be DataFrame, got {type(meta_df_train)}"
+        )
+        assert isinstance(meta_df_val, pd.DataFrame), (
+            f"meta_df_val must be DataFrame, got {type(meta_df_val)}"
+        )
+        # Assert that y_test and y_val are not None (should be guaranteed by earlier checks)
+        assert y_test is not None, "y_test should not be None at this point"
+        assert y_val is not None, "y_val should not be None at this point"
+        meta_train_np = meta_df_train.values
+        meta_val_np = meta_df_val.values
         self.meta_learner = hypertune_meta_learner(
-            meta_df_train,
+            meta_train_np,
             y_test,  # Train/evaluate HPO on test set
-            meta_df_val,
+            meta_val_np,
             y_val,  # Use validation set for final HPO eval (or nested CV split)
             meta_learner_type=self.meta_learner_type,
             target_precision=self.target_precision,
@@ -308,11 +374,13 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.logger.info(
             f"Tuning final threshold using validation data for target precision {self.target_precision}..."
         )
+        # Initialize variables to avoid unbound variable issues
+        meta_df_val_np = None
         if self.meta_learner_type == "tabnet":
             meta_df_val_np = meta_df_val.to_numpy()
-            meta_val_probs = self.meta_learner.predict_proba(meta_df_val_np)[:, 1]
+            meta_val_probs = self.meta_learner.predict_proba(meta_df_val_np)[:, 1]  # type: ignore
         else:
-            meta_val_probs = self.meta_learner.predict_proba(meta_df_val)[:, 1]
+            meta_val_probs = self.meta_learner.predict_proba(meta_df_val)[:, 1]  # type: ignore
         best_threshold, threshold_metrics = tune_threshold_for_precision_optimized(
             meta_val_probs,
             y_val,
@@ -326,14 +394,12 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
         # Final evaluation on validation data using the tuned threshold
         self.logger.info("Performing final evaluation on validation data...")
-        if self.meta_learner_type == "tabnet":
-            eval_results = evaluate_model(
-                self.meta_learner, meta_df_val_np, y_val, self.optimal_threshold, self.logger
-            )
-        else:
-            eval_results = evaluate_model(
-                self.meta_learner, meta_df_val, y_val, self.optimal_threshold, self.logger
-            )
+        # Assert y_val is not None for evaluation
+        assert y_val is not None, "y_val should not be None for evaluation"
+        # evaluate_model expects DataFrame, so always pass meta_df_val
+        eval_results = evaluate_model(
+            self.meta_learner, meta_df_val, y_val, self.optimal_threshold, self.logger
+        )
         eval_results.update(threshold_metrics)  # Add threshold metrics to final results
         self.logger.info(f"Validation evaluation results: {eval_results}")
         self.logger.info("Ensemble model 0404 training completed successfully.")
@@ -345,60 +411,107 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             raise ValueError("Model has not been trained. Call train() first.")
 
         # Use original columns from X for prepare_data
-        X_prepared = prepare_data(X, X.columns)
+        x_prepared = prepare_data(X, X.columns)
 
         # Select features for each model
-        X_xgb = X_prepared[self.xgb_features]
-        X_tabnet = X_prepared[self.tabnet_features]
-        X_lgb = X_prepared[self.lgb_features]
-        X_extra = X_prepared[self.extra_features]
-        X_mlp = X_prepared[self.mlp_features]
-        X_pytorch = X_prepared[self.pytorch_features] # Added PyTorch
-        X_svm = X_prepared[self.svm_features]         # Added SVM
-        X_fnn = X_prepared[self.fnn_features]         # Added FNN
+        x_xgb = x_prepared[self.xgb_features]
+        x_tabnet = x_prepared[self.tabnet_features]
+        x_lgb = x_prepared[self.lgb_features]
+        x_extra = x_prepared[self.extra_features]
+        x_mlp = x_prepared[self.mlp_features]
+        x_pytorch = x_prepared[self.pytorch_features]  # Added PyTorch
+        x_svm = x_prepared[self.svm_features]  # Added SVM
+        x_fnn = x_prepared[self.fnn_features]  # Added FNN
         try:
-            # Generate predictions
-            p_xgb = self.model_xgb.predict_proba(X_xgb)[:, 1]
-            p_lgb = self.model_lgb.predict_proba(X_lgb)[:, 1]
-            p_extra = self.model_extra.predict_proba(X_extra)[:, 1]
-            p_pytorch = self.model_pytorch.predict_proba(X_pytorch)[:, 1] 
-            p_fnn = self.model_fnn.predict_proba(X_fnn)[:, 1]
-            # Handle potential TabNet input type error
+            # Generate predictions with null guards
+            if self.model_xgb is None:
+                raise ValueError("XGBoost model not loaded")
             try:
-                p_tabnet = self.model_tabnet.predict_proba(X_tabnet)[:, 1]
+                p_xgb = self.model_xgb.predict_proba(x_xgb)[:, 1]  # type: ignore
+            except AttributeError:
+                self.logger.warning(XGB_PREDICT_PROBA_FALLBACK_MSG)
+                xgb_uri = f"runs:/{self.xgb_run_id}/{'model'}"
+                xgb_pyfunc = mlflow.pyfunc.load_model(xgb_uri)
+                p_xgb = xgb_pyfunc.predict_proba(x_xgb)[:, 1]  # type: ignore
+
+            if self.model_lgb is None:
+                raise ValueError("LightGBM model not loaded")
+            p_lgb = self.model_lgb.predict_proba(x_lgb)[:, 1]  # type: ignore
+
+            if self.model_extra is None:
+                raise ValueError("Extra Trees model not loaded")
+            p_extra = self.model_extra.predict_proba(x_extra)[:, 1]  # type: ignore
+
+            if self.model_pytorch is None:
+                raise ValueError("PyTorch model not loaded")
+            p_pytorch = self.model_pytorch.predict_proba(x_pytorch)[:, 1]  # type: ignore
+
+            if self.model_fnn is None:
+                raise ValueError("FNN model not loaded")
+            p_fnn = self.model_fnn.predict_proba(x_fnn)[:, 1]  # type: ignore
+
+            # Handle potential TabNet input type error
+            if self.model_tabnet is None:
+                raise ValueError("TabNet model not loaded")
+            try:
+                p_tabnet = self.model_tabnet.predict_proba(x_tabnet)[:, 1]  # type: ignore
             except TypeError:
-                p_tabnet = self.model_tabnet.predict_proba(X_tabnet.values)[:, 1]
-            
+                p_tabnet = self.model_tabnet.predict_proba(x_tabnet.values)[:, 1]  # type: ignore
+
             # --- MLP Scaling and Prediction ---
-            # Ensure X_mlp is a DataFrame with correct columns before transform
-            if not isinstance(X_mlp, pd.DataFrame):
-                self.logger.warning("X_mlp is not a DataFrame before scaling. Attempting conversion.")
-                X_mlp = pd.DataFrame(X_mlp, columns=self.mlp_features)
+            if self.model_mlp_scaler is None:
+                raise ValueError("MLP scaler not loaded")
+            # Ensure x_mlp is a DataFrame with correct columns before transform
+            if not isinstance(x_mlp, pd.DataFrame):
+                self.logger.warning(
+                    "x_mlp is not a DataFrame before scaling. Attempting conversion."
+                )
+                # Assert that mlp_features is a list for DataFrame constructor
+                assert isinstance(self.mlp_features, list), (
+                    f"mlp_features must be list, got {type(self.mlp_features)}"
+                )
+                # Explicitly cast to list[str] for type checker
+                mlp_columns: list[str] = list(self.mlp_features)
+                x_mlp = pd.DataFrame(x_mlp, columns=mlp_columns)  # type: ignore
             # Re-select columns just in case order changed or to ensure DataFrame type
-            X_mlp = X_mlp[self.mlp_features]
-            X_mlp_scaled = self.model_mlp_scaler.transform(X_mlp)
-            p_mlp = self.model_mlp.predict_proba(X_mlp_scaled)[:, 1]
+            x_mlp = x_mlp[self.mlp_features]
+            x_mlp_scaled = self.model_mlp_scaler.transform(x_mlp)
+            if self.model_mlp is None:
+                raise ValueError("MLP model not loaded")
+            p_mlp = self.model_mlp.predict_proba(x_mlp_scaled)[:, 1]  # type: ignore
 
             # --- SVM Scaling and Prediction ---
-            # Ensure X_svm is a DataFrame with correct columns before transform
-            if not isinstance(X_svm, pd.DataFrame):
-                self.logger.warning("X_svm is not a DataFrame before scaling. Attempting conversion.")
-                X_svm = pd.DataFrame(X_svm, columns=self.svm_features)
+            if self.model_svm_scaler is None:
+                raise ValueError("SVM scaler not loaded")
+            # Ensure x_svm is a DataFrame with correct columns before transform
+            if not isinstance(x_svm, pd.DataFrame):
+                self.logger.warning(
+                    "x_svm is not a DataFrame before scaling. Attempting conversion."
+                )
+                # Assert that svm_features is a list for DataFrame constructor
+                assert isinstance(self.svm_features, list), (
+                    f"svm_features must be list, got {type(self.svm_features)}"
+                )
+                # Explicitly cast to list[str] for type checker
+                svm_columns: list[str] = list(self.svm_features)
+                x_svm = pd.DataFrame(x_svm, columns=svm_columns)  # type: ignore
             # Re-select columns
-            X_svm = X_svm[self.svm_features]
-            X_svm_scaled = self.model_svm_scaler.transform(X_svm)
-            p_svm = self.model_svm.predict_proba(X_svm_scaled)[:, 1]
+            x_svm = x_svm[self.svm_features]
+            x_svm_scaled = self.model_svm_scaler.transform(x_svm)
+            if self.model_svm is None:
+                raise ValueError("SVM model not loaded")
+            p_svm = self.model_svm.predict_proba(x_svm_scaled)[:, 1]  # type: ignore
 
             meta_features = create_meta_features_optimized(
                 p_xgb,
                 p_tabnet,
                 p_lgb,
                 p_extra,
-                p_mlp,  
-                p_pytorch, 
-                p_svm,          # Added SVM
-                p_fnn,          # Added FNN
-                X_prepared,
+                p_mlp,
+                p_pytorch,
+                p_svm,  # Added SVM
+                p_fnn,  # Added FNN
+                x_prepared,
                 self.dynamic_weights_train if self.dynamic_weighting else None,
                 self.thresholds_train if self.dynamic_weighting else None,
             )
@@ -406,9 +519,9 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             meta_df = create_meta_dataframe(meta_features)
             if self.meta_learner_type == "tabnet":
                 meta_df_np = meta_df.to_numpy()
-                meta_probs = self.meta_learner.predict_proba(meta_df_np)[:, 1]
+                meta_probs = self.meta_learner.predict_proba(meta_df_np)[:, 1]  # type: ignore
             else:
-                meta_probs = self.meta_learner.predict_proba(meta_df)
+                meta_probs = self.meta_learner.predict_proba(meta_df)  # type: ignore
             # Handle both 1D and 2D probability arrays
             if len(meta_probs.shape) == 1:
                 # Already 1D probabilities
@@ -417,26 +530,26 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 # Extract positive class probabilities from 2D array
                 return meta_probs[:, 1]
         except Exception as e:
-            self.logger.error(f"Error predicting probabilities: {e}", exc_info=True)
+            self.logger.error(f"Error predicting probabilities: {e}")
             raise
 
     def predict(self, X) -> np.ndarray:
         probabilities = self.predict_proba(X)
         return (probabilities >= self.optimal_threshold).astype(int)
 
-    def explain_predictions(self, X_val) -> dict:
+    def explain_predictions(self, x_val) -> dict:
         # This might need updating if explain_predictions relies on specific base model types
-        return explain_predictions(self, X_val, self.logger)
+        return explain_predictions(self, x_val, self.logger)
 
-    def analyze_prediction_errors(self, X_val, y_val) -> dict:
-        return analyze_prediction_errors(self, X_val, y_val, self.optimal_threshold, self.logger)
+    def analyze_prediction_errors(self, x_val, y_val) -> dict:
+        return analyze_prediction_errors(self, x_val, y_val, self.optimal_threshold, self.logger)
 
-    def precision_filter(self, X, probabilities):
+    def precision_filter(self, x, probabilities):
         # This logic might be too specific, consider making it more general or removing
         high_conf = probabilities > self.optimal_threshold
-        X_high_conf = X[high_conf]
-        if "home_form" in X_high_conf.columns and "away_form" in X_high_conf.columns:
-            form_diff = abs(X_high_conf["home_form"] - X_high_conf["away_form"])
+        x_high_conf = x[high_conf]
+        if "home_form" in x_high_conf.columns and "away_form" in x_high_conf.columns:
+            form_diff = abs(x_high_conf["home_form"] - x_high_conf["away_form"])
             likely_not_draw = form_diff > 0.5
             high_conf[high_conf] = ~likely_not_draw
         return high_conf
@@ -453,6 +566,107 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         except Exception as e:
             return {"error": str(e)}
 
+    def _load_sklearn_model_with_features(self, run_id, model_path, model_name, flavor="sklearn"):
+        """Helper method to load sklearn-based models and extract features."""
+        try:
+            self.logger.info(f"Loading {model_name} model from run {run_id}...")
+            uri = f"runs:/{run_id}/{model_path}"
+
+            if flavor == "xgboost":
+                model = mlflow.xgboost.load_model(uri)
+            elif flavor == "lightgbm":
+                model = mlflow.lightgbm.load_model(uri)
+            else:
+                model = mlflow.sklearn.load_model(uri)
+
+            pyfunc = mlflow.pyfunc.load_model(uri)
+            features = []
+            if pyfunc.metadata.signature and pyfunc.metadata.signature.inputs:
+                features = pyfunc.metadata.signature.inputs.input_names()
+                self.logger.info(
+                    f"Updated {model_name} feature signature: {len(features)} features"
+                )
+            else:
+                self.logger.warning(f"No feature signature found for {model_name} model")
+                if flavor == "lightgbm":
+                    features = getattr(model, "feature_name_", [])
+                else:
+                    features = getattr(model, "feature_names_in_", [])
+
+            return model, features
+        except Exception as e:
+            self.logger.error(f"Failed to load {model_name} model: {str(e)}")
+            raise ValueError(f"Failed to load {model_name} model: {str(e)}") from e
+
+    def _load_sklearn_model_with_scaler(self, run_id, model_path, scaler_path, model_name):
+        """Helper method to load sklearn models with scalers."""
+        try:
+            self.logger.info(f"Loading {model_name} model from run {run_id}...")
+            model_uri = f"runs:/{run_id}/{model_path}"
+            model = mlflow.sklearn.load_model(model_uri)
+
+            pyfunc = mlflow.pyfunc.load_model(model_uri)
+            features = []
+            if pyfunc.metadata.signature and pyfunc.metadata.signature.inputs:
+                features = pyfunc.metadata.signature.inputs.input_names()
+                self.logger.info(
+                    f"Updated {model_name} feature signature: {len(features)} features"
+                )
+            else:
+                self.logger.warning(f"No feature signature found for {model_name} model")
+                features = getattr(model, "feature_names_in_", [])
+
+            # Load the associated scaler
+            self.logger.info(
+                f"Loading {model_name} scaler artifact '{scaler_path}' from run {run_id}..."
+            )
+            scaler_local_path = mlflow.artifacts.download_artifacts(
+                run_id=run_id, artifact_path=scaler_path
+            )
+            with open(scaler_local_path, "rb") as f:
+                scaler = pickle.load(f)
+            self.logger.info(f"{model_name} scaler loaded successfully.")
+
+            return model, scaler, features
+        except Exception as e:
+            self.logger.error(f"Failed to load {model_name} model or scaler: {str(e)}")
+            raise ValueError(f"Failed to load {model_name} model or scaler: {str(e)}") from e
+
+    def _load_pytorch_model_with_scaler(self, run_id, model_path, scaler_path, model_name):
+        """Helper method to load PyTorch models and their scalers."""
+        try:
+            self.logger.info(f"Loading {model_name} model from run {run_id}...")
+            model_uri = f"runs:/{run_id}/{model_path}"
+            model = mlflow.pytorch.load_model(model_uri)
+
+            # Load PyTorch model also as pyfunc to easily get signature
+            pyfunc = mlflow.pyfunc.load_model(model_uri)
+            features = []
+            if pyfunc.metadata.signature and pyfunc.metadata.signature.inputs:
+                features = pyfunc.metadata.signature.inputs.input_names()
+                self.logger.info(
+                    f"Updated {model_name} feature signature: {len(features)} features"
+                )
+            else:
+                self.logger.warning(f"No feature signature found for {model_name} model.")
+                features = []
+
+            # Load the associated scaler
+            self.logger.info(
+                f"Loading {model_name} scaler artifact '{scaler_path}' from run {run_id}..."
+            )
+            scaler_local_path = mlflow.artifacts.download_artifacts(
+                run_id=run_id, artifact_path=scaler_path
+            )
+            with open(scaler_local_path, "rb") as f:
+                scaler = pickle.load(f)
+            self.logger.info(f"{model_name} scaler loaded successfully.")
+
+            return model, scaler, features
+        except Exception as e:
+            self.logger.error(f"Failed to load {model_name} model or scaler: {str(e)}")
+            raise ValueError(f"Failed to load {model_name} model or scaler: {str(e)}") from e
+
     def load_models_from_mlflow(
         self,
         xgb_path="model",
@@ -462,282 +676,60 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         mlp_path="model",  # Artifact path for MLP model
         mlp_scaler_path="scaler/scaler_mlp.pkl",  # Artifact path for MLP scaler
         pytorch_path="model",
-        pytorch_scaler_path="scaler/scaler_pytorch.pkl",
+        pytorch_scaler_path=PYTORCH_SCALER_PATH,
         svm_path="model_svm",  # Artifact path for SVM model (from svm_model.py)
-        svm_scaler_path="scaler_svm.pkl", # Artifact path for SVM scaler (default name in svm_model.py)
+        svm_scaler_path="scaler_svm.pkl",  # Artifact path for SVM scaler (default name in svm_model.py)
         fnn_path="model",
-        fnn_scaler_path="scaler/scaler_pytorch.pkl",
+        fnn_scaler_path=PYTORCH_SCALER_PATH,
     ):
         """
-        Load pre-trained models (XGB, LGBM, TabNet, Extra Trees, MLP, PyTorch, SVM) 
+        Load pre-trained models (XGB, LGBM, TabNet, Extra Trees, MLP, PyTorch, SVM)
         and scalers from MLflow.
         Updates feature signatures for each model.
         """
         self.logger.info("Loading models and scaler from MLflow repository...")
 
         # Load XGBoost model
-        try:
-            self.logger.info(f"Loading XGBoost model from run {self.xgb_run_id}...")
-            xgb_uri = f"runs:/{self.xgb_run_id}/{xgb_path}"
-            self.model_xgb = mlflow.xgboost.load_model(xgb_uri)
-            xgb_pyfunc = mlflow.pyfunc.load_model(xgb_uri)
-            if xgb_pyfunc.metadata.signature and xgb_pyfunc.metadata.signature.inputs:
-                self.xgb_features = xgb_pyfunc.metadata.signature.inputs.input_names()
-                self.logger.info(
-                    f"Updated XGBoost feature signature: {len(self.xgb_features)} features"
-                )
-            else:
-                self.logger.warning("No feature signature found for XGBoost model")
-                self.xgb_features = getattr(self.model_xgb, "feature_names_in_", [])
-        except Exception as e:
-            self.logger.error(f"Failed to load XGBoost model: {str(e)}")
-            raise ValueError(f"Failed to load XGBoost model: {str(e)}") from e
+        self.model_xgb, self.xgb_features = self._load_sklearn_model_with_features(
+            self.xgb_run_id, xgb_path, "XGBoost", "xgboost"
+        )
 
         # Load LightGBM model
-        try:
-            self.logger.info(f"Loading LightGBM model from run {self.lgb_run_id}...")
-            lgb_uri = f"runs:/{self.lgb_run_id}/{lgb_path}"
-            self.model_lgb = mlflow.lightgbm.load_model(lgb_uri)
-            lgb_pyfunc = mlflow.pyfunc.load_model(lgb_uri)
-            if lgb_pyfunc.metadata.signature and lgb_pyfunc.metadata.signature.inputs:
-                self.lgb_features = lgb_pyfunc.metadata.signature.inputs.input_names()
-                self.logger.info(
-                    f"Updated LightGBM feature signature: {len(self.lgb_features)} features"
-                )
-            else:
-                self.logger.warning("No feature signature found for LightGBM model")
-                self.lgb_features = getattr(self.model_lgb, "feature_name_", [])
-        except Exception as e:
-            self.logger.error(f"Failed to load LightGBM model: {str(e)}")
-            raise ValueError(f"Failed to load LightGBM model: {str(e)}") from e
+        self.model_lgb, self.lgb_features = self._load_sklearn_model_with_features(
+            self.lgb_run_id, lgb_path, "LightGBM", "lightgbm"
+        )
 
         # Load TabNet model
-        try:
-            self.logger.info(f"Loading TabNet model from run {self.tabnet_run_id}...")
-            tabnet_uri = f"runs:/{self.tabnet_run_id}/{tabnet_path}"
-            self.model_tabnet = mlflow.sklearn.load_model(
-                tabnet_uri
-            )  # Assuming saved via sklearn flavor
-            tabnet_pyfunc = mlflow.pyfunc.load_model(tabnet_uri)
-            if tabnet_pyfunc.metadata.signature and tabnet_pyfunc.metadata.signature.inputs:
-                self.tabnet_features = tabnet_pyfunc.metadata.signature.inputs.input_names()
-                self.logger.info(
-                    f"Updated TabNet feature signature: {len(self.tabnet_features)} features"
-                )
-            else:
-                self.logger.warning("No feature signature found for TabNet model")
-                self.tabnet_features = getattr(self.model_tabnet, "feature_names_in_", [])
-        except Exception as e:
-            self.logger.error(f"Failed to load TabNet model: {str(e)}")
-            raise ValueError(f"Failed to load TabNet model: {str(e)}") from e
+        self.model_tabnet, self.tabnet_features = self._load_sklearn_model_with_features(
+            self.tabnet_run_id, tabnet_path, "TabNet", "sklearn"
+        )
 
         # Load Random Forest model
-        try:
-            self.logger.info(f"Loading Extra Trees model from run {self.extra_run_id}...")
-            extra_uri = f"runs:/{self.extra_run_id}/{extra_path}"
-            self.model_extra = mlflow.sklearn.load_model(extra_uri)
-            extra_pyfunc = mlflow.pyfunc.load_model(extra_uri)
-            if extra_pyfunc.metadata.signature and extra_pyfunc.metadata.signature.inputs:
-                self.extra_features = extra_pyfunc.metadata.signature.inputs.input_names()
-                self.logger.info(
-                    f"Updated Extra Trees signature: {len(self.extra_features)} features"
-                )
-            else:
-                self.logger.warning("No feature signature found for Extra Trees model")
-                self.extra_features = getattr(self.model_extra, "feature_names_in_", [])
-        except Exception as e:
-            self.logger.error(f"Failed to load Extra Trees model: {str(e)}")
-            raise ValueError(f"Failed to load Extra Trees model: {str(e)}") from e
+        self.model_extra, self.extra_features = self._load_sklearn_model_with_features(
+            self.extra_run_id, extra_path, "Extra Trees", "sklearn"
+        )
 
-        # Load MLP (sklearn) model
-        try:
-            self.logger.info(f"Loading MLP model from run {self.mlp_run_id}...")
-            mlp_uri = f"runs:/{self.mlp_run_id}/{mlp_path}"
-            self.model_mlp = mlflow.sklearn.load_model(mlp_uri)
-            mlp_pyfunc = mlflow.pyfunc.load_model(mlp_uri)
-            if mlp_pyfunc.metadata.signature and mlp_pyfunc.metadata.signature.inputs:
-                self.mlp_features = mlp_pyfunc.metadata.signature.inputs.input_names()
-                self.logger.info(
-                    f"Updated MLP feature signature: {len(self.mlp_features)} features"
-                )
-            else:
-                self.logger.warning("No feature signature found for MLP model")
-                # Attempt to get features from the underlying sklearn model if possible
-                self.mlp_features = getattr(self.model_mlp, "feature_names_in_", []) 
+        # Load MLP model and scaler
+        self.model_mlp, self.model_mlp_scaler, self.mlp_features = (
+            self._load_sklearn_model_with_scaler(self.mlp_run_id, mlp_path, mlp_scaler_path, "MLP")
+        )
 
-            # Load the associated MLP scaler
-            self.logger.info(
-                f"Loading MLP scaler artifact '{mlp_scaler_path}' from run {self.mlp_run_id}..."
+        # Load PyTorch model and scaler
+        self.model_pytorch, self.model_pytorch_scaler, self.pytorch_features = (
+            self._load_pytorch_model_with_scaler(
+                self.pytorch_run_id, pytorch_path, pytorch_scaler_path, "PyTorch"
             )
-            scaler_local_path = mlflow.artifacts.download_artifacts(
-                run_id=self.mlp_run_id, artifact_path=mlp_scaler_path
-            )
-            with open(scaler_local_path, "rb") as f:
-                self.model_mlp_scaler = pickle.load(f)
-            self.logger.info("MLP scaler loaded successfully.")
-            if hasattr(self.model_mlp, 'scaler_') and hasattr(self.model_mlp, 'device_'):
-                try: 
-                    # Determine device (use CUDA if available, same logic as hypertuner)
-                    pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                    self.model_mlp.scaler_ = self.model_mlp_scaler
-                    self.model_mlp.device_ = pytorch_device
-                    self.model_mlp.to(pytorch_device) # Ensure model is on the correct device
-                    self.logger.info(f"Attached scaler and device ({pytorch_device}) to loaded MLP model.")
-                except Exception as attach_e:
-                    self.logger.warning(f"Could not attach scaler/device to MLP model: {attach_e}")
-            else:
-                self.logger.warning("Loaded MLP model does not have scaler_/device_ attributes for attachment.")
-                # Ensure model is moved to the correct device anyway
-                try:
-                    pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                    self.model_mlp.to(pytorch_device)
-                    self.logger.info(f"Moved loaded MLP model to device: {pytorch_device}")
-                except Exception as move_e:
-                    self.logger.error(f"Could not move MLP model to device: {move_e}")
-        except Exception as e:
-            self.logger.error(f"Failed to load MLP model or scaler: {str(e)}")
-            raise ValueError(f"Failed to load MLP model or scaler: {str(e)}") from e
-                
-        # Load PyTorch model
-        try:
-            # Define artifact paths for PyTorch model and its scaler
-            pytorch_model_path = "model" # Assuming artifact path is 'model'
-            pytorch_scaler_path = "scaler/scaler_pytorch.pkl" # Assuming scaler saved in 'scaler' dir
-            
-            self.logger.info(f"Loading PyTorch model from run {self.pytorch_run_id}...")
-            pytorch_uri = f"runs:/{self.pytorch_run_id}/{pytorch_model_path}"
-            self.model_pytorch = mlflow.pytorch.load_model(pytorch_uri)
-            
-            # Load PyTorch model also as pyfunc to easily get signature
-            pytorch_pyfunc = mlflow.pyfunc.load_model(pytorch_uri)
-            if pytorch_pyfunc.metadata.signature and pytorch_pyfunc.metadata.signature.inputs:
-                self.pytorch_features = pytorch_pyfunc.metadata.signature.inputs.input_names()
-                self.logger.info(
-                    f"Updated PyTorch feature signature: {len(self.pytorch_features)} features"
-                )
-            else:
-                self.logger.warning("No feature signature found for PyTorch model.")
-                self.pytorch_features = [] 
+        )
 
-            # Load the associated PyTorch scaler
-            self.logger.info(
-                f"Loading PyTorch scaler artifact '{pytorch_scaler_path}' from run {self.pytorch_run_id}..."
-            )
-            scaler_local_path = mlflow.artifacts.download_artifacts(
-                run_id=self.pytorch_run_id, artifact_path=pytorch_scaler_path
-            )
-            with open(scaler_local_path, "rb") as f:
-                self.model_pytorch_scaler = pickle.load(f)
-            self.logger.info("PyTorch scaler loaded successfully.")
-            
-            # Optional: Attach scaler and device to the loaded PyTorch model instance 
-            # if its predict_proba method relies on them being attributes (like in the hypertuner)
-            if hasattr(self.model_pytorch, 'scaler_') and hasattr(self.model_pytorch, 'device_'):
-                try: 
-                    # Determine device (use CUDA if available, same logic as hypertuner)
-                    pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                    self.model_pytorch.scaler_ = self.model_pytorch_scaler
-                    self.model_pytorch.device_ = pytorch_device
-                    self.model_pytorch.to(pytorch_device) # Ensure model is on the correct device
-                    self.logger.info(f"Attached scaler and device ({pytorch_device}) to loaded PyTorch model.")
-                except Exception as attach_e:
-                    self.logger.warning(f"Could not attach scaler/device to PyTorch model: {attach_e}")
-            else:
-                self.logger.warning("Loaded PyTorch model does not have scaler_/device_ attributes for attachment.")
-                # Ensure model is moved to the correct device anyway
-                try:
-                    pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                    self.model_pytorch.to(pytorch_device)
-                    self.logger.info(f"Moved loaded PyTorch model to device: {pytorch_device}")
-                except Exception as move_e:
-                    self.logger.error(f"Could not move PyTorch model to device: {move_e}")
-        except Exception as e:
-            self.logger.error(f"Failed to load PyTorch model or scaler: {str(e)}")
-            raise ValueError(f"Failed to load PyTorch model or scaler: {str(e)}") from e
+        # Load SVM model and scaler
+        self.model_svm, self.model_svm_scaler, self.svm_features = (
+            self._load_sklearn_model_with_scaler(self.svm_run_id, svm_path, svm_scaler_path, "SVM")
+        )
 
-        # Load SVM (sklearn) model
-        try:
-            self.logger.info(f"Loading SVM model from run {self.svm_run_id}...")
-            svm_uri = f"runs:/{self.svm_run_id}/{svm_path}"
-            self.model_svm = mlflow.sklearn.load_model(svm_uri)
-            svm_pyfunc = mlflow.pyfunc.load_model(svm_uri)
-            if svm_pyfunc.metadata.signature and svm_pyfunc.metadata.signature.inputs:
-                self.svm_features = svm_pyfunc.metadata.signature.inputs.input_names()
-                self.logger.info(
-                    f"Updated SVM feature signature: {len(self.svm_features)} features"
-                )
-            else:
-                self.logger.warning("No feature signature found for SVM model")
-                self.svm_features = getattr(self.model_svm, "feature_names_in_", [])
-
-            # Load the associated SVM scaler
-            self.logger.info(
-                f"Loading SVM scaler artifact '{svm_scaler_path}' from run {self.svm_run_id}..."
-            )
-            scaler_local_path = mlflow.artifacts.download_artifacts(
-                run_id=self.svm_run_id, artifact_path=svm_scaler_path
-            )
-            with open(scaler_local_path, "rb") as f:
-                self.model_svm_scaler = pickle.load(f)
-            self.logger.info("SVM scaler loaded successfully.")
-            # Verify scaler type (optional)
-            if not isinstance(self.model_svm_scaler, (StandardScaler, sklearn.preprocessing.RobustScaler)): # Add other expected scaler types if needed
-                self.logger.warning(f"Loaded SVM scaler is of unexpected type: {type(self.model_svm_scaler).__name__}")
-        except Exception as e:
-            self.logger.error(f"Failed to load SVM model or scaler: {str(e)}")
-            raise ValueError(f"Failed to load SVM model or scaler: {str(e)}") from e
-
-        # Load FNN model
-        try:
-            self.logger.info(f"Loading FNN model from run {self.fnn_run_id}...")
-            fnn_uri = f"runs:/{self.fnn_run_id}/{fnn_path}"
-            self.model_fnn = mlflow.pytorch.load_model(fnn_uri)
-            
-            # Load PyTorch model also as pyfunc to easily get signature
-            fnn_pyfunc = mlflow.pyfunc.load_model(fnn_uri)
-            if fnn_pyfunc.metadata.signature and fnn_pyfunc.metadata.signature.inputs:
-                self.fnn_features = fnn_pyfunc.metadata.signature.inputs.input_names()
-                self.logger.info(
-                    f"Updated FNN feature signature: {len(self.fnn_features)} features"
-                )
-            else:
-                self.logger.warning("No feature signature found for FNN model.")
-                self.fnn_features = [] 
-
-            # Load the associated PyTorch scaler
-            self.logger.info(
-                f"Loading FNN scaler artifact '{fnn_scaler_path}' from run {self.fnn_run_id}..."
-            )
-            scaler_local_path = mlflow.artifacts.download_artifacts(
-                run_id=self.fnn_run_id, artifact_path=fnn_scaler_path
-            )
-            with open(scaler_local_path, "rb") as f:
-                self.model_fnn_scaler = pickle.load(f)
-            self.logger.info("FNN scaler loaded successfully.")
-            
-            # Optional: Attach scaler and device to the loaded PyTorch model instance 
-            if hasattr(self.model_pytorch, 'scaler_') and hasattr(self.model_pytorch, 'device_'):
-                try: 
-                    # Determine device (use CUDA if available, same logic as hypertuner)
-                    pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                    self.model_fnn.scaler_ = self.model_fnn_scaler
-                    self.model_fnn.device_ = pytorch_device
-                    self.model_fnn.to(pytorch_device) # Ensure model is on the correct device
-                    self.logger.info(f"Attached scaler and device ({pytorch_device}) to loaded FNN model.")
-                except Exception as attach_e:
-                    self.logger.warning(f"Could not attach scaler/device to FNN model: {attach_e}")
-            else:
-                self.logger.warning("Loaded FNN model does not have scaler_/device_ attributes for attachment.")
-                # Ensure model is moved to the correct device anyway
-                try:
-                    pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                    self.model_fnn.to(pytorch_device)
-                    self.logger.info(f"Moved loaded FNN model to device: {pytorch_device}")
-                except Exception as move_e:
-                    self.logger.error(f"Could not move FNN model to device: {move_e}")
-        except Exception as e:
-            self.logger.error(f"Failed to load FNN model or scaler: {str(e)}")
-            raise ValueError(f"Failed to load FNN model or scaler: {str(e)}") from e
+        # Load FNN model and scaler
+        self.model_fnn, self.model_fnn_scaler, self.fnn_features = (
+            self._load_pytorch_model_with_scaler(self.fnn_run_id, fnn_path, fnn_scaler_path, "FNN")
+        )
 
         self.logger.info("Base models loading complete.")
         # Consider setting self.selected_features based on intersection or a specific model

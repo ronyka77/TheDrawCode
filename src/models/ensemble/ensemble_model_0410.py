@@ -70,30 +70,30 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         self.logger = logger or ExperimentLogger(
             experiment_name="ensemble_model_0410", log_dir="./logs/ensemble_model_0410"
         )
-        self.required_recall = required_recall # For meta-learner
-        self.sampling_strategy = sampling_strategy # Used elsewhere?
-        self.complexity_penalty = complexity_penalty # Used elsewhere?
-        self.target_precision = target_precision # For dynamic weights
+        self.required_recall = required_recall  # For meta-learner
+        self.sampling_strategy = sampling_strategy  # Used elsewhere?
+        self.complexity_penalty = complexity_penalty  # Used elsewhere?
+        self.target_precision = target_precision  # For dynamic weights
 
         # --- MLflow Run IDs for Base Models ---
-        self.xgb_run_id = "4a3ebfc328af4041925d8b39786fb0ea"  
-        self.lgb_run_id = "2c9ea4315c16460689e00596ed2b6d9d"  
-        self.tabnet_run_id = "c531685eae4d429fb7fc1af4f6b38a95" 
-        self.extra_run_id = "2830d0b8ebcb4c46809e6afab57da539" 
+        self.xgb_run_id = "4a3ebfc328af4041925d8b39786fb0ea"
+        self.lgb_run_id = "2c9ea4315c16460689e00596ed2b6d9d"
+        self.tabnet_run_id = "c531685eae4d429fb7fc1af4f6b38a95"
+        self.extra_run_id = "2830d0b8ebcb4c46809e6afab57da539"
         self.mlp_run_id = "25b4a2f5478746d08253e31ea12161c4"
         self.pytorch_run_id = "fc1cfea4661b4603958894a956c1e91a"
 
         # Minimum recalls for dynamic weighting (order: xgb, tabnet, lgb, rf, mlp, pytorch)
-        self.min_recalls = [0.30, 0.20, 0.30, 0.40, 0.30, 0.30] 
+        self.min_recalls = [0.30, 0.20, 0.30, 0.40, 0.30, 0.30]
 
         # Meta-learner settings
         self.meta_learner_type = meta_learner_type
-        self.optimal_threshold = 0.5 # Will be tuned
-        self.individual_thresholding = individual_thresholding # Unused currently?
+        self.optimal_threshold = 0.5  # Will be tuned
+        self.individual_thresholding = individual_thresholding  # Unused currently?
         self.calibrate = calibrate  # Unused currently?
-        self.calibration_method = calibration_method # Unused currently?
+        self.calibration_method = calibration_method  # Unused currently?
         self.dynamic_weighting = dynamic_weighting
-        num_models = 6 # Updated number of models
+        num_models = 6  # Updated number of models
         if self.dynamic_weighting:
             # Adjusted for 6 base models
             self.dynamic_weights = {
@@ -102,26 +102,26 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 "lgb": 1 / num_models,
                 "extra": 1 / num_models,
                 "mlp": 1 / num_models,
-                "pytorch": 1 / num_models, # Added pytorch
+                "pytorch": 1 / num_models,  # Added pytorch
             }
-        
+
         # Placeholder attributes for models and features - will be populated by load_models
         self.meta_learner = None
         self.model_xgb = None
         self.model_lgb = None
         self.model_tabnet = None
-        self.model_extra = None 
+        self.model_extra = None
         self.model_mlp = None
-        self.model_mlp_scaler = None 
-        self.model_pytorch = None       # Added pytorch model placeholder
-        self.model_pytorch_scaler = None # Added pytorch scaler placeholder
+        self.model_mlp_scaler = None
+        self.model_pytorch = None  # Added pytorch model placeholder
+        self.model_pytorch_scaler = None  # Added pytorch scaler placeholder
 
         self.xgb_features = []
         self.lgb_features = []
         self.tabnet_features = []
         self.extra_features = []
         self.mlp_features = []
-        self.pytorch_features = []      # Added pytorch feature list placeholder
+        self.pytorch_features = []  # Added pytorch feature list placeholder
 
         # Load models on initialization
         self.load_models_from_mlflow()
@@ -162,21 +162,21 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         X_val_lgb = X_val_prepared[self.lgb_features]
         X_val_extra = X_val_prepared[self.extra_features]
         X_val_mlp = X_val_prepared[self.mlp_features]  # Prepare MLP features
-        X_val_pytorch = X_val_prepared[self.pytorch_features] # Added PyTorch features
+        X_val_pytorch = X_val_prepared[self.pytorch_features]  # Added PyTorch features
 
         X_test_xgb = X_test_prepared[self.xgb_features]
         X_test_tabnet = X_test_prepared[self.tabnet_features]
         X_test_lgb = X_test_prepared[self.lgb_features]
         X_test_extra = X_test_prepared[self.extra_features]
         X_test_mlp = X_test_prepared[self.mlp_features]  # Prepare MLP features
-        X_test_pytorch = X_test_prepared[self.pytorch_features] # Added PyTorch features
+        X_test_pytorch = X_test_prepared[self.pytorch_features]  # Added PyTorch features
 
         # Obtain predictions from base models on validation set
         self.logger.info("Obtaining validation predictions from base models...")
         p_xgb_val = self.model_xgb.predict_proba(X_val_xgb)[:, 1]
         # TabNet input might need .values depending on saving format
         try:
-            p_tabnet_val = self.model_tabnet.predict_proba(X_val_tabnet)[:, 1] 
+            p_tabnet_val = self.model_tabnet.predict_proba(X_val_tabnet)[:, 1]
         except TypeError:
             self.logger.warning("TabNet predict_proba failed on DataFrame, trying .values")
             p_tabnet_val = self.model_tabnet.predict_proba(X_val_tabnet.values)[:, 1]
@@ -202,25 +202,26 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         # MLP requires scaling
         X_test_mlp_scaled = self.model_mlp_scaler.transform(X_test_mlp)
         p_mlp_test = self.model_mlp.predict_proba(X_test_mlp_scaled)[:, 1]
-        # PyTorch 
+        # PyTorch
         p_pytorch_test = self.model_pytorch.predict_proba(X_test_pytorch)[:, 1]
 
         # Optionally calculate dynamic weights based on validation performance
         if self.dynamic_weighting:
-            
             # Use test predictions for weights used during FINAL meta-learner TRAINING
             self.logger.info("Computing dynamic weights based on test performance...")
-            self.dynamic_weights_train, self.thresholds_train = compute_precision_focused_weights_optimized(
-                p_xgb_test,
-                p_tabnet_test,
-                p_lgb_test,
-                p_extra_test,
-                p_mlp_test,  
-                p_pytorch_test, # Added PyTorch
-                y_test,
-                self.target_precision,
-                self.min_recalls,
-                self.logger,
+            self.dynamic_weights_train, self.thresholds_train = (
+                compute_precision_focused_weights_optimized(
+                    p_xgb_test,
+                    p_tabnet_test,
+                    p_lgb_test,
+                    p_extra_test,
+                    p_mlp_test,
+                    p_pytorch_test,  # Added PyTorch
+                    y_test,
+                    self.target_precision,
+                    self.min_recalls,
+                    self.logger,
+                )
             )
             # Ensure weights_0410 is imported and used
             self.logger.info("Computing dynamic weights based on validation performance...")
@@ -229,11 +230,11 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 p_tabnet_val,
                 p_lgb_val,
                 p_extra_val,
-                p_mlp_val,  
-                p_pytorch_val, # Added PyTorch
-                y_val, 
+                p_mlp_val,
+                p_pytorch_val,  # Added PyTorch
+                y_val,
                 self.target_precision,
-                self.min_recalls, # Should now have 6 elements
+                self.min_recalls,  # Should now have 6 elements
                 self.logger,
             )
 
@@ -244,8 +245,8 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             p_tabnet_val,
             p_lgb_val,
             p_extra_val,
-            p_mlp_val,  
-            p_pytorch_val, # Added PyTorch
+            p_mlp_val,
+            p_pytorch_val,  # Added PyTorch
             self.dynamic_weights if self.dynamic_weighting else None,
             self.thresholds if self.dynamic_weighting else None,
         )
@@ -256,8 +257,8 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             p_tabnet_test,
             p_lgb_test,
             p_extra_test,
-            p_mlp_test,  
-            p_pytorch_test, # Added PyTorch
+            p_mlp_test,
+            p_pytorch_test,  # Added PyTorch
             self.dynamic_weights_train if self.dynamic_weighting else None,
             self.thresholds_train if self.dynamic_weighting else None,
         )
@@ -329,7 +330,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         X_lgb = X_prepared[self.lgb_features]
         X_extra = X_prepared[self.extra_features]
         X_mlp = X_prepared[self.mlp_features]
-        X_pytorch = X_prepared[self.pytorch_features] # Added PyTorch
+        X_pytorch = X_prepared[self.pytorch_features]  # Added PyTorch
 
         try:
             # Generate predictions
@@ -353,8 +354,8 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 p_tabnet,
                 p_lgb,
                 p_extra,
-                p_mlp,  
-                p_pytorch, 
+                p_mlp,
+                p_pytorch,
                 self.dynamic_weights_train if self.dynamic_weighting else None,
                 self.thresholds_train if self.dynamic_weighting else None,
             )
@@ -519,7 +520,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 else:
                     self.logger.warning("No feature signature found for MLP model")
                     # Attempt to get features from the underlying sklearn model if possible
-                    self.mlp_features = getattr(self.model_mlp, "feature_names_in_", []) 
+                    self.mlp_features = getattr(self.model_mlp, "feature_names_in_", [])
 
                 # Load the associated MLP scaler
                 self.logger.info(
@@ -535,7 +536,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
             except Exception as e:
                 self.logger.error(f"Failed to load MLP model or scaler: {str(e)}")
                 raise ValueError(f"Failed to load MLP model or scaler: {str(e)}") from e
-                
+
         # Load PyTorch model
         if not self.pytorch_run_id or self.pytorch_run_id == "YOUR_PYTORCH_RUN_ID_HERE":
             self.logger.warning(
@@ -544,13 +545,13 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
         else:
             try:
                 # Define artifact paths for PyTorch model and its scaler
-                pytorch_model_path = "model" # Assuming artifact path is 'model'
-                pytorch_scaler_path = "scaler/scaler.pkl" # Assuming scaler saved in 'scaler' dir
-                
+                pytorch_model_path = "model"  # Assuming artifact path is 'model'
+                pytorch_scaler_path = "scaler/scaler.pkl"  # Assuming scaler saved in 'scaler' dir
+
                 self.logger.info(f"Loading PyTorch model from run {self.pytorch_run_id}...")
                 pytorch_uri = f"runs:/{self.pytorch_run_id}/{pytorch_model_path}"
                 self.model_pytorch = mlflow.pytorch.load_model(pytorch_uri)
-                
+
                 # Load PyTorch model also as pyfunc to easily get signature
                 pytorch_pyfunc = mlflow.pyfunc.load_model(pytorch_uri)
                 if pytorch_pyfunc.metadata.signature and pytorch_pyfunc.metadata.signature.inputs:
@@ -562,7 +563,7 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                     self.logger.warning("No feature signature found for PyTorch model.")
                     # PyTorch models don't have a standard feature_names_in_ attribute
                     # Consider storing feature names as a separate artifact if needed, or rely on signature
-                    self.pytorch_features = [] 
+                    self.pytorch_features = []
 
                 # Load the associated PyTorch scaler
                 self.logger.info(
@@ -574,24 +575,38 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
                 with open(scaler_local_path, "rb") as f:
                     self.model_pytorch_scaler = pickle.load(f)
                 self.logger.info("PyTorch scaler loaded successfully.")
-                
-                # Optional: Attach scaler and device to the loaded PyTorch model instance 
+
+                # Optional: Attach scaler and device to the loaded PyTorch model instance
                 # if its predict_proba method relies on them being attributes (like in the hypertuner)
-                if hasattr(self.model_pytorch, 'scaler_') and hasattr(self.model_pytorch, 'device_'):
-                    try: 
+                if hasattr(self.model_pytorch, "scaler_") and hasattr(
+                    self.model_pytorch, "device_"
+                ):
+                    try:
                         # Determine device (use CUDA if available, same logic as hypertuner)
-                        pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                        pytorch_device = torch.device(
+                            "cuda" if torch.cuda.is_available() else "cpu"
+                        )
                         self.model_pytorch.scaler_ = self.model_pytorch_scaler
                         self.model_pytorch.device_ = pytorch_device
-                        self.model_pytorch.to(pytorch_device) # Ensure model is on the correct device
-                        self.logger.info(f"Attached scaler and device ({pytorch_device}) to loaded PyTorch model.")
+                        self.model_pytorch.to(
+                            pytorch_device
+                        )  # Ensure model is on the correct device
+                        self.logger.info(
+                            f"Attached scaler and device ({pytorch_device}) to loaded PyTorch model."
+                        )
                     except Exception as attach_e:
-                        self.logger.warning(f"Could not attach scaler/device to PyTorch model: {attach_e}")
+                        self.logger.warning(
+                            f"Could not attach scaler/device to PyTorch model: {attach_e}"
+                        )
                 else:
-                    self.logger.warning("Loaded PyTorch model does not have scaler_/device_ attributes for attachment.")
+                    self.logger.warning(
+                        "Loaded PyTorch model does not have scaler_/device_ attributes for attachment."
+                    )
                     # Ensure model is moved to the correct device anyway
                     try:
-                        pytorch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                        pytorch_device = torch.device(
+                            "cuda" if torch.cuda.is_available() else "cpu"
+                        )
                         self.model_pytorch.to(pytorch_device)
                         self.logger.info(f"Moved loaded PyTorch model to device: {pytorch_device}")
                     except Exception as move_e:
